@@ -121,7 +121,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         pendingPopoverPresentation = Task { [weak self] in
             var previousRect: NSRect?
             for _ in 0..<20 {
-                do { try await Task.sleep(for: .milliseconds(50)) }
+                do { try await Task.sleep(nanoseconds: 50_000_000) }
                 catch { return }
                 guard let self, !Task.isCancelled else { return }
                 guard let button = self.statusItem.button,

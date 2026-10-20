@@ -77,7 +77,7 @@ final class AppearanceTransition {
                 for snapshot in fadingSnapshots {
                     snapshot.animator().alphaValue = 0
                 }
-            } completionHandler: {
+            } completionHandler: { [weak self] in
                 Task { @MainActor [weak self] in
                     fadingSnapshots.forEach { $0.removeFromSuperview() }
                     if self?.generation == currentGeneration {

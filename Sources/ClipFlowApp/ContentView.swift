@@ -489,11 +489,11 @@ struct LibraryInspectorOverlay: View {
                         store: store
                     )
 
-                    ViewThatFits(in: .horizontal) {
+                    HorizontalViewThatFits {
                         HStack(spacing: 10) {
                             actionButtons
                         }
-
+                    } second: {
                         VStack(alignment: .leading, spacing: 10) {
                             actionButtons
                         }
@@ -1956,10 +1956,11 @@ struct FlexiblePillRow: View {
     let tint: Color
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
+        HorizontalViewThatFits {
             HStack(spacing: 8) {
                 rowContent
             }
+        } second: {
             VStack(alignment: .leading, spacing: 8) {
                 rowContent
             }

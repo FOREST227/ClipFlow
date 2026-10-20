@@ -22,7 +22,7 @@ final class StoreTests: XCTestCase {
         store.ingestCopiedText("  hello\n", sourceApp: "Editor", sourceBundleID: nil)
         store.ingestCopiedText("hello", sourceApp: "Editor", sourceBundleID: nil)
         XCTAssertEqual(Set(store.items.map(\.fullText)), ["  hello\n", "hello"])
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(nanoseconds: 200000000)
     }
 
     func testOverflowRetainsPinnedItem() async throws {
@@ -36,7 +36,7 @@ final class StoreTests: XCTestCase {
         }
         XCTAssertEqual(store.items.count, 80)
         XCTAssertNotNil(store.item(withID: pinnedID))
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(nanoseconds: 200000000)
     }
 
     func testCorruptHistoryPreservesImagesAndOriginalFile() async throws {
@@ -50,7 +50,7 @@ final class StoreTests: XCTestCase {
         try original.write(to: historyURL)
         let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
         store.ingestCopiedText("new copy", sourceApp: "Editor", sourceBundleID: nil)
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(nanoseconds: 200000000)
         XCTAssertTrue(FileManager.default.fileExists(atPath: imageURL.path))
         XCTAssertEqual(try Data(contentsOf: historyURL), original)
     }
@@ -70,7 +70,7 @@ final class StoreTests: XCTestCase {
         pasteboard.setString("external copy", forType: .string)
         monitor.poll(sourceApplication: nil)
         XCTAssertEqual(store.items.first?.fullText, "external copy")
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(nanoseconds: 200000000)
     }
 
     func testExpirySettingSurvivesRestartAndKeepsSensitiveContentLocal() async throws {
@@ -86,13 +86,13 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(item.privacy, .vault)
         store.purgeExpired(at: Date().addingTimeInterval(600))
         XCTAssertEqual(store.items.count, 1)
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(nanoseconds: 200000000)
         let reloaded = ClipFlowStore(storageDirectory: directory, defaults: defaults)
         XCTAssertFalse(reloaded.sensitiveAutoExpireEnabled)
         XCTAssertEqual(reloaded.items.count, 1)
         reloaded.sensitiveAutoExpireEnabled = true
         XCTAssertEqual(try XCTUnwrap(reloaded.items.first?.expiresAt).timeIntervalSince(item.createdAt), 300, accuracy: 0.01)
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(nanoseconds: 200000000)
     }
 
     func testExpiryRemovesPinnedItemsWithoutNewCopy() async throws {
@@ -107,7 +107,7 @@ final class StoreTests: XCTestCase {
         store.purgeExpired(at: item.createdAt.addingTimeInterval(300))
         XCTAssertTrue(store.items.isEmpty)
         XCTAssertTrue(store.revealedItemIDs.isEmpty)
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(nanoseconds: 200000000)
     }
 
     func testEnablingExpiryDeletesOldSensitiveHistory() async throws {
@@ -123,7 +123,7 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(store.items.count, 1)
         store.sensitiveAutoExpireEnabled = true
         XCTAssertTrue(store.items.isEmpty)
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(nanoseconds: 200000000)
     }
 
     func testRapidCopiesAreDebouncedBeforeSync() async throws {
@@ -132,10 +132,10 @@ final class StoreTests: XCTestCase {
         store.iCloudSyncEnabled = true
         store.ingestCopiedText("first", sourceApp: "Editor", sourceBundleID: nil)
         store.ingestCopiedText("second", sourceApp: "Editor", sourceBundleID: nil)
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(nanoseconds: 200000000)
         let historyURL = directory.appendingPathComponent("ClipFlow/history.json")
         XCTAssertFalse(FileManager.default.fileExists(atPath: historyURL.path))
-        try await Task.sleep(for: .milliseconds(1000))
+        try await Task.sleep(nanoseconds: 1000000000)
         XCTAssertTrue(FileManager.default.fileExists(atPath: historyURL.path))
         store.setICloudSyncEnabled(false)
     }
@@ -146,7 +146,7 @@ final class StoreTests: XCTestCase {
         store.iCloudSyncEnabled = true
         store.ingestCopiedText("hello", sourceApp: "Editor", sourceBundleID: nil)
         store.setICloudSyncEnabled(false)
-        try await Task.sleep(for: .milliseconds(1100))
+        try await Task.sleep(nanoseconds: 1100000000)
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("ClipFlow/history.json").path))
     }
 
@@ -163,10 +163,10 @@ final class StoreTests: XCTestCase {
         let pasteboard = NSPasteboard.withUniqueName()
         defer { pasteboard.releaseGlobally() }
         let monitor = ClipboardMonitor(store: store, pasteboard: pasteboard)
-        try await Task.sleep(for: .milliseconds(1100))
+        try await Task.sleep(nanoseconds: 1100000000)
         monitor.poll(sourceApplication: nil)
         XCTAssertTrue(store.items.isEmpty)
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(nanoseconds: 200000000)
         let persisted = try JSONDecoder().decode([ClipboardItem].self, from: Data(contentsOf: directory.appendingPathComponent("history.json")))
         XCTAssertTrue(persisted.isEmpty)
     }
@@ -180,7 +180,7 @@ final class StoreTests: XCTestCase {
         try JSONEncoder().encode([item]).write(to: directory.appendingPathComponent("history.json"))
         let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
         store.togglePin(item.id)
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(nanoseconds: 200000000)
         let reloaded = ClipFlowStore(storageDirectory: directory, defaults: defaults)
         XCTAssertEqual(try XCTUnwrap(reloaded.items.first?.expiresAt).timeIntervalSince(item.createdAt), 300, accuracy: 0.01)
     }
@@ -198,6 +198,6 @@ final class StoreTests: XCTestCase {
         XCTAssertLessThanOrEqual(preview.width, 640)
         XCTAssertLessThanOrEqual(preview.height, 640)
         XCTAssertEqual(store.imageData(for: item), data)
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(nanoseconds: 200000000)
     }
 }

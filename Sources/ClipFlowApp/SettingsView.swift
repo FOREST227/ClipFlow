@@ -147,7 +147,7 @@ struct SettingsView: View {
                     SettingsSectionTitle(title: "排除应用", detail: "每行一个 Bundle ID，来自这些应用的复制内容不会被记录。")
                     TextEditor(text: $draft.excludedAppsText)
                         .font(.system(size: 12, design: .monospaced))
-                        .scrollContentBackground(.hidden)
+                        .scrollContentBackgroundHiddenCompat()
                         .padding(8).frame(height: 136)
                         .background(palette.inputFill, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(palette.border, lineWidth: 1))

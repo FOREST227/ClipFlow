@@ -60,7 +60,7 @@ struct ClipFlowTabBar<Tab: ClipFlowTab>: View {
                 }
                 .buttonStyle(.plain)
                 .focused($focused, equals: option)
-                .focusEffectDisabled()
+                .focusEffectDisabledCompat()
                 .onHover { hovered = $0 ? option : nil }
                 .accessibilityLabel(option.title)
                 .accessibilityAddTraits(selection == option ? [.isSelected] : [])

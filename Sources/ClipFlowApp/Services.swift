@@ -591,7 +591,7 @@ struct QuickPastePanelView: View {
                             }
                         }
                     }
-                    .scrollIndicators(.hidden)
+                    .scrollIndicatorsHiddenCompat()
                 }
 
                 HStack(spacing: 8) {
@@ -640,7 +640,7 @@ struct QuickPastePanelView: View {
                 selectedItemID = clips.first?.id
             }
         }
-        .onChange(of: query) { _, _ in
+        .onChangeBackward(of: query) {
             selectedItemID = clips.first?.id
         }
         .clipShape(RoundedRectangle(cornerRadius: QuickPastePanelLayout.cornerRadius, style: .continuous))

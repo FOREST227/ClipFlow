@@ -56,6 +56,7 @@ private struct ShortcutRecorderInput: NSViewRepresentable {
         configure(button)
     }
 
+    @available(macOS 13, *)
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ShortcutRecorderButton, context: Context) -> CGSize? {
         CGSize(width: proposal.width ?? 176, height: proposal.height ?? 36)
     }
@@ -75,6 +76,7 @@ private struct ShortcutRecorderInput: NSViewRepresentable {
 }
 
 final class ShortcutRecorderButton: NSButton {
+    override var intrinsicContentSize: NSSize { NSSize(width: 176, height: 36) }
     var beginRecording: (() -> Bool)?
     var endRecording: (() -> Void)?
     var capture: ((ClipFlowShortcut) -> Void)?

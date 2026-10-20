@@ -5,6 +5,17 @@ import XCTest
 
 @MainActor
 final class ShortcutTests: XCTestCase {
+    func testLegacyQuickPasteShortcutIsPreservedWithoutOverridingNewPreference() throws {
+        let suite = "ClipFlowShortcuts.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Data(#"{"keyCode":8,"modifiers":6144}"#.utf8), forKey: "hotKeyQuickPaste")
+        XCTAssertEqual(ClipFlowShortcut.load(from: defaults),
+                       ClipFlowShortcut(keyCode: 8, modifiers: UInt32(controlKey | optionKey)))
+        defaults.set(try JSONEncoder().encode(ClipFlowShortcut.default), forKey: ClipFlowShortcut.defaultsKey)
+        XCTAssertEqual(ClipFlowShortcut.load(from: defaults), .default)
+    }
+
     func testKeyCapsKeepNamedKeysTogether() {
         XCTAssertEqual(ClipFlowShortcut.default.keyCaps, ["⌥", "V"])
         let shortcut = ClipFlowShortcut(keyCode: UInt32(kVK_F18), modifiers: UInt32(controlKey | optionKey | shiftKey | cmdKey))

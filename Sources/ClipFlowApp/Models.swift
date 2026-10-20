@@ -826,7 +826,7 @@ final class ClipFlowStore: ObservableObject {
 
     init(storageDirectory: URL? = nil, defaults: UserDefaults = .standard, syncDirectory: URL? = nil) {
         self.defaults = defaults
-        appearanceMode = ClipFlowAppearance(rawValue: defaults.string(forKey: Keys.appearanceMode) ?? "") ?? .system
+        appearanceMode = ClipFlowAppearance.load(from: defaults)
         quickPasteShortcut = ClipFlowShortcut.load(from: defaults)
         let appSupport = storageDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("ClipFlow", isDirectory: true) ?? URL(fileURLWithPath: NSTemporaryDirectory())
@@ -1104,6 +1104,11 @@ final class ClipFlowStore: ObservableObject {
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
+        guard #available(macOS 13, *) else {
+            launchAtLogin = false
+            lastCaptureStatus = "macOS 12 请在系统偏好设置的用户与群组中添加登录项"
+            return
+        }
         do {
             if enabled {
                 try SMAppService.mainApp.register()
@@ -1469,7 +1474,7 @@ final class ClipFlowStore: ObservableObject {
         cloudSyncLoopTask = Task { [weak self] in
             while !Task.isCancelled {
                 do {
-                    try await Task.sleep(for: .seconds(25))
+                    try await Task.sleep(nanoseconds: 25_000_000_000)
                 } catch {
                     return
                 }
@@ -1488,7 +1493,7 @@ final class ClipFlowStore: ObservableObject {
         pendingCloudSyncTask?.cancel()
         pendingCloudSyncTask = Task { [weak self] in
             do {
-                try await Task.sleep(for: .milliseconds(900))
+                try await Task.sleep(nanoseconds: 900_000_000)
             } catch {
                 return
             }
@@ -1715,6 +1720,7 @@ final class ClipFlowStore: ObservableObject {
     ]
 
     private static func currentLaunchAtLoginState() -> Bool {
+        guard #available(macOS 13, *) else { return false }
         switch SMAppService.mainApp.status {
         case .enabled, .requiresApproval:
             return true

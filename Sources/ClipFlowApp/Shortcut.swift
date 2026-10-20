@@ -56,7 +56,7 @@ struct ClipFlowShortcut: Codable, Equatable, Sendable {
     }
 
     static func load(from defaults: UserDefaults) -> ClipFlowShortcut {
-        guard let data = defaults.data(forKey: defaultsKey),
+        guard let data = defaults.data(forKey: defaultsKey) ?? defaults.data(forKey: "hotKeyQuickPaste"),
               let shortcut = try? JSONDecoder().decode(Self.self, from: data),
               shortcut.isValid else { return .default }
         return shortcut

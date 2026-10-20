@@ -36,12 +36,16 @@ ClipFlow 是一款面向 macOS 的原生剪切板应用，强调“在鼠标附�
 
 ## 当前版本
 
-当前版本为 `v0.0.1`。
+当前版本为 `v0.0.5`，支持 macOS 12 及以上版本。
+
+[下载最新版本](https://github.com/Forest227/ClipFlow/releases/tag/v0.0.5) · [更新说明](docs/releases/v0.0.5.md)
 
 本地 release 安装包位于：
 
-- `dist/release/ClipFlow-v0.0.1.dmg`
-- `dist/release/ClipFlow-v0.0.1.dmg.sha256`
+- `dist/release/ClipFlow-v0.0.5-arm64.dmg`：Apple Silicon
+- `dist/release/ClipFlow-v0.0.5-x86_64.dmg`：Intel
+- `dist/release/ClipFlow-v0.0.5-universal.dmg`：通用版本
+- 每个安装包均附带 `.sha256` 校验文件
 
 ## 如何开始使用
 
@@ -55,7 +59,7 @@ ClipFlow 是一款面向 macOS 的原生剪切板应用，强调“在鼠标附�
 ## 使用提醒
 
 - 第一次使用自动粘贴时，macOS 可能会请求“辅助功能”权限
-- “启动时打开菜单栏面板”开启时，启动或再次打开 App 会展开菜单栏弹窗；关闭时打开剪贴历史。设置窗口只在手动选择“设置”或按 `Command + ,` 时打开，不随启动自动恢复
+- “启动时打开菜单栏面板”开启时，启动或再次打开 App 会展开菜单栏弹窗；关闭时打开剪贴历史。设置页只在手动选择“设置”或按 `Command + ,` 时显示，不随启动自动恢复
 - 快捷键至少包含 Command、Option、Control 中的一个，可额外加 Shift；录入时按 Esc、点击其他位置或切换应用可取消。系统保留组合可能无法录入，注册失败不会覆盖原设置；`Command + V` 保留给自动粘贴，不能用作呼出快捷键
 - 如果没有授予该权限，ClipFlow 仍然可以记录历史，但无法自动把内容粘贴回目标输入框
 - 设置中的“敏感内容 5 分钟后自动删除”默认开启，按复制时间计算，置顶也会过期。关闭后仍遮罩显示、仅本地保存；重新开启时会清理已超时的敏感记录
@@ -71,10 +75,12 @@ ClipFlow 使用 SwiftUI 和 AppKit 构建，重点接入了 macOS 的剪切板�
 
 - `Sources/ClipFlowApp`：应用主代码
 - `docs/clipflow-design.md`：产品与交互设计文档
-- `docs/releases/v0.0.1.md`：`v0.0.1` 发布说明
+- `docs/releases/v0.0.5.md`：`v0.0.5` 发布说明
 - `scripts/build_app.sh`：本地打包脚本
 
 ## 本地运行
+
+开发需要 Swift 6 和完整 Xcode；最低运行系统为 macOS 12。macOS 12 的开机启动需在系统“用户与群组 → 登录项”中手动添加，macOS 13 及以上可在应用内管理。
 
 ```bash
 swift build
@@ -114,3 +120,9 @@ open dist/ClipFlow.app
 
 GitHub 托管构建机没有本机私钥，因此现有发布流程显式使用 `CLIPFLOW_ADHOC_SIGN=1`。
 该 CI 产物仍为临时签名，不具备上述本机固定签名的权限连续性；本机常规构建不要设置此变量。
+
+生成三种架构的安装包：
+
+```bash
+zsh scripts/build_release_dmg.sh v0.0.5
+```

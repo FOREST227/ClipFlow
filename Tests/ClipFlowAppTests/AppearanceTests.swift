@@ -4,6 +4,18 @@ import XCTest
 
 @MainActor
 final class AppearanceTests: XCTestCase {
+    func testLegacyAppearancePreferencesArePreserved() throws {
+        let suite = "ClipFlowAppearanceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(1, forKey: "appearanceMode")
+        XCTAssertEqual(ClipFlowAppearance.load(from: defaults), .light)
+        defaults.set(2, forKey: "appearanceMode")
+        XCTAssertEqual(ClipFlowAppearance.load(from: defaults), .dark)
+        defaults.set(0, forKey: "appearanceMode")
+        XCTAssertEqual(ClipFlowAppearance.load(from: defaults), .system)
+    }
+
     func testEquivalentResolvedColorsDoNotCrossfade() throws {
         let light = try XCTUnwrap(NSAppearance(named: .aqua))
         let vibrantLight = try XCTUnwrap(NSAppearance(named: .vibrantLight))

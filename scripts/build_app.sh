@@ -2,26 +2,65 @@
 
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# build_app.sh — Build ClipFlow.app for a given architecture.
+#
+# Usage:
+#   ./scripts/build_app.sh                  # host architecture (default)
+#   ./scripts/build_app.sh arm64            # Apple Silicon
+#   ./scripts/build_app.sh x86_64           # Intel
+#
+# Environment variables:
+#   CLIPFLOW_VERSION       — bundle short version (default 0.0.5)
+#   CLIPFLOW_BUILD_NUMBER  — bundle build number (default 1)
+#   CLIPFLOW_ADHOC_SIGN    — set to 1 for explicit ad-hoc signing (CI only)
+# ---------------------------------------------------------------------------
+
+ARCH="${1:-host}"
+
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PRODUCT_NAME="ClipFlowApp"
 APP_NAME="ClipFlow"
 DIST_DIR="$ROOT_DIR/dist"
-APP_DIR="$DIST_DIR/$APP_NAME.app"
 ICON_PNG="$ROOT_DIR/assets/icon/ClipFlow-icon-1024.png"
-ICONSET_DIR="$DIST_DIR/ClipFlow.iconset"
 ICON_NAME="AppIcon"
-ICNS_PATH="$APP_DIR/Contents/Resources/$ICON_NAME.icns"
-APP_VERSION="${CLIPFLOW_VERSION:-0.1.0}"
+APP_VERSION="${CLIPFLOW_VERSION:-0.0.5}"
 BUILD_NUMBER="${CLIPFLOW_BUILD_NUMBER:-1}"
+DEPLOYMENT_TARGET="12.0"
 
-# Fail before rebuilding if the fixed local signing identity is unavailable.
+# Resolve output directory based on architecture
+case "$ARCH" in
+  host)
+    APP_DIR="$DIST_DIR/$APP_NAME.app"
+    ICONSET_DIR="$DIST_DIR/ClipFlow.iconset"
+    SWIFT_ARCH_FLAGS=()
+    ;;
+  arm64|x86_64)
+    APP_DIR="$DIST_DIR/$APP_NAME-$ARCH.app"
+    ICONSET_DIR="$DIST_DIR/ClipFlow-$ARCH.iconset"
+    SWIFT_ARCH_FLAGS=(--arch "$ARCH" --scratch-path "$ROOT_DIR/.build/release-$ARCH"
+      -Xswiftc -target -Xswiftc "${ARCH}-apple-macosx${DEPLOYMENT_TARGET}")
+    ;;
+  *)
+    echo "Usage: $0 [arm64|x86_64]" >&2
+    exit 1
+    ;;
+esac
+
+if [[ ! -f "$ICON_PNG" ]]; then
+  echo "Icon source not found at $ICON_PNG" >&2
+  exit 1
+fi
+
+# Fail before compiling if the fixed local signing certificate is unavailable.
 zsh "$ROOT_DIR/scripts/sign_app.sh" --check
+
+# Build
 cd "$ROOT_DIR"
-
-swift "$ROOT_DIR/scripts/render_icon.swift" "$ICON_PNG"
-
-swift build -c release --product "$PRODUCT_NAME"
-BIN_DIR="$(swift build -c release --show-bin-path)"
+export MACOSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET"
+SWIFT="$(xcrun --find swift)"
+"$SWIFT" build -c release --product "$PRODUCT_NAME" "${SWIFT_ARCH_FLAGS[@]}"
+BIN_DIR="$("$SWIFT" build -c release --show-bin-path "${SWIFT_ARCH_FLAGS[@]}")"
 BINARY_PATH="$BIN_DIR/$PRODUCT_NAME"
 
 if [[ ! -f "$BINARY_PATH" ]]; then
@@ -29,6 +68,14 @@ if [[ ! -f "$BINARY_PATH" ]]; then
   exit 1
 fi
 
+# Verify architecture
+echo "Binary architecture:"
+lipo -info "$BINARY_PATH"
+if [[ "$ARCH" != "host" ]]; then
+  lipo -verify_arch "$ARCH" "$BINARY_PATH"
+fi
+
+# Assemble .app bundle
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
@@ -43,7 +90,7 @@ for size in 16 32 128 256 512; do
   sips -z "$double_size" "$double_size" "$ICON_PNG" --out "$ICONSET_DIR/icon_${size}x${size}@2x.png" >/dev/null
 done
 
-iconutil -c icns "$ICONSET_DIR" -o "$ICNS_PATH"
+iconutil -c icns "$ICONSET_DIR" -o "$APP_DIR/Contents/Resources/$ICON_NAME.icns"
 
 cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -55,7 +102,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key>
   <string>ClipFlowApp</string>
   <key>CFBundleDisplayName</key>
-  <string>ClipFlow 剪流</string>
+  <string>ClipFlow</string>
   <key>CFBundleIdentifier</key>
   <string>com.clipflow.app</string>
   <key>CFBundleIconFile</key>
@@ -71,7 +118,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key>
   <string>$BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key>
-  <string>14.0</string>
+  <string>$DEPLOYMENT_TARGET</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSPrincipalClass</key>

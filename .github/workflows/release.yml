@@ -10,14 +10,38 @@ permissions:
 
 jobs:
   build-and-release:
-    runs-on: macos-14
+    runs-on: macos-15
+    env:
+      # The fixed local signing key stays on the developer's Mac.
+      CLIPFLOW_ADHOC_SIGN: '1'
+    defaults:
+      run:
+        shell: /bin/zsh {0}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Verify Swift toolchain and run tests
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          SWIFT_VERSION="$(xcrun swift --version)"
+          echo "$SWIFT_VERSION"
+          SWIFT_MAJOR="$(echo "$SWIFT_VERSION" | sed -nE 's/.*Swift version ([0-9]+).*/\1/p' | head -n 1)"
+          if [[ -z "$SWIFT_MAJOR" ]] || (( SWIFT_MAJOR < 6 )); then
+            echo "ClipFlow requires Xcode with Swift 6 or newer." >&2
+            exit 1
+          fi
+          xcrun swift test
+
       - name: Prepare release metadata
-        shell: zsh
+        shell: /bin/zsh {0}
         run: |
           set -euo pipefail
 
@@ -34,15 +58,12 @@ jobs:
             echo "HAS_CUSTOM_NOTES=false" >> "$GITHUB_ENV"
           fi
 
-      - name: Build app and DMG
-        shell: zsh
-        env:
-          # Hosted CI has no access to this Mac's persistent private key.
-          CLIPFLOW_ADHOC_SIGN: "1"
+      - name: Build app and DMGs (arm64 / x86_64 / universal)
+        shell: /bin/zsh {0}
         run: zsh scripts/build_release_dmg.sh "${TAG_NAME}"
 
       - name: Ensure GitHub CLI is available
-        shell: zsh
+        shell: /bin/zsh {0}
         run: |
           set -euo pipefail
           if ! command -v gh >/dev/null 2>&1; then
@@ -52,31 +73,44 @@ jobs:
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: zsh
+        shell: /bin/zsh {0}
         run: |
           set -euo pipefail
 
-          DMG_PATH="dist/release/ClipFlow-${TAG_NAME}.dmg"
-          SHA_PATH="${DMG_PATH}.sha256"
+          ARTIFACTS=(
+            "dist/release/ClipFlow-${TAG_NAME}-arm64.dmg"
+            "dist/release/ClipFlow-${TAG_NAME}-arm64.dmg.sha256"
+            "dist/release/ClipFlow-${TAG_NAME}-x86_64.dmg"
+            "dist/release/ClipFlow-${TAG_NAME}-x86_64.dmg.sha256"
+            "dist/release/ClipFlow-${TAG_NAME}-universal.dmg"
+            "dist/release/ClipFlow-${TAG_NAME}-universal.dmg.sha256"
+          )
 
           if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
             if [[ "${HAS_CUSTOM_NOTES}" == "true" ]]; then
               gh release edit "${TAG_NAME}" \
-                --title "${RELEASE_TITLE}" \
-                --notes-file "${RELEASE_NOTES_FILE}"
-            fi
-
-            gh release upload "${TAG_NAME}" "${DMG_PATH}" "${SHA_PATH}" --clobber
-          else
-            if [[ "${HAS_CUSTOM_NOTES}" == "true" ]]; then
-              gh release create "${TAG_NAME}" "${DMG_PATH}" "${SHA_PATH}" \
-                --verify-tag \
+                --draft=false \
                 --title "${RELEASE_TITLE}" \
                 --notes-file "${RELEASE_NOTES_FILE}"
             else
-              gh release create "${TAG_NAME}" "${DMG_PATH}" "${SHA_PATH}" \
-                --verify-tag \
-                --title "${RELEASE_TITLE}" \
+              gh release edit "${TAG_NAME}" --draft=false
+            fi
+
+            gh release upload "${TAG_NAME}" "${ARTIFACTS[@]}" --clobber
+          else
+            COMMON_ARGS=(
+              --verify-tag
+              --draft=false
+              --title "${RELEASE_TITLE}"
+            )
+
+            if [[ "${HAS_CUSTOM_NOTES}" == "true" ]]; then
+              gh release create "${TAG_NAME}" "${ARTIFACTS[@]}" \
+                "${COMMON_ARGS[@]}" \
+                --notes-file "${RELEASE_NOTES_FILE}"
+            else
+              gh release create "${TAG_NAME}" "${ARTIFACTS[@]}" \
+                "${COMMON_ARGS[@]}" \
                 --generate-notes
             fi
           fi

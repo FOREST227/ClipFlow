@@ -11,7 +11,7 @@ set -euo pipefail
 #   ./scripts/build_app.sh x86_64           # Intel
 #
 # Environment variables:
-#   CLIPFLOW_VERSION       — bundle short version (default 0.0.5)
+#   CLIPFLOW_VERSION       — bundle short version (default 0.0.6)
 #   CLIPFLOW_BUILD_NUMBER  — bundle build number (default 1)
 #   CLIPFLOW_ADHOC_SIGN    — set to 1 for explicit ad-hoc signing (CI only)
 # ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ APP_NAME="ClipFlow"
 DIST_DIR="$ROOT_DIR/dist"
 ICON_PNG="$ROOT_DIR/assets/icon/ClipFlow-icon-1024.png"
 ICON_NAME="AppIcon"
-APP_VERSION="${CLIPFLOW_VERSION:-0.0.5}"
+APP_VERSION="${CLIPFLOW_VERSION:-0.0.6}"
 BUILD_NUMBER="${CLIPFLOW_BUILD_NUMBER:-1}"
 DEPLOYMENT_TARGET="12.0"
 
@@ -72,7 +72,7 @@ fi
 echo "Binary architecture:"
 lipo -info "$BINARY_PATH"
 if [[ "$ARCH" != "host" ]]; then
-  lipo -verify_arch "$ARCH" "$BINARY_PATH"
+  lipo "$BINARY_PATH" -verify_arch "$ARCH"
 fi
 
 # Assemble .app bundle

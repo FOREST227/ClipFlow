@@ -6,8 +6,8 @@ set -euo pipefail
 # build_release_dmg.sh — Build arm64, x86_64, and universal DMGs.
 #
 # Usage:
-#   ./scripts/build_release_dmg.sh v0.0.5
-#   ./scripts/build_release_dmg.sh            # uses CLIPFLOW_VERSION or v0.0.5
+#   ./scripts/build_release_dmg.sh v0.0.6
+#   ./scripts/build_release_dmg.sh            # uses CLIPFLOW_VERSION or v0.0.6
 #
 # Produces:
 #   dist/release/ClipFlow-<tag>-arm64.dmg
@@ -22,7 +22,7 @@ RELEASE_DIR="$DIST_DIR/release"
 APP_NAME="ClipFlow"
 PRODUCT_NAME="ClipFlowApp"
 
-RAW_VERSION="${1:-${CLIPFLOW_VERSION:-v0.0.5}}"
+RAW_VERSION="${1:-${CLIPFLOW_VERSION:-v0.0.6}}"
 TAG_NAME="${RAW_VERSION#refs/tags/}"
 BUNDLE_VERSION="${TAG_NAME#v}"
 BUILD_NUMBER="${CLIPFLOW_BUILD_NUMBER:-${GITHUB_RUN_NUMBER:-1}}"
@@ -77,7 +77,7 @@ zsh "$ROOT_DIR/scripts/sign_app.sh" "$UNIVERSAL_APP"
 echo "Universal binary:"
 lipo -info "$UNIVERSAL_APP/Contents/MacOS/$PRODUCT_NAME"
 for RELEASE_ARCH in arm64 x86_64; do
-  lipo -verify_arch "$RELEASE_ARCH" "$UNIVERSAL_APP/Contents/MacOS/$PRODUCT_NAME"
+  lipo "$UNIVERSAL_APP/Contents/MacOS/$PRODUCT_NAME" -verify_arch "$RELEASE_ARCH"
 done
 
 # ── Create DMGs ────────────────────────────────────────────────────────────

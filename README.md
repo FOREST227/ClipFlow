@@ -36,15 +36,15 @@ ClipFlow 是一款面向 macOS 的原生剪切板应用，强调“在鼠标附�
 
 ## 当前版本
 
-当前版本为 `v0.0.5`，支持 macOS 12 及以上版本。
+当前版本为 `v0.0.6`，支持 macOS 12 及以上版本。
 
-[下载最新版本](https://github.com/Forest227/ClipFlow/releases/tag/v0.0.5) · [更新说明](docs/releases/v0.0.5.md)
+[下载最新版本](https://github.com/Forest227/ClipFlow/releases/tag/v0.0.6) · [更新说明](docs/releases/v0.0.6.md)
 
 本地 release 安装包位于：
 
-- `dist/release/ClipFlow-v0.0.5-arm64.dmg`：Apple Silicon
-- `dist/release/ClipFlow-v0.0.5-x86_64.dmg`：Intel
-- `dist/release/ClipFlow-v0.0.5-universal.dmg`：通用版本
+- `dist/release/ClipFlow-v0.0.6-arm64.dmg`：Apple Silicon
+- `dist/release/ClipFlow-v0.0.6-x86_64.dmg`：Intel
+- `dist/release/ClipFlow-v0.0.6-universal.dmg`：通用版本
 - 每个安装包均附带 `.sha256` 校验文件
 
 ## 如何开始使用
@@ -75,7 +75,7 @@ ClipFlow 使用 SwiftUI 和 AppKit 构建，重点接入了 macOS 的剪切板�
 
 - `Sources/ClipFlowApp`：应用主代码
 - `docs/clipflow-design.md`：产品与交互设计文档
-- `docs/releases/v0.0.5.md`：`v0.0.5` 发布说明
+- `docs/releases/v0.0.6.md`：`v0.0.6` 发布说明
 - `scripts/build_app.sh`：本地打包脚本
 
 ## 本地运行
@@ -124,5 +124,5 @@ GitHub 托管构建机没有本机私钥，因此现有发布流程显式使用 
 生成三种架构的安装包：
 
 ```bash
-zsh scripts/build_release_dmg.sh v0.0.5
+zsh scripts/build_release_dmg.sh v0.0.6
 ```

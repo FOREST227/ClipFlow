@@ -16,6 +16,10 @@ let package = Package(
         .executableTarget(
             name: "ClipFlowApp",
             path: "Sources/ClipFlowApp"
+        ),
+        .testTarget(
+            name: "ClipFlowAppTests",
+            dependencies: ["ClipFlowApp"]
         )
     ]
 )

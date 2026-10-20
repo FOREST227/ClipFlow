@@ -1,5 +1,7 @@
+import ApplicationServices
 import CryptoKit
 import Foundation
+import ImageIO
 import ServiceManagement
 import SwiftUI
 
@@ -58,7 +60,7 @@ enum ClipCategory: String, CaseIterable, Identifiable {
     }
 }
 
-enum ClipboardKind: String, Codable, CaseIterable {
+enum ClipboardKind: String, Codable, CaseIterable, Sendable {
     case text
     case code
     case link
@@ -76,7 +78,7 @@ enum ClipboardKind: String, Codable, CaseIterable {
     }
 }
 
-enum PrivacyLevel: String, Codable {
+enum PrivacyLevel: String, Codable, Sendable {
     case standard
     case masked
     case vault
@@ -98,7 +100,7 @@ enum PrivacyLevel: String, Codable {
     }
 }
 
-struct ClipboardItem: Identifiable, Hashable, Codable {
+struct ClipboardItem: Identifiable, Hashable, Codable, Sendable {
     var id: UUID
     var title: String
     var snippet: String
@@ -118,6 +120,8 @@ struct ClipboardItem: Identifiable, Hashable, Codable {
     var imageWidth: Double?
     var imageHeight: Double?
     var imageSignature: String?
+    // Separate capture time from the ordering timestamp changed by pinning.
+    var capturedAt: Date?
 
     var timeLabel: String {
         let formatter = RelativeDateTimeFormatter()
@@ -127,7 +131,21 @@ struct ClipboardItem: Identifiable, Hashable, Codable {
     }
 
     var isSensitive: Bool {
-        privacy != .standard || localOnly || autoExpire
+        kind == .secret || privacy != .standard || localOnly || autoExpire
+    }
+
+    func applyingExpirationPolicy(enabled: Bool) -> ClipboardItem {
+        var item = self
+        let sensitive = isSensitive
+        item.capturedAt = capturedAt ?? createdAt
+        item.localOnly = localOnly || sensitive
+        item.autoExpire = sensitive && enabled
+        item.expiresAt = item.autoExpire ? item.capturedAt?.addingTimeInterval(300) : nil
+        return item
+    }
+
+    func isExpired(at now: Date = Date()) -> Bool {
+        autoExpire && expiresAt.map { $0 <= now } == true
     }
 
     var isImage: Bool {
@@ -177,20 +195,69 @@ struct IntegrationPill: Identifiable {
     let tint: Color
 }
 
+enum ClipFlowPermissionStatus {
+    case granted
+    case needsAttention
+    case notRequired
+
+    var label: String {
+        switch self {
+        case .granted:
+            return "正常"
+        case .needsAttention:
+            return "需要处理"
+        case .notRequired:
+            return "当前无需"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .granted:
+            return Color(red: 0.34, green: 0.67, blue: 0.53)
+        case .needsAttention:
+            return ClipCategory.protected.tint
+        case .notRequired:
+            return ClipCategory.all.tint
+        }
+    }
+}
+
+struct ClipFlowPermissionItem: Identifiable {
+    let id = UUID()
+    let title: String
+    let detail: String
+    let icon: String
+    let status: ClipFlowPermissionStatus
+}
+
+struct ClipFlowPermissionReport: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+    let items: [ClipFlowPermissionItem]
+
+    var needsAttention: Bool {
+        items.contains { $0.status == .needsAttention }
+    }
+}
+
 enum ClipboardClassifier {
     static func kind(for text: String) -> ClipboardKind {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = normalized.lowercased()
+        let codeLike = looksLikeCode(normalized)
+        let secretLike = looksLikeSecretPayload(normalized, lowered: lowered, codeLike: codeLike)
 
-        if looksLikeSecret(lowered) {
+        if secretLike {
             return .secret
         }
 
-        if looksLikeURL(normalized) {
+        if looksLikeURL(normalized) && !codeLike {
             return .link
         }
 
-        if looksLikeCode(lowered) {
+        if codeLike {
             return .code
         }
 
@@ -198,10 +265,13 @@ enum ClipboardClassifier {
     }
 
     static func privacy(for text: String, kind: ClipboardKind, sourceBundleID: String?, autoProtectSecrets: Bool) -> PrivacyLevel {
-        let lowered = text.lowercased()
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowered = normalized.lowercased()
+        let codeLike = kind == .code || looksLikeCode(normalized)
         let sensitiveSource = (sourceBundleID.map(sensitiveSourceBundleIDs.contains) ?? false)
+        let secretLike = looksLikeSecretPayload(normalized, lowered: lowered, codeLike: codeLike)
 
-        if kind == .secret || (autoProtectSecrets && looksLikeSecret(lowered)) || sensitiveSource {
+        if kind == .secret || (autoProtectSecrets && secretLike) || sensitiveSource {
             return .vault
         }
 
@@ -226,11 +296,23 @@ enum ClipboardClassifier {
                 labels.append("便签")
             }
         case .code:
-            labels.append("命令")
-            if lowered.contains("swift") || lowered.contains("import ") {
+            labels.append(isLikelyShellCommand(text, lowered: lowered) ? "命令" : "代码")
+            if lowered.contains("swift") || lowered.contains("import swiftui") || lowered.contains("import foundation") {
                 labels.append("Swift")
             }
-            if lowered.contains("ssh") || lowered.contains("brew") || lowered.contains("git ") {
+            if lowered.contains("python") || lowered.contains("def ") || lowered.contains("print(") {
+                labels.append("Python")
+            }
+            if lowered.contains("select ") || lowered.contains("insert into") || lowered.contains("update ") || lowered.contains("delete from") {
+                labels.append("SQL")
+            }
+            if lowered.contains("<div") || lowered.contains("</") || lowered.contains("/>") || lowered.contains("<html") {
+                labels.append("HTML")
+            }
+            if looksLikeJSON(text) {
+                labels.append("JSON")
+            }
+            if isLikelyShellCommand(text, lowered: lowered) {
                 labels.append("终端")
             }
         case .link:
@@ -277,7 +359,8 @@ enum ClipboardClassifier {
         let kind = kind(for: normalized)
         let privacy = privacy(for: normalized, kind: kind, sourceBundleID: sourceBundleID, autoProtectSecrets: autoProtectSecrets)
         let localOnly = privacy != .standard
-        let autoExpire = kind == .secret || privacy == .masked
+        let autoExpire = privacy != .standard
+        let capturedAt = Date()
         let title = kind.label
         let snippet = makeSnippet(for: normalized)
         let labels = labels(for: normalized, kind: kind, sourceApp: sourceApp, privacy: privacy)
@@ -287,10 +370,10 @@ enum ClipboardClassifier {
             id: existingItem?.id ?? UUID(),
             title: title,
             snippet: snippet,
-            fullText: normalized,
+            fullText: text,
             sourceApp: sourceApp,
             sourceBundleID: sourceBundleID,
-            createdAt: Date(),
+            createdAt: capturedAt,
             kind: kind,
             privacy: privacy,
             labels: labels,
@@ -298,11 +381,12 @@ enum ClipboardClassifier {
             localOnly: localOnly,
             autoExpire: autoExpire,
             pasteTargets: pasteTargets,
-            expiresAt: autoExpire ? Date().addingTimeInterval(kind == .secret ? 120 : 900) : nil,
+            expiresAt: autoExpire ? capturedAt.addingTimeInterval(300) : nil,
             imageFilename: nil,
             imageWidth: nil,
             imageHeight: nil,
-            imageSignature: nil
+            imageSignature: nil,
+            capturedAt: capturedAt
         )
     }
 
@@ -315,6 +399,7 @@ enum ClipboardClassifier {
         existingItem: ClipboardItem?
     ) -> ClipboardItem {
         let privacy = imagePrivacy(sourceBundleID: sourceBundleID)
+        let capturedAt = Date()
 
         return ClipboardItem(
             id: existingItem?.id ?? UUID(),
@@ -323,19 +408,20 @@ enum ClipboardClassifier {
             fullText: "",
             sourceApp: sourceApp,
             sourceBundleID: sourceBundleID,
-            createdAt: Date(),
+            createdAt: capturedAt,
             kind: .image,
             privacy: privacy,
             labels: imageLabels(for: imageSize, sourceApp: sourceApp, privacy: privacy),
             pinned: existingItem?.pinned ?? false,
             localOnly: privacy != .standard,
-            autoExpire: false,
+            autoExpire: privacy != .standard,
             pasteTargets: pasteTargets(for: .image),
-            expiresAt: nil,
+            expiresAt: privacy != .standard ? capturedAt.addingTimeInterval(300) : nil,
             imageFilename: imageFilename,
             imageWidth: imageSize.width,
             imageHeight: imageSize.height,
-            imageSignature: imageSignature
+            imageSignature: imageSignature,
+            capturedAt: capturedAt
         )
     }
 
@@ -357,14 +443,55 @@ enum ClipboardClassifier {
         return detector.firstMatch(in: text, options: [], range: range)?.url != nil
     }
 
-    private static func looksLikeCode(_ lowered: String) -> Bool {
-        let codeMarkers = [
-            "func ", "let ", "var ", "import ", "class ", "struct ",
-            "git ", "ssh ", "brew ", "npm ", "pnpm ", "swift ",
-            "{", "}", "=>", "::", "--", "</", "/>"
-        ]
+    private static func looksLikeCode(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
 
-        return codeMarkers.contains { lowered.contains($0) }
+        let lowered = trimmed.lowercased()
+        let lines = trimmed
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        if trimmed.hasPrefix("```") || trimmed.contains("\n```") {
+            return true
+        }
+
+        if looksLikeJSON(trimmed) {
+            return true
+        }
+
+        if isLikelyShellCommand(trimmed, lowered: lowered) || looksLikeSQL(trimmed, lowered: lowered) {
+            return true
+        }
+
+        var score = 0
+
+        if lines.count >= 2 {
+            score += 1
+        }
+
+        let keywordHits = codeKeywordPatterns.filter {
+            lowered.range(of: $0, options: .regularExpression) != nil
+        }.count
+        score += min(keywordHits, 3)
+
+        let symbolHits = codeSymbolPatterns.filter {
+            trimmed.range(of: $0, options: .regularExpression) != nil
+        }.count
+        score += min(symbolHits, 2)
+
+        let codeLikeLines = lines.filter { lineLooksLikeCode($0) }.count
+        if codeLikeLines >= max(1, lines.count / 2) {
+            score += 2
+        }
+
+        if lines.count == 1,
+           trimmed.range(of: #"^(?:<[^>]+>.*</[^>]+>|[a-z_][a-z0-9_]*\s*\(.*\)|[a-z_][a-z0-9_]*\s*=\s*.+)$"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            score += 2
+        }
+
+        return score >= (lines.count <= 1 ? 3 : 4)
     }
 
     private static func looksLikeOperationalCommand(_ lowered: String) -> Bool {
@@ -375,22 +502,43 @@ enum ClipboardClassifier {
             || lowered.contains("secret")
     }
 
-    private static func looksLikeSecret(_ lowered: String) -> Bool {
-        let secretMarkers = [
-            "otp", "verification code", "one-time code", "password",
-            "passcode", "api_key", "secret", "token", "bearer ",
-            "sk-", "xoxb-", "ghp_", "ssh-rsa", "private key"
-        ]
-
-        if secretMarkers.contains(where: lowered.contains) {
-            return true
-        }
-
+    private static func looksLikeSecretPayload(_ text: String, lowered: String, codeLike: Bool) -> Bool {
         if lowered.range(of: #"^\d{4,8}$"#, options: .regularExpression) != nil {
             return true
         }
 
-        if lowered.range(of: #"[a-z0-9_\-]{24,}"#, options: .regularExpression) != nil {
+        let hardSecretPatterns = [
+            #"\b(?:sk|rk)-[a-z0-9]{16,}\b"#,
+            #"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"#,
+            #"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"#,
+            #"\beyJ[a-zA-Z0-9_\-]{10,}\.[a-zA-Z0-9_\-]{10,}\.[a-zA-Z0-9_\-]{10,}\b"#,
+            #"\bssh-rsa\s+[A-Za-z0-9+/=]{40,}"#,
+            #"\bAKIA[0-9A-Z]{16}\b"#
+        ]
+
+        if hardSecretPatterns.contains(where: { lowered.range(of: $0, options: .regularExpression) != nil }) {
+            return true
+        }
+
+        if looksLikeHardcodedCredential(text, lowered: lowered, codeLike: codeLike) {
+            return true
+        }
+
+        if codeLike {
+            return false
+        }
+
+        let softSecretMarkers = [
+            "otp", "verification code", "one-time code", "password",
+            "passcode", "api_key", "secret", "token", "bearer ", "private key"
+        ]
+
+        if text.count <= 160, softSecretMarkers.contains(where: lowered.contains) {
+            return true
+        }
+
+        if lowered.range(of: #"[a-z0-9_\-]{24,}"#, options: .regularExpression) != nil,
+           !lowered.contains(" ") {
             return true
         }
 
@@ -467,6 +615,129 @@ enum ClipboardClassifier {
         let prefix = String(compact.prefix(120))
         return compact.count > 120 ? "\(prefix)…" : prefix
     }
+
+    private static func isLikelyShellCommand(_ text: String, lowered: String) -> Bool {
+        let commandRegex = #"^(?:[$>%#]\s*)?(?:git|ssh|scp|brew|npm|pnpm|yarn|npx|node|python|python3|pip|pip3|curl|wget|docker|kubectl|defaults|chmod|chown|find|grep|sed|awk|cat|ls|cd|pwd|cp|mv|rm|mkdir|touch|swift|xcodebuild|pod|bundle|rails)\b"#
+        if lowered.range(of: commandRegex, options: .regularExpression) != nil {
+            return true
+        }
+
+        return text.contains("\n$ ")
+            || text.contains("\n% ")
+            || text.contains("\n> ")
+    }
+
+    private static func looksLikeSQL(_ text: String, lowered: String) -> Bool {
+        let sqlRegex = #"^(?:with|select|insert\s+into|update|delete\s+from|create\s+table|alter\s+table|drop\s+table)\b"#
+        return lowered.range(of: sqlRegex, options: .regularExpression) != nil
+            || text.range(of: #"\bfrom\b.+\bwhere\b"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    private static func looksLikeJSON(_ text: String) -> Bool {
+        guard text.first == "{" || text.first == "[" else { return false }
+        guard let data = text.data(using: .utf8) else { return false }
+        return (try? JSONSerialization.jsonObject(with: data)) != nil
+    }
+
+    private static func looksLikeHardcodedCredential(_ text: String, lowered: String, codeLike: Bool) -> Bool {
+        if codeLike {
+            return text
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .contains(where: lineLooksLikeHardcodedCredential)
+        }
+
+        let assignmentPatterns = [
+            #"(?:api[_\- ]?key|access[_\- ]?token|refresh[_\- ]?token|client[_\- ]?secret|password|passcode|bearer)\s*[:=]\s*[\"']?[A-Za-z0-9_\-\/+=]{8,}"#,
+            #"(?:authorization)\s*[:=]\s*[\"']?bearer\s+[A-Za-z0-9_\-\/+=\.]{8,}"#
+        ]
+
+        if assignmentPatterns.contains(where: { lowered.range(of: $0, options: .regularExpression) != nil }) {
+            return true
+        }
+
+        return text.range(of: #"(?:api[_\- ]?key|token|secret|password)\s*[:=]\s*`[^`]{8,}`"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    private static func lineLooksLikeHardcodedCredential(_ line: String) -> Bool {
+        guard !line.isEmpty else { return false }
+        guard !lineLooksLikeRegexPatternDefinition(line) else { return false }
+
+        let inlineSecretAssignmentPatterns = [
+            #"\b(?:api[_\- ]?key|access[_\- ]?token|refresh[_\- ]?token|client[_\- ]?secret|password|passcode)\b.{0,24}(?:=|:)\s*(?:\"[^\"]{8,}\"|'[^']{8,}'|`[^`]{8,}`)"#,
+            #"\b(?:authorization|bearer)\b.{0,24}(?:=|:)\s*(?:\"bearer\s+[A-Za-z0-9_\-\/+=\.]{8,}\"|'bearer\s+[A-Za-z0-9_\-\/+=\.]{8,}'|bearer\s+[A-Za-z0-9_\-\/+=\.]{8,})"#,
+            #"^(?:export\s+)?(?:api[_\- ]?key|token|secret|password)\s*=\s*[A-Za-z0-9_\-\/+=\.]{12,}$"#
+        ]
+
+        return inlineSecretAssignmentPatterns.contains {
+            line.range(of: $0, options: [.regularExpression, .caseInsensitive]) != nil
+        }
+    }
+
+    private static func lineLooksLikeRegexPatternDefinition(_ line: String) -> Bool {
+        let lowered = line.lowercased()
+
+        if lowered.contains("options: .regularexpression") || lowered.contains("nsregularexpression") {
+            return true
+        }
+
+        let regexMarkers = [
+            #"\"#, #"\d"#, #"\w"#, #"\b"#, #"\s"#,
+            "(?:", "(?=", "(?!", "[a-z", "[0-9", "[^", "{8,}", "{10,}", ".*", ".+",
+            #"range(of: #""#, #"try? regularexpression"#, #"checkingtype.link"#, #"detector.firstmatch"#
+        ]
+
+        return regexMarkers.contains { line.contains($0) }
+    }
+
+    private static func lineLooksLikeCode(_ line: String) -> Bool {
+        let lowered = line.lowercased()
+
+        if isLikelyShellCommand(line, lowered: lowered) || looksLikeSQL(line, lowered: lowered) {
+            return true
+        }
+
+        if lowered.range(of: #"^(?:func|let|var|const|import|from|def|class|struct|enum|interface|public|private|protected|return|if|else|for|while|switch|case)\b"#, options: .regularExpression) != nil {
+            return true
+        }
+
+        return line.range(of: #"[{}[\]();:=<>]|=>|->|::|</|/>"#, options: .regularExpression) != nil
+    }
+
+    private static let codeKeywordPatterns = [
+        #"\bfunc\b"#,
+        #"\blet\b"#,
+        #"\bvar\b"#,
+        #"\bconst\b"#,
+        #"\bimport\b"#,
+        #"\bfrom\b"#,
+        #"\bdef\b"#,
+        #"\bclass\b"#,
+        #"\bstruct\b"#,
+        #"\benum\b"#,
+        #"\binterface\b"#,
+        #"\bpublic\b"#,
+        #"\bprivate\b"#,
+        #"\breturn\b"#,
+        #"\bif\s*\("#,
+        #"\bfor\s*\("#,
+        #"\bwhile\s*\("#,
+        #"\bselect\b"#,
+        #"\bcreate\s+table\b"#,
+        #"\b<!doctype\b"#,
+        #"<[a-z][^>]*>"#
+    ]
+
+    private static let codeSymbolPatterns = [
+        #"[{}]"#,
+        #"\=\>"#,
+        #"\-\>"#,
+        #"\=\s*[^=]"#,
+        #";"#,
+        #"</"#,
+        #"/>"#,
+        #"\[[^\]]+\]"#
+    ]
 }
 
 @MainActor
@@ -483,12 +754,25 @@ final class ClipFlowStore: ObservableObject {
     @Published var capturePaused: Bool {
         didSet { defaults.set(capturePaused, forKey: Keys.capturePaused) }
     }
+    @Published var appearanceMode: ClipFlowAppearance {
+        didSet { defaults.set(appearanceMode.rawValue, forKey: Keys.appearanceMode) }
+    }
     @Published var autoProtectSecrets: Bool {
         didSet { defaults.set(autoProtectSecrets, forKey: Keys.autoProtectSecrets) }
+    }
+    @Published var sensitiveAutoExpireEnabled: Bool {
+        didSet {
+            defaults.set(sensitiveAutoExpireEnabled, forKey: Keys.sensitiveAutoExpireEnabled)
+            items = items.map { $0.applyingExpirationPolicy(enabled: sensitiveAutoExpireEnabled) }
+            purgeExpired()
+        }
     }
     @Published var launchAtLogin: Bool
     @Published var launchToStatusBar: Bool {
         didSet { defaults.set(launchToStatusBar, forKey: Keys.launchToStatusBar) }
+    }
+    @Published var menuQuickPasteModeEnabled: Bool {
+        didSet { defaults.set(menuQuickPasteModeEnabled, forKey: Keys.menuQuickPasteModeEnabled) }
     }
     @Published var iCloudSyncEnabled: Bool
     @Published var excludedBundleIDs: [String] {
@@ -498,10 +782,18 @@ final class ClipFlowStore: ObservableObject {
     @Published var lastCaptureStatus: String = "准备就绪"
     @Published private(set) var iCloudSyncPhase: ClipFlowCloudSyncPhase = .disabled
     @Published private(set) var iCloudLastSyncedAt: Date?
+    @Published var startupPermissionReport: ClipFlowPermissionReport?
+    @Published private(set) var quickPasteShortcut: ClipFlowShortcut
+    @Published var shortcutError: String?
+    @Published private(set) var isRecordingShortcut = false
+    var registerShortcut: ((ClipFlowShortcut) -> String?)?
+    var suspendShortcut: (() -> Void)?
+    @Published private(set) var historyLoadError: String?
 
     @Published private(set) var items: [ClipboardItem] = [] {
         didSet {
-            persistItems()
+            itemsRevision += 1
+            schedulePersistItems()
             ensureSelectionStillValid()
             if iCloudSyncEnabled && !isApplyingCloudSnapshot {
                 scheduleICloudSync()
@@ -512,32 +804,47 @@ final class ClipFlowStore: ObservableObject {
     let integrations = ClipFlowCatalog.integrations
     let maxItems = 80
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
     private let fileManager = FileManager.default
+    private let persistenceQueue = DispatchQueue(label: "ClipFlow.persistence", qos: .utility)
+    private let imagePreviewCache = NSCache<NSString, NSImage>()
     private let historyURL: URL
     private let imagesDirectoryURL: URL
     private let cloudSyncCoordinator: ClipFlowCloudSyncCoordinator
+    private var pendingPersistWorkItem: DispatchWorkItem?
     private var localSyncTombstones: [UUID: Date] = [:] {
         didSet { persistLocalSyncTombstones() }
     }
     private var cloudSyncLoopTask: Task<Void, Never>?
     private var pendingCloudSyncTask: Task<Void, Never>?
+    private let cloudSyncWorker = ClipFlowCloudSyncWorker()
+    private var activeCloudSyncTask: Task<Void, Never>?
+    private var cloudSyncGeneration = 0
+    private var syncRequestedWhileRunning = false
     private var isApplyingCloudSnapshot = false
+    private var itemsRevision = 0
 
-    private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+    init(storageDirectory: URL? = nil, defaults: UserDefaults = .standard, syncDirectory: URL? = nil) {
+        self.defaults = defaults
+        appearanceMode = ClipFlowAppearance(rawValue: defaults.string(forKey: Keys.appearanceMode) ?? "") ?? .system
+        quickPasteShortcut = ClipFlowShortcut.load(from: defaults)
+        let appSupport = storageDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("ClipFlow", isDirectory: true) ?? URL(fileURLWithPath: NSTemporaryDirectory())
 
         try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
         historyURL = appSupport.appendingPathComponent("history.json")
         imagesDirectoryURL = appSupport.appendingPathComponent("images", isDirectory: true)
         try? FileManager.default.createDirectory(at: imagesDirectoryURL, withIntermediateDirectories: true)
-        cloudSyncCoordinator = ClipFlowCloudSyncCoordinator(localImagesDirectoryURL: imagesDirectoryURL)
+        imagePreviewCache.countLimit = maxItems + 20
+        imagePreviewCache.totalCostLimit = 64 * 1024 * 1024
+        cloudSyncCoordinator = ClipFlowCloudSyncCoordinator(localImagesDirectoryURL: imagesDirectoryURL, documentsDirectoryURL: syncDirectory)
 
         capturePaused = defaults.object(forKey: Keys.capturePaused) as? Bool ?? false
         autoProtectSecrets = defaults.object(forKey: Keys.autoProtectSecrets) as? Bool ?? true
+        sensitiveAutoExpireEnabled = defaults.object(forKey: Keys.sensitiveAutoExpireEnabled) as? Bool ?? true
         launchAtLogin = Self.currentLaunchAtLoginState()
         launchToStatusBar = defaults.object(forKey: Keys.launchToStatusBar) as? Bool ?? false
+        menuQuickPasteModeEnabled = defaults.object(forKey: Keys.menuQuickPasteModeEnabled) as? Bool ?? true
         iCloudSyncEnabled = defaults.object(forKey: Keys.iCloudSyncEnabled) as? Bool ?? false
         excludedBundleIDs = defaults.stringArray(forKey: Keys.excludedBundleIDs) ?? Self.defaultExcludedBundleIDs
         iCloudLastSyncedAt = defaults.object(forKey: Keys.iCloudLastSyncedAt) as? Date
@@ -545,11 +852,56 @@ final class ClipFlowStore: ObservableObject {
         items = loadItems()
         cleanupOrphanedImageFiles()
         selectedItemID = items.first?.id
+    }
 
+    func start() {
+        schedulePersistItems()
+        runStartupPermissionCheck()
         if iCloudSyncEnabled {
             Task { [weak self] in
                 self?.enableICloudSyncIfPossible(announceResult: false)
             }
+        }
+    }
+
+    @discardableResult
+    func setQuickPasteShortcut(_ shortcut: ClipFlowShortcut) -> Bool {
+        if let error = shortcut.validationError {
+            shortcutError = error
+            return false
+        }
+        guard let registerShortcut else {
+            shortcutError = "快捷键服务尚未就绪，请重启应用后重试。"
+            return false
+        }
+        if let error = registerShortcut(shortcut) {
+            shortcutError = error
+            return false
+        }
+        quickPasteShortcut = shortcut
+        defaults.set(try? JSONEncoder().encode(shortcut), forKey: ClipFlowShortcut.defaultsKey)
+        shortcutError = nil
+        lastCaptureStatus = "快捷键已设为 \(shortcut.displayName)"
+        return true
+    }
+
+    func beginShortcutRecording() -> Bool {
+        guard !isRecordingShortcut else { return false }
+        guard registerShortcut != nil, suspendShortcut != nil else {
+            shortcutError = "快捷键服务尚未就绪，请重启应用后重试。"
+            return false
+        }
+        suspendShortcut?()
+        isRecordingShortcut = true
+        shortcutError = nil
+        return true
+    }
+
+    func endShortcutRecording() {
+        guard isRecordingShortcut else { return }
+        isRecordingShortcut = false
+        if let error = registerShortcut?(quickPasteShortcut) {
+            shortcutError = "快捷键未能恢复：\(error)"
         }
     }
 
@@ -624,7 +976,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     func item(withID id: UUID) -> ClipboardItem? {
-        items.first { $0.id == id }
+        items.first { $0.id == id && !$0.isExpired() }
     }
 
     func select(_ item: ClipboardItem) {
@@ -658,24 +1010,23 @@ final class ClipFlowStore: ObservableObject {
     }
 
     func ingestCopiedText(_ text: String, sourceApp: String, sourceBundleID: String?) {
-        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return }
-        guard normalized.count <= 20_000 else {
+        guard !text.isEmpty else { return }
+        guard text.count <= 20_000 else {
             lastCaptureStatus = "已跳过过大的剪贴内容"
             return
         }
 
         purgeExpired()
 
-        let existingIndex = items.firstIndex { $0.fullText == normalized }
+        let existingIndex = items.firstIndex { !$0.isImage && $0.fullText == text }
         let existing = existingIndex.map { items.remove(at: $0) }
         let item = ClipboardClassifier.makeItem(
-            text: normalized,
+            text: text,
             sourceApp: sourceApp,
             sourceBundleID: sourceBundleID,
             autoProtectSecrets: autoProtectSecrets,
             existingItem: existing
-        )
+        ).applyingExpirationPolicy(enabled: sensitiveAutoExpireEnabled)
 
         items.insert(item, at: 0)
         trimItemsToLimit()
@@ -712,6 +1063,8 @@ final class ClipFlowStore: ObservableObject {
             return
         }
 
+        imagePreviewCache.removeObject(forKey: imageFilename as NSString)
+
         if let existing, existing.imageFilename != imageFilename {
             removeStoredAssetIfNeeded(for: existing)
         }
@@ -723,7 +1076,7 @@ final class ClipFlowStore: ObservableObject {
             sourceApp: sourceApp,
             sourceBundleID: sourceBundleID,
             existingItem: existing
-        )
+        ).applyingExpirationPolicy(enabled: sensitiveAutoExpireEnabled)
 
         items.insert(item, at: 0)
         trimItemsToLimit()
@@ -772,10 +1125,19 @@ final class ClipFlowStore: ObservableObject {
         lastCaptureStatus = enabled ? "启动后将直接驻留状态栏" : "启动后将显示主窗口"
     }
 
+    func toggleMenuQuickPasteMode() {
+        menuQuickPasteModeEnabled.toggle()
+        lastCaptureStatus = menuQuickPasteModeEnabled
+            ? "已开启快贴模式，双击最近条目会直接粘贴"
+            : "已关闭快贴模式，左键点击最近条目会复制到剪贴板"
+    }
+
     func setICloudSyncEnabled(_ enabled: Bool) {
+        cloudSyncGeneration += 1
         if enabled {
             iCloudSyncEnabled = true
             defaults.set(true, forKey: Keys.iCloudSyncEnabled)
+            refreshPermissionReport(showEvenIfHealthy: false, promptForAccessibility: false)
             Task { [weak self] in
                 self?.enableICloudSyncIfPossible(announceResult: true)
             }
@@ -785,8 +1147,22 @@ final class ClipFlowStore: ObservableObject {
             iCloudSyncEnabled = false
             defaults.set(false, forKey: Keys.iCloudSyncEnabled)
             iCloudSyncPhase = .disabled
-            lastCaptureStatus = "已关闭 iCloud 同步"
+            lastCaptureStatus = "已关闭文稿目录同步"
         }
+    }
+
+    func dismissStartupPermissionReport() {
+        startupPermissionReport = nil
+    }
+
+    func rerunPermissionCheck() {
+        refreshPermissionReport(showEvenIfHealthy: true, promptForAccessibility: false)
+    }
+
+    func requestAccessibilityPermissionPrompt() {
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        refreshPermissionReport(showEvenIfHealthy: true, promptForAccessibility: false)
     }
 
     func toggleReveal(_ itemID: UUID) {
@@ -804,6 +1180,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     func displaySnippet(for item: ClipboardItem) -> String {
+        guard !item.isExpired() else { return "内容已过期" }
         if item.isImage && !isRevealed(item) {
             return "图片预览已隐藏"
         }
@@ -811,6 +1188,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     func displayFullText(for item: ClipboardItem) -> String {
+        guard !item.isExpired() else { return "内容已过期" }
         if item.isImage && !isRevealed(item) {
             return "图片预览已隐藏"
         }
@@ -827,30 +1205,42 @@ final class ClipFlowStore: ObservableObject {
 
     func imageData(for item: ClipboardItem) -> Data? {
         guard let imageURL = imageURL(for: item) else { return nil }
-        return try? Data(contentsOf: imageURL)
+        return try? Data(contentsOf: imageURL, options: [.mappedIfSafe])
     }
 
-    func purgeExpired() {
-        let now = Date()
-        let expiredItems = items.filter { item in
-            if item.pinned {
-                return false
-            }
+    func imagePreview(for item: ClipboardItem) -> NSImage? {
+        guard !item.isExpired() else { return nil }
+        guard let imageFilename = item.imageFilename else { return nil }
 
-            guard let expiresAt = item.expiresAt else {
-                return false
-            }
-
-            return expiresAt <= now
+        let cacheKey = imageFilename as NSString
+        if let cachedImage = imagePreviewCache.object(forKey: cacheKey) {
+            return cachedImage
         }
 
-        let before = items.count
+        guard let imageURL = imageURL(for: item),
+              let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
+              let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 640,
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary) else {
+            return nil
+        }
+
+        let image = NSImage(cgImage: thumbnail, size: .zero)
+        imagePreviewCache.setObject(image, forKey: cacheKey, cost: thumbnail.bytesPerRow * thumbnail.height)
+        return image
+    }
+
+    func purgeExpired(at now: Date = Date()) {
+        let expiredItems = items.filter { $0.isExpired(at: now) }
+        guard !expiredItems.isEmpty else { return }
+        let expiredIDs = Set(expiredItems.map(\.id))
         expiredItems.forEach(removeStoredAssetIfNeeded)
-        items.removeAll { expiredItems.contains($0) }
-
-        if items.count < before {
-            lastCaptureStatus = "已清理过期的敏感内容"
-        }
+        items.removeAll { expiredIDs.contains($0.id) }
+        revealedItemIDs.subtract(expiredIDs)
+        lastCaptureStatus = "已清理过期的敏感内容"
     }
 
     func hudItems(matching query: String) -> [ClipboardItem] {
@@ -887,9 +1277,9 @@ final class ClipFlowStore: ObservableObject {
         case .disabled:
             return "未启用"
         case .syncing:
-            return "同步中"
+            return "整理中"
         case .active:
-            return "已连接"
+            return "已启用"
         case .unavailable:
             return "不可用"
         case .failed:
@@ -913,23 +1303,23 @@ final class ClipFlowStore: ObservableObject {
     var iCloudSyncDetail: String {
         switch iCloudSyncPhase {
         case .disabled:
-            return "仅同步普通文本与图片历史，受保护内容会继续保留在本地。"
+            return "将普通文本与图片历史镜像到“文稿/ClipFlow”。如果系统已开启 iCloud Drive 的“桌面与文稿文件夹”，这些内容会随系统同步。"
         case .syncing:
-            return "正在合并本机与 iCloud 历史内容。"
+            return "正在合并本机与“文稿/ClipFlow”中的历史内容。"
         case .active:
             if let iCloudLastSyncedAt {
-                return "已连接 iCloud，上次同步于 \(Self.syncFormatter.string(from: iCloudLastSyncedAt))。受保护内容不会上传。"
+                return "已启用文稿目录同步，上次整理于 \(Self.syncFormatter.string(from: iCloudLastSyncedAt))。受保护内容不会写入“文稿/ClipFlow”。"
             }
-            return "已连接 iCloud，普通历史内容会在设备间同步。"
+            return "已启用文稿目录同步。若系统已开启文稿同步，普通历史内容会随系统在设备间同步。"
         case .unavailable:
-            return cloudSyncCoordinator.resolveAvailabilityDescription() ?? "当前无法访问 iCloud 容器。"
+            return cloudSyncCoordinator.resolveAvailabilityDescription() ?? "当前无法访问“文稿/ClipFlow”。"
         case .failed(let message):
             return message
         }
     }
 
     private var sortedItems: [ClipboardItem] {
-        sortItems(items)
+        sortItems(items.filter { !$0.isExpired() })
     }
 
     private func masked(text: String) -> String {
@@ -970,42 +1360,74 @@ final class ClipFlowStore: ObservableObject {
     }
 
     private func loadItems() -> [ClipboardItem] {
-        guard let data = try? Data(contentsOf: historyURL) else {
-            return []
-        }
-
         do {
+            let data: Data
+            do {
+                data = try Data(contentsOf: historyURL)
+            } catch CocoaError.fileReadNoSuchFile {
+                return []
+            }
             let decoded = try JSONDecoder().decode([ClipboardItem].self, from: data)
-            return decoded.filter {
+            return decoded.map { $0.applyingExpirationPolicy(enabled: sensitiveAutoExpireEnabled) }.filter {
                 if $0.isImage, let imageURL = imageURL(for: $0), !fileManager.fileExists(atPath: imageURL.path) {
                     return false
                 }
-                guard let expiresAt = $0.expiresAt else { return true }
-                return expiresAt > Date() || $0.pinned
+                return !$0.isExpired()
             }
         } catch {
+            historyLoadError = "历史文件读取失败，已保留原文件和图片。新记录暂存于内存，请恢复历史文件后重启应用。"
+            lastCaptureStatus = historyLoadError ?? "历史文件读取失败"
             return []
         }
     }
 
-    private func persistItems() {
+    private func schedulePersistItems() {
+        guard historyLoadError == nil else { return }
+        let destinationURL = historyURL
+
+        pendingPersistWorkItem?.cancel()
+
+        let data: Data
         do {
-            let data = try JSONEncoder().encode(items)
-            try data.write(to: historyURL, options: [.atomic])
+            data = try JSONEncoder().encode(items)
         } catch {
             lastCaptureStatus = "保存历史记录失败"
+            return
         }
+
+        let writer: @Sendable () -> Void = {
+            do {
+                try data.write(to: destinationURL, options: [.atomic])
+            } catch {
+                Task { @MainActor in
+                    ClipFlowStore.shared.lastCaptureStatus = "保存历史记录失败"
+                }
+            }
+        }
+
+        let workItem = DispatchWorkItem(qos: .utility, flags: .assignCurrentContext, block: writer)
+
+        pendingPersistWorkItem = workItem
+        persistenceQueue.asyncAfter(deadline: .now() + 0.12, execute: workItem)
     }
 
     private func trimItemsToLimit() {
         guard items.count > maxItems else { return }
-        let overflow = Array(items.dropFirst(maxItems))
+        let ordered = sortItems(items)
+        let retained = ordered.filter(\.pinned) + ordered.filter { !$0.pinned }
+            .prefix(max(0, maxItems - ordered.filter(\.pinned).count))
+        let retainedIDs = Set(retained.map(\.id))
+        let overflow = items.filter { !retainedIDs.contains($0.id) }
         rememberCloudDeletion(for: overflow)
         overflow.forEach(removeStoredAssetIfNeeded)
-        items = Array(items.prefix(maxItems))
+        items = retained
     }
 
     private func removeStoredAssetIfNeeded(for item: ClipboardItem) {
+        if let imageFilename = item.imageFilename {
+            imagePreviewCache.removeObject(forKey: imageFilename as NSString)
+        }
+
         guard let imageURL = imageURL(for: item), fileManager.fileExists(atPath: imageURL.path) else {
             return
         }
@@ -1014,6 +1436,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     private func cleanupOrphanedImageFiles() {
+        guard historyLoadError == nil else { return }
         guard let fileURLs = try? fileManager.contentsOfDirectory(at: imagesDirectoryURL, includingPropertiesForKeys: nil) else {
             return
         }
@@ -1025,7 +1448,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     private func isEligibleForICloudSync(_ item: ClipboardItem) -> Bool {
-        !item.localOnly && !item.autoExpire
+        !item.isSensitive
     }
 
     private func rememberCloudDeletion(for removedItems: [ClipboardItem]) {
@@ -1036,6 +1459,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     private func enableICloudSyncIfPossible(announceResult: Bool) {
+        guard iCloudSyncEnabled, historyLoadError == nil else { return }
         startCloudSyncLoop()
         runICloudSync(announceSuccess: announceResult)
     }
@@ -1044,7 +1468,12 @@ final class ClipFlowStore: ObservableObject {
         cloudSyncLoopTask?.cancel()
         cloudSyncLoopTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(25))
+                do {
+                    try await Task.sleep(for: .seconds(25))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
                 self?.refreshICloudSyncIfNeeded()
             }
         }
@@ -1058,40 +1487,86 @@ final class ClipFlowStore: ObservableObject {
     private func scheduleICloudSync() {
         pendingCloudSyncTask?.cancel()
         pendingCloudSyncTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(900))
+            do {
+                try await Task.sleep(for: .milliseconds(900))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
             self?.refreshICloudSyncIfNeeded()
         }
     }
 
     private func runICloudSync(announceSuccess: Bool) {
-        guard iCloudSyncEnabled else { return }
+        guard iCloudSyncEnabled, historyLoadError == nil else { return }
+        guard activeCloudSyncTask == nil else {
+            syncRequestedWhileRunning = true
+            return
+        }
 
         iCloudSyncPhase = .syncing
-
-        do {
-            let result = try cloudSyncCoordinator.synchronize(
-                localItems: items,
-                tombstones: localSyncTombstones,
-                maxItems: maxItems
-            )
-
-            applyCloudItems(result.localItems)
-            localSyncTombstones = result.tombstones
-            iCloudLastSyncedAt = Date()
-            defaults.set(iCloudLastSyncedAt, forKey: Keys.iCloudLastSyncedAt)
-            iCloudSyncPhase = .active
-
-            if announceSuccess {
-                lastCaptureStatus = "已开启 iCloud 同步"
+        let snapshot = items
+        let tombstones = localSyncTombstones
+        let revision = itemsRevision
+        let generation = cloudSyncGeneration
+        let coordinator = cloudSyncCoordinator
+        let worker = cloudSyncWorker
+        let limit = maxItems
+        activeCloudSyncTask = Task { [weak self] in
+            let result: Result<ClipFlowCloudSyncResult, Error>
+            do {
+                result = .success(try await worker.synchronize(
+                    using: coordinator, localItems: snapshot, tombstones: tombstones, maxItems: limit
+                ))
+            } catch {
+                result = .failure(error)
             }
-        } catch let error as ClipFlowCloudSyncError {
-            handleICloudSyncFailure(error)
-        } catch {
-            handleICloudSyncFailure(.writeFailed)
+            guard let self else { return }
+            self.activeCloudSyncTask = nil
+            let changedDuringSync = self.itemsRevision != revision
+            let needsFollowUp = self.syncRequestedWhileRunning || changedDuringSync
+                || self.cloudSyncGeneration != generation
+            self.syncRequestedWhileRunning = false
+            guard self.iCloudSyncEnabled else {
+                self.cleanupOrphanedImageFiles()
+                return
+            }
+            guard self.cloudSyncGeneration == generation else {
+                self.cleanupOrphanedImageFiles()
+                self.scheduleICloudSync()
+                return
+            }
+            switch result {
+            case .success(let result):
+                // A copy/delete/pin performed during disk I/O must not be overwritten
+                // by the older snapshot. Reconcile it in the next serialized run.
+                if !changedDuringSync {
+                    self.applyCloudItems(result.localItems)
+                    self.localSyncTombstones = result.tombstones
+                }
+                // A background download may have recreated an asset deleted
+                // during this run, even when its stale snapshot is discarded.
+                self.cleanupOrphanedImageFiles()
+                self.iCloudLastSyncedAt = Date()
+                self.defaults.set(self.iCloudLastSyncedAt, forKey: Keys.iCloudLastSyncedAt)
+                self.iCloudSyncPhase = .active
+                if announceSuccess {
+                    self.lastCaptureStatus = "已开启文稿目录同步"
+                }
+                if needsFollowUp { self.scheduleICloudSync() }
+            case .failure(let error):
+                if changedDuringSync {
+                    self.cleanupOrphanedImageFiles()
+                    self.scheduleICloudSync()
+                } else {
+                    self.handleICloudSyncFailure((error as? ClipFlowCloudSyncError) ?? .writeFailed)
+                }
+            }
         }
     }
 
     private func handleICloudSyncFailure(_ error: ClipFlowCloudSyncError) {
+        cloudSyncGeneration += 1
         pendingCloudSyncTask?.cancel()
         cloudSyncLoopTask?.cancel()
         iCloudSyncEnabled = false
@@ -1100,10 +1575,10 @@ final class ClipFlowStore: ObservableObject {
         switch error {
         case .unavailable:
             iCloudSyncPhase = .unavailable
-            lastCaptureStatus = error.errorDescription ?? "iCloud 不可用"
+            lastCaptureStatus = cloudSyncCoordinator.resolveAvailabilityDescription() ?? "无法访问“文稿”目录"
         case .invalidState, .writeFailed:
-            iCloudSyncPhase = .failed(error.errorDescription ?? "iCloud 同步失败")
-            lastCaptureStatus = error.errorDescription ?? "iCloud 同步失败"
+            iCloudSyncPhase = .failed(error.errorDescription ?? "文稿目录同步失败")
+            lastCaptureStatus = error.errorDescription ?? "文稿目录同步失败"
         }
     }
 
@@ -1111,7 +1586,7 @@ final class ClipFlowStore: ObservableObject {
         let preservedLocalItems = items.filter { !isEligibleForICloudSync($0) }
         var combinedByID = Dictionary(uniqueKeysWithValues: preservedLocalItems.map { ($0.id, $0) })
 
-        for item in cloudItems {
+        for item in cloudItems where combinedByID[item.id] == nil {
             combinedByID[item.id] = item
         }
 
@@ -1138,11 +1613,93 @@ final class ClipFlowStore: ObservableObject {
         defaults.set(data, forKey: Keys.iCloudSyncTombstones)
     }
 
+    private func runStartupPermissionCheck() {
+        refreshPermissionReport(showEvenIfHealthy: false, promptForAccessibility: true)
+    }
+
+    private func refreshPermissionReport(showEvenIfHealthy: Bool, promptForAccessibility: Bool) {
+        let report = buildPermissionReport(promptForAccessibility: promptForAccessibility)
+
+        if report.needsAttention || showEvenIfHealthy {
+            startupPermissionReport = report
+        } else {
+            startupPermissionReport = nil
+            lastCaptureStatus = "启动权限检查完成"
+        }
+    }
+
+    private func buildPermissionReport(promptForAccessibility: Bool) -> ClipFlowPermissionReport {
+        let accessibilityGranted = checkAccessibilityPermission(promptIfNeeded: promptForAccessibility)
+        let accessibilityItem = ClipFlowPermissionItem(
+            title: "辅助功能",
+            detail: accessibilityGranted
+                ? "已授权。ClipFlow 可以在回填剪贴板后自动触发粘贴。"
+                : "未授权。没有这个权限时，ClipFlow 只能保存历史，无法自动把内容粘贴回输入框。",
+            icon: "figure.wave.circle",
+            status: accessibilityGranted ? .granted : .needsAttention
+        )
+
+        let documentsAccessGranted = checkDocumentsFolderAccessIfNeeded()
+        let documentsItem = ClipFlowPermissionItem(
+            title: "文稿目录",
+            detail: iCloudSyncEnabled
+                ? (documentsAccessGranted
+                    ? "已可读写“文稿/ClipFlow”，普通历史内容会镜像到这个文件夹。"
+                    : "文稿目录同步已开启，但当前还不能稳定读写“文稿/ClipFlow”。如系统弹出权限提示，请选择允许。")
+                : "当前未开启文稿目录同步，因此不需要检查这个权限。",
+            icon: "folder.badge.gearshape",
+            status: iCloudSyncEnabled ? (documentsAccessGranted ? .granted : .needsAttention) : .notRequired
+        )
+
+        let items = [accessibilityItem, documentsItem]
+        let hasIssue = items.contains { $0.status == .needsAttention }
+
+        return ClipFlowPermissionReport(
+            title: hasIssue ? "启动时发现权限未完整" : "权限检查完成",
+            message: hasIssue
+                ? "ClipFlow 已在启动时完成权限检测。部分系统权限还未就绪，相关功能可能会受影响。"
+                : "ClipFlow 已完成本次启动权限检测，当前核心权限状态正常。",
+            items: items
+        )
+    }
+
+    private func checkAccessibilityPermission(promptIfNeeded: Bool) -> Bool {
+        if promptIfNeeded {
+            let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+            return AXIsProcessTrustedWithOptions(options)
+        }
+
+        return AXIsProcessTrusted()
+    }
+
+    private func checkDocumentsFolderAccessIfNeeded() -> Bool {
+        guard iCloudSyncEnabled else { return true }
+        guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return false
+        }
+
+        let clipFlowDirectory = documentsURL.appendingPathComponent("ClipFlow", isDirectory: true)
+        let probeURL = clipFlowDirectory.appendingPathComponent(".permission-probe")
+
+        do {
+            try fileManager.createDirectory(at: clipFlowDirectory, withIntermediateDirectories: true)
+            let probeData = Data("clipflow".utf8)
+            try probeData.write(to: probeURL, options: [.atomic])
+            try? fileManager.removeItem(at: probeURL)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     private enum Keys {
+        static let appearanceMode = "appearanceMode"
         static let capturePaused = "capturePaused"
         static let autoProtectSecrets = "autoProtectSecrets"
+        static let sensitiveAutoExpireEnabled = "sensitiveAutoExpireEnabled"
         static let launchAtLogin = "launchAtLogin"
         static let launchToStatusBar = "launchToStatusBar"
+        static let menuQuickPasteModeEnabled = "menuQuickPasteModeEnabled"
         static let iCloudSyncEnabled = "iCloudSyncEnabled"
         static let iCloudLastSyncedAt = "iCloudLastSyncedAt"
         static let iCloudSyncTombstones = "iCloudSyncTombstones"
@@ -1191,7 +1748,7 @@ enum ClipFlowCatalog {
         IntegrationPill(
             title: "全局呼出",
             icon: "command.circle",
-            detail: "按下 Option + V，在指针附近呼出快速粘贴面板。",
+            detail: "用全局快捷键在指针附近呼出快速粘贴面板，可在设置中自定义组合。",
             tint: ClipCategory.quickPaste.tint
         ),
         IntegrationPill(

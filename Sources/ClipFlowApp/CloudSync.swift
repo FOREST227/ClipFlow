@@ -27,7 +27,7 @@ struct ClipFlowCloudSyncState: Codable {
     }
 }
 
-struct ClipFlowCloudSyncResult {
+struct ClipFlowCloudSyncResult: Sendable {
     let cloudItems: [ClipboardItem]
     let localItems: [ClipboardItem]
     let tombstones: [UUID: Date]
@@ -41,23 +41,25 @@ enum ClipFlowCloudSyncError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable:
-            return "当前无法访问 iCloud，请确认已登录 iCloud，并为 App 启用 iCloud 能力。"
+            return "当前无法访问“文稿/ClipFlow”，请确认已允许 ClipFlow 读写“文稿”文件夹。"
         case .invalidState:
-            return "iCloud 历史数据不可读取。"
+            return "“文稿/ClipFlow”中的历史数据不可读取。"
         case .writeFailed:
-            return "写入 iCloud 历史失败。"
+            return "写入“文稿/ClipFlow”失败。"
         }
     }
 }
 
-struct ClipFlowCloudSyncCoordinator {
-    private let fileManager = FileManager.default
+struct ClipFlowCloudSyncCoordinator: Sendable {
+    private var fileManager: FileManager { .default }
     private let localImagesDirectoryURL: URL
-    private let containerIdentifier: String?
+    private let documentsFolderName: String
+    private let documentsDirectoryURL: URL?
 
-    init(localImagesDirectoryURL: URL, containerIdentifier: String? = nil) {
+    init(localImagesDirectoryURL: URL, documentsFolderName: String = "ClipFlow", documentsDirectoryURL: URL? = nil) {
         self.localImagesDirectoryURL = localImagesDirectoryURL
-        self.containerIdentifier = containerIdentifier
+        self.documentsFolderName = documentsFolderName
+        self.documentsDirectoryURL = documentsDirectoryURL
     }
 
     func synchronize(
@@ -71,7 +73,7 @@ struct ClipFlowCloudSyncCoordinator {
         let localSyncedItems = localItems.filter(isEligibleForCloudSync(_:))
 
         var mergedByID: [UUID: ClipboardItem] = [:]
-        remoteState.items.forEach { mergedByID[$0.id] = $0 }
+        remoteState.items.filter(isEligibleForCloudSync(_:)).forEach { mergedByID[$0.id] = $0 }
 
         for item in localSyncedItems {
             guard shouldKeep(item, tombstones: mergedTombstones) else { continue }
@@ -90,7 +92,8 @@ struct ClipFlowCloudSyncCoordinator {
             .sorted(by: sortItems(lhs:rhs:))
 
         if mergedItems.count > maxItems {
-            mergedItems = Array(mergedItems.prefix(maxItems))
+            let pinned = mergedItems.filter(\.pinned)
+            mergedItems = pinned + mergedItems.filter { !$0.pinned }.prefix(max(0, maxItems - pinned.count))
         }
 
         for item in mergedItems where item.isImage {
@@ -101,12 +104,17 @@ struct ClipFlowCloudSyncCoordinator {
             ensureLocalAssetIfNeeded(for: $0, cloudImagesDirectoryURL: locations.imagesURL)
         }
 
-        let stateToWrite = ClipFlowCloudSyncState(
-            updatedAt: Date(),
-            items: mergedItems,
-            tombstones: mergedTombstones
-        )
-        try persistRemoteStateIfNeeded(stateToWrite, to: locations.historyURL)
+        if remoteState.items != mergedItems || remoteState.tombstones != mergedTombstones {
+            let stateToWrite = ClipFlowCloudSyncState(
+                updatedAt: Date(),
+                items: mergedItems,
+                tombstones: mergedTombstones
+            )
+            try persistRemoteStateIfNeeded(stateToWrite, to: locations.historyURL)
+        }
+        // iCloud may deliver an image before the history that references it.
+        // A single device's snapshot cannot prove a remote asset is orphaned.
+        // Only local assets are garbage-collected until coordinated remote GC exists.
 
         return ClipFlowCloudSyncResult(
             cloudItems: mergedItems,
@@ -116,33 +124,29 @@ struct ClipFlowCloudSyncCoordinator {
     }
 
     func resolveAvailabilityDescription() -> String? {
-        guard fileManager.ubiquityIdentityToken != nil else {
-            return "未检测到可用的 iCloud 账号"
+        do {
+            _ = try resolveLocations()
+            return nil
+        } catch {
+            return "无法访问“文稿”目录，请在系统设置的“隐私与安全性”里允许 ClipFlow 读写文稿文件夹。"
         }
-
-        guard fileManager.url(forUbiquityContainerIdentifier: containerIdentifier) != nil else {
-            return "当前构建未启用 iCloud 容器"
-        }
-
-        return nil
     }
 
     private func resolveLocations() throws -> ClipFlowCloudSyncLocations {
-        guard fileManager.ubiquityIdentityToken != nil else {
+        guard let documentsURL = documentsDirectoryURL ?? fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
             throw ClipFlowCloudSyncError.unavailable
         }
 
-        guard let containerURL = fileManager.url(forUbiquityContainerIdentifier: containerIdentifier) else {
-            throw ClipFlowCloudSyncError.unavailable
-        }
-
-        let documentsURL = containerURL.appendingPathComponent("Documents", isDirectory: true)
-        let rootURL = documentsURL.appendingPathComponent("ClipFlow", isDirectory: true)
+        let rootURL = documentsURL.appendingPathComponent(documentsFolderName, isDirectory: true)
         let imagesURL = rootURL.appendingPathComponent("images", isDirectory: true)
-        let historyURL = rootURL.appendingPathComponent("history-sync.json")
+        let historyURL = rootURL.appendingPathComponent("history.json")
 
-        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: imagesURL, withIntermediateDirectories: true)
+        do {
+            try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: imagesURL, withIntermediateDirectories: true)
+        } catch {
+            throw ClipFlowCloudSyncError.unavailable
+        }
         return ClipFlowCloudSyncLocations(historyURL: historyURL, imagesURL: imagesURL)
     }
 
@@ -210,7 +214,7 @@ struct ClipFlowCloudSyncCoordinator {
     }
 
     private func isEligibleForCloudSync(_ item: ClipboardItem) -> Bool {
-        !item.localOnly && !item.autoExpire
+        !item.isSensitive
     }
 
     private func prepareCloudAssetIfNeeded(for item: ClipboardItem, cloudImagesDirectoryURL: URL) throws {
@@ -266,6 +270,18 @@ struct ClipFlowCloudSyncCoordinator {
         if fileManager.isUbiquitousItem(at: url) {
             try? fileManager.startDownloadingUbiquitousItem(at: url)
         }
+    }
+}
+
+// File and image work runs off the main actor, serialized across sync requests.
+actor ClipFlowCloudSyncWorker {
+    func synchronize(
+        using coordinator: ClipFlowCloudSyncCoordinator,
+        localItems: [ClipboardItem],
+        tombstones: [UUID: Date],
+        maxItems: Int
+    ) throws -> ClipFlowCloudSyncResult {
+        try coordinator.synchronize(localItems: localItems, tombstones: tombstones, maxItems: maxItems)
     }
 }
 

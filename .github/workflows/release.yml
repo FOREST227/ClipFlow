@@ -36,6 +36,9 @@ jobs:
 
       - name: Build app and DMG
         shell: zsh
+        env:
+          # Hosted CI has no access to this Mac's persistent private key.
+          CLIPFLOW_ADHOC_SIGN: "1"
         run: zsh scripts/build_release_dmg.sh "${TAG_NAME}"
 
       - name: Ensure GitHub CLI is available

@@ -14,6 +14,10 @@ ICNS_PATH="$APP_DIR/Contents/Resources/$ICON_NAME.icns"
 APP_VERSION="${CLIPFLOW_VERSION:-0.1.0}"
 BUILD_NUMBER="${CLIPFLOW_BUILD_NUMBER:-1}"
 
+# Fail before rebuilding if the fixed local signing identity is unavailable.
+zsh "$ROOT_DIR/scripts/sign_app.sh" --check
+cd "$ROOT_DIR"
+
 swift "$ROOT_DIR/scripts/render_icon.swift" "$ICON_PNG"
 
 swift build -c release --product "$PRODUCT_NAME"
@@ -76,7 +80,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$APP_DIR" >/dev/null
+zsh "$ROOT_DIR/scripts/sign_app.sh" "$APP_DIR"
 
 echo "Built app bundle at:"
 echo "$APP_DIR"

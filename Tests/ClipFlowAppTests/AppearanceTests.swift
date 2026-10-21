@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import XCTest
 @testable import ClipFlowApp
 
@@ -40,6 +41,44 @@ final class AppearanceTests: XCTestCase {
         XCTAssertFalse(AppearanceTransition.needsCrossfade(from: manual, to: application.effectiveAppearance))
     }
 
+    func testSwitchingAppearanceDoesNotSynchronouslyRasterizeWindow() throws {
+        try XCTSkipIf(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        let application = NSApplication.shared
+        let original = application.appearance
+        let controller = NSViewController()
+        let content = AppearanceRasterizationSpy(frame: NSRect(x: 0, y: 0, width: 500, height: 660))
+        controller.view = content
+        let window = NSWindow(contentViewController: controller)
+        window.isReleasedWhenClosed = false
+        defer {
+            window.close()
+            application.appearance = original
+        }
+        content.wantsLayer = true
+        window.orderFront(nil)
+        window.displayIfNeeded()
+        XCTAssertNotNil(content.layer)
+        let transition = AppearanceTransition()
+        transition.apply(.light)
+        let initialCount = content.snapshotRequests
+        let start = CACurrentMediaTime()
+        transition.apply(.dark)
+        print("Appearance apply synchronous time: \(CACurrentMediaTime() - start)s")
+        XCTAssertEqual(content.snapshotRequests, initialCount,
+            "Appearance switching must not rasterize the window on the input event thread")
+        XCTAssertEqual(application.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
+        XCTAssertNotNil(content.layer?.animation(forKey: AppearanceTransition.animationKey))
+        transition.apply(.light)
+        transition.apply(.system)
+        XCTAssertNil(application.appearance)
+        let systemIsDark = application.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        transition.apply(systemIsDark ? .dark : .light)
+        transition.apply(.system)
+        XCTAssertNil(content.layer?.animation(forKey: AppearanceTransition.animationKey),
+            "Matching System appearance must remove any in-flight fade without starting another")
+        XCTAssertEqual(content.snapshotRequests, initialCount)
+    }
+
     func testAppearancePersistsAndSystemModeClearsOverride() throws {
         let suite = "ClipFlowAppearanceTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -72,5 +111,14 @@ final class AppearanceTests: XCTestCase {
         defaults.set("unknown", forKey: "appearanceMode")
         let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
         XCTAssertEqual(store.appearanceMode, .system)
+    }
+}
+
+@MainActor
+private final class AppearanceRasterizationSpy: NSView {
+    var snapshotRequests = 0
+    override func bitmapImageRepForCachingDisplay(in rect: NSRect) -> NSBitmapImageRep? {
+        snapshotRequests += 1
+        return super.bitmapImageRepForCachingDisplay(in: rect)
     }
 }

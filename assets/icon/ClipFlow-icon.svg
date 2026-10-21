@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 256 256" role="img"><title>ClipFlow 流线 · 浅色底板与暖金蓝色渐变流线</title>
+<defs>
+<linearGradient id="surface" x1="16" y1="16" x2="240" y2="240" gradientUnits="userSpaceOnUse"><stop stop-color="#FAF2E6"/><stop offset="0.52" stop-color="#EDF5FC"/><stop offset="1" stop-color="#F2EDFA"/></linearGradient>
+<linearGradient id="flowShared" x1="56" y1="56" x2="184" y2="200" gradientUnits="userSpaceOnUse"><stop stop-color="#D7AF7C"/><stop offset="0.4" stop-color="#B1B6D5"/><stop offset="0.72" stop-color="#819FD5"/><stop offset="1" stop-color="#5894DE"/></linearGradient>
+
+<path id="flow0" d="M64 176A8 8 0 0 1 56 168V104A48 48 0 0 1 104 56H176A8 8 0 0 1 184 64V72A8 8 0 0 1 176 80H104A24 24 0 0 0 80 104V168A8 8 0 0 1 72 176Z"/>
+<path id="flow1" d="M112 200A8 8 0 0 1 104 192V144A40 40 0 0 1 144 104H176A8 8 0 0 1 184 112V120A8 8 0 0 1 176 128H144A16 16 0 0 0 128 144V192A8 8 0 0 1 120 200Z"/>
+</defs>
+<rect x="16" y="16" width="224" height="224" rx="50" fill="url(#surface)"/>
+<g transform="translate(6 6)">
+<use xlink:href="#flow0" fill="url(#flowShared)"/>
+<use xlink:href="#flow1" fill="url(#flowShared)"/>
+</g></svg>

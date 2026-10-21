@@ -12,7 +12,6 @@ enum MainWindowPage: String, CaseIterable, Identifiable, ClipFlowTab {
 @MainActor
 final class SettingsDraft: ObservableObject {
     @Published var excludedAppsText: String
-    @Published var section: SettingsSection = .general
 
     init(store: ClipFlowStore) {
         excludedAppsText = store.excludedBundleIDs.joined(separator: "\n")
@@ -31,6 +30,7 @@ final class MainWindowNavigation: ObservableObject {
     }
 
     func select(_ page: MainWindowPage) {
+        guard self.page != page else { return }
         if self.page == .settings && page != .settings {
             store.endShortcutRecording()
         }
@@ -82,6 +82,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 }
 
 private struct MainWindowView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var store: ClipFlowStore
     @ObservedObject var navigation: MainWindowNavigation
     let locale: Locale
@@ -90,26 +92,54 @@ private struct MainWindowView: View {
         VStack(spacing: 0) {
             ClipFlowTabBar(
                 options: MainWindowPage.allCases,
-                selection: Binding(get: { navigation.page }, set: { navigation.select($0) }),
-                accessibilityTitle: "窗口页面"
+                selection: Binding(get: { navigation.page }, set: { page in
+                    guard page != navigation.page else { return }
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                    navigation.select(page)
+                }),
+                accessibilityTitle: "窗口页面",
+                style: .integrated
             )
             .padding(.horizontal, 16)
-            .frame(height: 56)
-            .background(.bar)
-
-            Divider()
-            Group {
-                switch navigation.page {
-                case .history:
-                    ContentView(store: store)
-                case .settings:
-                    SettingsView(store: store, draft: navigation.settingsDraft)
-                }
+            .frame(height: 48)
+            ZStack {
+                SettingsView(showsBackground: false, store: store, draft: navigation.settingsDraft)
+                    .modifier(PageMotion(isSelected: navigation.page == .settings,
+                        hiddenOffset: -12, reduceMotion: reduceMotion))
+                ContentView(showsBackground: false, store: store)
+                    .modifier(PageMotion(isSelected: navigation.page == .history,
+                        hiddenOffset: 12, reduceMotion: reduceMotion))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+        }
+        .background {
+            GeometryReader { proxy in
+                AppBackground(palette: .resolve(for: colorScheme))
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+            }
+            .allowsHitTesting(false)
         }
         .frame(width: ClipFlowLayout.libraryWidth)
         .frame(minHeight: 660)
         .environment(\.locale, locale)
+    }
+}
+
+/// Keep page identity (and scroll position) stable while retargeting a short fade.
+private struct PageMotion: ViewModifier {
+    let isSelected: Bool
+    let hiddenOffset: CGFloat
+    let reduceMotion: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isSelected ? 1 : 0)
+            .offset(x: isSelected || reduceMotion ? 0 : hiddenOffset)
+            .allowsHitTesting(isSelected)
+            .disabled(!isSelected)
+            .accessibilityHidden(!isSelected)
+            .animation(reduceMotion ? nil : (isSelected ? ClipFlowMotion.pageSwitch : ClipFlowMotion.pageExit), value: isSelected)
     }
 }

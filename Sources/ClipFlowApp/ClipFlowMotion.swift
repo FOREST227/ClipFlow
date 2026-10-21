@@ -2,6 +2,9 @@ import SwiftUI
 
 enum ClipFlowMotion {
     static let overlay = Animation.interactiveSpring(response: 0.22, dampingFraction: 0.92, blendDuration: 0.06)
+    static let tabSelection = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.16)
+    static let pageSwitch = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.26)
+    static let pageExit = Animation.easeOut(duration: 0.12)
     static let selection = Animation.easeOut(duration: 0.14)
     static let press = Animation.easeOut(duration: 0.10)
     static let fade = Animation.easeOut(duration: 0.16)

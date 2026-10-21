@@ -5,11 +5,18 @@ protocol ClipFlowTab: Hashable {
     var icon: String { get }
 }
 
-/// Shared visual treatment for page navigation and the settings subgroups.
+enum ClipFlowTabStyle {
+    case segmented, integrated, compact
+}
+
+/// Shared navigation behavior with distinct page, section and option treatments.
 struct ClipFlowTabBar<Tab: ClipFlowTab>: View {
     let options: [Tab]
     @Binding var selection: Tab
     let accessibilityTitle: String
+    var style: ClipFlowTabStyle = .segmented
+    private var integrated: Bool { style == .integrated }
+    private var compact: Bool { style == .compact }
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var indicator
@@ -21,23 +28,49 @@ struct ClipFlowTabBar<Tab: ClipFlowTab>: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(options, id: \.self) { option in
+                if compact && option != options.first {
+                    Rectangle().fill(Color.primary.opacity(0.12))
+                        .frame(width: 1, height: 10)
+                        .accessibilityHidden(true)
+                }
                 Button {
+                    guard selection != option else { return }
                     selection = option
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: option.icon)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(selection == option ? accent : Color.secondary)
+                        if integrated {
+                            ClipFlowBrandMark(icon: option.icon, size: 28, usesAppPalette: true)
+                                .opacity(selection == option ? 1 : 0.65)
+                                .scaleEffect(reduceMotion || selection == option ? 1 : 0.94)
+                        } else if !compact {
+                            Image(systemName: option.icon)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(selection == option ? accent : Color.secondary)
+                        }
                         Text(option.title)
-                            .font(.system(size: 12, weight: selection == option ? .semibold : .medium))
-                            .foregroundStyle(selection == option ? Color.primary : Color.secondary)
+                            .font(integrated
+                                ? .system(size: 15, weight: .bold, design: .rounded)
+                                : .system(size: 12, weight: selection == option ? .semibold : .medium))
+                            .foregroundStyle(selection == option ? (compact ? accent : Color.primary) : (compact && hovered == option ? Color.primary : Color.secondary))
                             .lineLimit(1)
                     }
-                    .padding(.horizontal, 12)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 32)
+                    .frame(height: integrated ? 40 : 32)
+                    .overlay(alignment: .bottom) {
+                        if integrated && selection == option {
+                            Capsule().fill(accent).frame(width: 24, height: 2)
+                                .matchedGeometryEffect(id: "selection", in: indicator)
+                        }
+                    }
+                    .padding(.horizontal, compact ? 20 : 12)
+                    .frame(maxWidth: compact ? nil : .infinity)
                     .background {
-                        if selection == option {
+                        if compact {
+                            Color.clear
+                        } else if integrated {
+                            if hovered == option {
+                                RoundedRectangle(cornerRadius: 10).fill(accent.opacity(0.04))
+                            }
+                        } else if selection == option {
                             RoundedRectangle(cornerRadius: 10)
                                 .fill(LinearGradient(
                                     colors: colorScheme == .dark
@@ -66,10 +99,10 @@ struct ClipFlowTabBar<Tab: ClipFlowTab>: View {
                 .accessibilityAddTraits(selection == option ? [.isSelected] : [])
             }
         }
-        .padding(4)
-        .background(Color.primary.opacity(colorScheme == .dark ? 0.07 : 0.04), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.06), lineWidth: 1))
-        .animation(reduceMotion ? nil : .interactiveSpring(response: 0.25, dampingFraction: 0.88), value: selection)
+        .padding(style == .segmented ? 4 : 0)
+        .background(Color.primary.opacity(style == .segmented ? (colorScheme == .dark ? 0.07 : 0.04) : 0), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(style == .segmented ? 0.06 : 0), lineWidth: 1))
+        .animation(reduceMotion ? nil : (integrated ? ClipFlowMotion.tabSelection : .easeOut(duration: 0.2)), value: selection)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityTitle)

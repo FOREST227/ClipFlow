@@ -8,7 +8,7 @@ struct ClipFlowApp {
     static func main() {
         let application = NSApplication.shared
         let delegate = ClipFlowAppDelegate()
-        application.setActivationPolicy(.regular)
+        application.setActivationPolicy(.accessory)
         application.delegate = delegate
         withExtendedLifetime(delegate) {
             application.run()
@@ -41,27 +41,15 @@ final class ClipFlowAppDelegate: NSObject, NSApplicationDelegate {
             self?.showSettingsWindow()
         }
 
-        // Wait until the status item has been attached to the menu bar.
-        DispatchQueue.main.async { [weak self] in
-            self?.showStartupInterface()
-        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        showStartupInterface()
+        // Launching again keeps the menu-bar utility quiet; navigation is explicit.
         return false
     }
 
     func applicationShouldSaveApplicationState(_ app: NSApplication, coder: NSCoder) -> Bool { false }
     func applicationShouldRestoreApplicationState(_ app: NSApplication, coder: NSCoder) -> Bool { false }
-
-    private func showStartupInterface() {
-        if ClipFlowStore.shared.launchToStatusBar {
-            statusBarController?.showPopover(waitForMenuBarLayout: true)
-        } else {
-            showLibraryWindow()
-        }
-    }
 
     @objc private func openLibraryFromMenu(_ sender: Any?) {
         AppNavigationCenter.shared.openLibrary()

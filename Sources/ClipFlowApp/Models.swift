@@ -768,9 +768,6 @@ final class ClipFlowStore: ObservableObject {
         }
     }
     @Published var launchAtLogin: Bool
-    @Published var launchToStatusBar: Bool {
-        didSet { defaults.set(launchToStatusBar, forKey: Keys.launchToStatusBar) }
-    }
     @Published var menuQuickPasteModeEnabled: Bool {
         didSet { defaults.set(menuQuickPasteModeEnabled, forKey: Keys.menuQuickPasteModeEnabled) }
     }
@@ -843,7 +840,6 @@ final class ClipFlowStore: ObservableObject {
         autoProtectSecrets = defaults.object(forKey: Keys.autoProtectSecrets) as? Bool ?? true
         sensitiveAutoExpireEnabled = defaults.object(forKey: Keys.sensitiveAutoExpireEnabled) as? Bool ?? true
         launchAtLogin = Self.currentLaunchAtLoginState()
-        launchToStatusBar = defaults.object(forKey: Keys.launchToStatusBar) as? Bool ?? false
         menuQuickPasteModeEnabled = defaults.object(forKey: Keys.menuQuickPasteModeEnabled) as? Bool ?? true
         iCloudSyncEnabled = defaults.object(forKey: Keys.iCloudSyncEnabled) as? Bool ?? false
         excludedBundleIDs = defaults.stringArray(forKey: Keys.excludedBundleIDs) ?? Self.defaultExcludedBundleIDs
@@ -1123,11 +1119,6 @@ final class ClipFlowStore: ObservableObject {
             launchAtLogin = Self.currentLaunchAtLoginState()
             lastCaptureStatus = "开机自动启动设置失败，请将 ClipFlow 放在应用程序目录后再试"
         }
-    }
-
-    func setLaunchToStatusBar(_ enabled: Bool) {
-        launchToStatusBar = enabled
-        lastCaptureStatus = enabled ? "启动后将直接驻留状态栏" : "启动后将显示主窗口"
     }
 
     func toggleMenuQuickPasteMode() {
@@ -1703,7 +1694,6 @@ final class ClipFlowStore: ObservableObject {
         static let autoProtectSecrets = "autoProtectSecrets"
         static let sensitiveAutoExpireEnabled = "sensitiveAutoExpireEnabled"
         static let launchAtLogin = "launchAtLogin"
-        static let launchToStatusBar = "launchToStatusBar"
         static let menuQuickPasteModeEnabled = "menuQuickPasteModeEnabled"
         static let iCloudSyncEnabled = "iCloudSyncEnabled"
         static let iCloudLastSyncedAt = "iCloudLastSyncedAt"

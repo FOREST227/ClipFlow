@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+import Combine
 @testable import ClipFlowApp
 
 @MainActor
@@ -22,14 +23,30 @@ final class MainWindowTests: XCTestCase {
         store.selectedCategory = .code
         navigation.select(.settings)
         navigation.settingsDraft.excludedAppsText = "com.example.unsaved"
-        navigation.settingsDraft.section = .privacy
         navigation.select(.history)
         XCTAssertEqual(store.searchText, "project notes")
         XCTAssertEqual(store.selectedCategory, .code)
         navigation.select(.settings)
         XCTAssertEqual(navigation.settingsDraft.excludedAppsText, "com.example.unsaved")
-        XCTAssertEqual(navigation.settingsDraft.section, .privacy)
         XCTAssertFalse(store.excludedBundleIDs.contains("com.example.unsaved"))
+    }
+
+    func testSelectingCurrentPageDoesNotRepublishOrInterruptRecording() throws {
+        let store = try makeStore()
+        let navigation = MainWindowNavigation(store: store)
+        navigation.select(.settings)
+        store.registerShortcut = { _ in nil }
+        store.suspendShortcut = {}
+        XCTAssertTrue(store.beginShortcutRecording())
+        var updates = 0
+        let observation = navigation.$page.dropFirst().sink { _ in updates += 1 }
+        navigation.select(.settings)
+        XCTAssertEqual(updates, 0)
+        XCTAssertTrue(store.isRecordingShortcut)
+        navigation.select(.history)
+        XCTAssertEqual(updates, 1)
+        XCTAssertFalse(store.isRecordingShortcut)
+        withExtendedLifetime(observation) {}
     }
 
     func testLeavingSettingsRestoresSuspendedShortcut() throws {
@@ -56,7 +73,7 @@ final class MainWindowTests: XCTestCase {
         controller.navigation.select(.history)
         XCTAssertTrue(controller.window === window)
         XCTAssertTrue(controller.window?.contentViewController === content)
-        XCTAssertEqual(window.contentLayoutRect.width, 500, accuracy: 0.5)
+        XCTAssertEqual(window.contentLayoutRect.width, 460, accuracy: 0.5)
         window.close()
     }
 }

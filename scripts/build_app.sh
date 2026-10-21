@@ -11,7 +11,7 @@ set -euo pipefail
 #   ./scripts/build_app.sh x86_64           # Intel
 #
 # Environment variables:
-#   CLIPFLOW_VERSION       — bundle short version (default 0.0.6)
+#   CLIPFLOW_VERSION       — bundle short version (default 0.0.7)
 #   CLIPFLOW_BUILD_NUMBER  — bundle build number (default 1)
 #   CLIPFLOW_ADHOC_SIGN    — set to 1 for explicit ad-hoc signing (CI only)
 # ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ APP_NAME="ClipFlow"
 DIST_DIR="$ROOT_DIR/dist"
 ICON_PNG="$ROOT_DIR/assets/icon/ClipFlow-icon-1024.png"
 ICON_NAME="AppIcon"
-APP_VERSION="${CLIPFLOW_VERSION:-0.0.6}"
+APP_VERSION="${CLIPFLOW_VERSION:-0.0.7}"
 BUILD_NUMBER="${CLIPFLOW_BUILD_NUMBER:-1}"
 DEPLOYMENT_TARGET="12.0"
 
@@ -119,6 +119,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
   <string>$BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key>
   <string>$DEPLOYMENT_TARGET</string>
+  <key>LSUIElement</key>
+  <true/>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSPrincipalClass</key>

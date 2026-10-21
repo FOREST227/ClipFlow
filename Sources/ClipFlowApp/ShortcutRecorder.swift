@@ -6,11 +6,12 @@ struct ShortcutRecorder: View {
     @ObservedObject var store: ClipFlowStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ViewState private var hovered = false
+    @ViewState private var focused = false
 
     private var accent: Color { ClipCategory.all.tint }
 
     var body: some View {
-        ShortcutRecorderInput(store: store)
+        ShortcutRecorderInput(store: store, focused: $focused)
             .background {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(store.isRecordingShortcut ? accent.opacity(0.10) : Color.primary.opacity(0.035))
@@ -26,7 +27,7 @@ struct ShortcutRecorder: View {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(store.isRecordingShortcut ? accent.opacity(0.5)
+                    .strokeBorder(store.isRecordingShortcut || focused ? accent.opacity(0.5)
                         : hovered ? accent.opacity(0.3) : Color.primary.opacity(0.09), lineWidth: 1)
                     .allowsHitTesting(false)
             }
@@ -38,6 +39,7 @@ struct ShortcutRecorder: View {
 
 private struct ShortcutRecorderInput: NSViewRepresentable {
     @ObservedObject var store: ClipFlowStore
+    @Binding var focused: Bool
 
     func makeNSView(context: Context) -> ShortcutRecorderButton {
         let button = ShortcutRecorderButton()
@@ -62,6 +64,7 @@ private struct ShortcutRecorderInput: NSViewRepresentable {
     }
 
     private func configure(_ button: ShortcutRecorderButton) {
+        button.focusChanged = { focused = $0 }
         button.beginRecording = { store.beginShortcutRecording() }
         button.endRecording = { store.endShortcutRecording() }
         button.capture = { shortcut in _ = store.setQuickPasteShortcut(shortcut) }
@@ -77,6 +80,7 @@ private struct ShortcutRecorderInput: NSViewRepresentable {
 
 final class ShortcutRecorderButton: NSButton {
     override var intrinsicContentSize: NSSize { NSSize(width: 176, height: 36) }
+    var focusChanged: ((Bool) -> Void)?
     var beginRecording: (() -> Bool)?
     var endRecording: (() -> Void)?
     var capture: ((ClipFlowShortcut) -> Void)?
@@ -88,6 +92,8 @@ final class ShortcutRecorderButton: NSButton {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        // SwiftUI draws the single rounded focus/recording border.
+        focusRingType = .none
         target = self
         action = #selector(begin)
     }
@@ -134,9 +140,17 @@ final class ShortcutRecorderButton: NSButton {
         refreshTitle()
     }
 
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { focusChanged?(true) }
+        return accepted
+    }
+
     override func resignFirstResponder() -> Bool {
         finishRecording()
-        return super.resignFirstResponder()
+        let resigned = super.resignFirstResponder()
+        if resigned { focusChanged?(false) }
+        return resigned
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {

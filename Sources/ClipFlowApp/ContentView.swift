@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
+    var showsBackground = true
     @ObservedObject var store: ClipFlowStore
     @Environment(\.colorScheme) private var colorScheme
     @ViewState private var inspectingItemID: ClipboardItem.ID?
@@ -11,9 +12,11 @@ struct ContentView: View {
 
         GeometryReader { proxy in
             ZStack {
-                AppBackground(palette: palette)
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .clipped()
+                if showsBackground {
+                    AppBackground(palette: palette)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                }
 
                 VStack(spacing: ClipFlowLayout.sectionGap) {
                     HeaderView(store: store, palette: palette)
@@ -208,34 +211,6 @@ struct HeaderView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            PageSummaryHeader(title: "剪贴历史", icon: "cursorarrow.motionlines") {
-                Button { ClipFlowRuntime.shared.showHUD() } label: {
-                    Label(store.quickPasteShortcut.displayName, systemImage: "cursorarrow.rays")
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                }
-                .buttonStyle(PageHeaderButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
-                .help("打开快速粘贴")
-                Button { store.capturePaused.toggle() } label: {
-                    Image(systemName: store.capturePaused ? "play.fill" : "pause.fill")
-                        .frame(width: 16)
-                }
-                .buttonStyle(PageHeaderButtonStyle(fill: palette.secondaryButtonFill))
-                .help(store.capturePaused ? "恢复监听" : "暂停监听")
-                Button { AppNavigationCenter.shared.openSettings() } label: {
-                    Image(systemName: "gearshape").frame(width: 16)
-                }
-                .buttonStyle(PageHeaderButtonStyle(fill: palette.secondaryButtonFill))
-                .help("设置")
-            } statistics: {
-                CompactStatusPill(title: "剪贴历史", value: "\(store.items.count) 条",
-                    icon: "square.stack.3d.up", tint: ClipCategory.all.tint)
-                CompactStatusPill(title: "已置顶", value: "\(store.items.filter(\.pinned).count) 条",
-                    icon: "pin.fill", tint: ClipCategory.quickPaste.tint)
-                CompactStatusPill(title: "受保护", value: "\(store.protectedCount) 条",
-                    icon: "lock.shield", tint: ClipCategory.protected.tint)
-                CompactStatusPill(title: "监听", value: store.capturePaused ? "已暂停" : "运行中",
-                    icon: "waveform", tint: store.capturePaused ? .orange : .green)
-            }
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("搜索内容、来源或标签", text: $store.searchText).textFieldStyle(.plain)
@@ -330,7 +305,7 @@ struct EmptyLibraryView: View {
                 .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             if !store.items.isEmpty {
                 Button("查看全部内容") { store.searchText = ""; store.selectedCategory = .all }
-                    .buttonStyle(DenseClipButtonStyle(fill: palette.secondaryButtonFill))
+                    .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
             }
         }
         .padding(24)
@@ -675,6 +650,8 @@ struct IntegrationRow: View {
 }
 
 struct MenuBarView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    private var palette: ClipFlowPalette { .resolve(for: colorScheme) }
     @ObservedObject var store: ClipFlowStore
     @ViewState private var inspectingItemID: UUID?
 
@@ -720,25 +697,45 @@ struct MenuBarView: View {
                     .frame(maxHeight: .infinity)
                 }
                 Divider()
-                HStack(spacing: 12) {
-                    Toggle("快贴", isOn: Binding(
-                        get: { store.menuQuickPasteModeEnabled },
-                        set: { if $0 != store.menuQuickPasteModeEnabled { store.toggleMenuQuickPasteMode() } }
-                    ))
-                    .toggleStyle(.switch).controlSize(.mini)
-                    .help("开启后双击条目直接粘贴")
-                    Spacer(minLength: 0)
-                    Menu {
-                        Button("清空未置顶历史", role: .destructive) { store.clearHistory() }
-                        Divider()
-                        Button("重启 ClipFlow") { ClipFlowRuntime.shared.restartApplication() }
-                        Button("退出 ClipFlow") { NSApp.terminate(nil) }
-                    } label: { Image(systemName: "ellipsis") }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .accessibilityLabel("更多操作")
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Toggle("双击快贴", isOn: Binding(
+                            get: { store.menuQuickPasteModeEnabled },
+                            set: { if $0 != store.menuQuickPasteModeEnabled { store.toggleMenuQuickPasteMode() } }
+                        ))
+                        .toggleStyle(.switch).controlSize(.mini)
+                        .fixedSize()
+                        .help("开启后双击条目直接粘贴；关闭后单击仅复制")
+                        Spacer(minLength: 12)
+                        Button { AppNavigationCenter.shared.openSettings() } label: {
+                            Label("设置", systemImage: "gearshape")
+                        }
+                        .buttonStyle(MenuFooterActionStyle(fill: Color.primary.opacity(0.045)))
+                        .help("打开设置")
+                        Menu {
+                            Button("清空未置顶历史", role: .destructive) { store.clearHistory() }
+                            Divider()
+                            Button("重启 ClipFlow") { ClipFlowRuntime.shared.restartApplication() }
+                            Button("退出 ClipFlow") { NSApp.terminate(nil) }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 28, height: 28)
+                                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+                                .contentShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                        .accessibilityLabel("更多操作")
+                        .help("更多操作")
+                    }
+                    .font(.system(size: 11, weight: .medium)).controlSize(.small)
+                    .frame(height: 28)
+                    Text(store.statusSummary)
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.tail)
+                        .help(store.statusSummary)
                 }
-                .font(.system(size: 11)).controlSize(.small)
-                Text(store.statusSummary).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
             }
             .allowsHitTesting(inspectingItem == nil)
             .blur(radius: inspectingItem == nil ? 0 : ClipFlowMotion.backgroundDefocusRadius)
@@ -755,6 +752,14 @@ struct MenuBarView: View {
         }
         .padding(16)
         .frame(width: ClipFlowLayout.menuWidth, height: ClipFlowLayout.menuHeight)
+        .background {
+            GeometryReader { proxy in
+                FloatingPanelBackground(palette: palette, tintOpacity: 0.9)
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+            }
+            .allowsHitTesting(false)
+        }
     }
 
     private var inspectingItem: ClipboardItem? {
@@ -775,7 +780,11 @@ struct MenuPanelHeader: View {
         ClipFlowBrandSurface {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
-                    ClipFlowBrandMark(icon: "paperclip", size: 32)
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 36, height: 36)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("ClipFlow 剪流").font(.system(size: 16, weight: .bold, design: .rounded))
                         Label(store.capturePaused ? "监听已暂停" : "正在监听", systemImage: store.capturePaused ? "pause.circle.fill" : "record.circle.fill")
@@ -983,6 +992,8 @@ struct MenuRecentClipRow: View {
 }
 
 struct MenuInteractiveRecentRow: NSViewRepresentable {
+    @Environment(\.colorScheme) private var colorScheme
+    private var palette: ClipFlowPalette { .resolve(for: colorScheme) }
     let item: ClipboardItem
     let snippet: String
     let store: ClipFlowStore
@@ -999,11 +1010,11 @@ struct MenuInteractiveRecentRow: NSViewRepresentable {
                     .padding(10)
                     .background(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Color.primary.opacity(0.045))
+                            .fill(palette.softFill)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            .stroke(palette.border, lineWidth: 1)
                     )
             ),
             quickPasteModeEnabled: quickPasteModeEnabled,
@@ -1021,11 +1032,11 @@ struct MenuInteractiveRecentRow: NSViewRepresentable {
                     .padding(10)
                     .background(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Color.primary.opacity(0.045))
+                            .fill(palette.softFill)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            .stroke(palette.border, lineWidth: 1)
                     )
             ),
             quickPasteModeEnabled: quickPasteModeEnabled,
@@ -1170,24 +1181,15 @@ struct MenuCompactButtonStyle: ButtonStyle {
 
 struct MenuFooterActionStyle: ButtonStyle {
     let fill: Color
-    var foreground: Color = Color.primary
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(foreground)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(fill.opacity(configuration.isPressed ? 0.78 : 1))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
-            )
-            .animation(ClipFlowMotion.press, value: configuration.isPressed)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Color.primary.opacity(configuration.isPressed ? 0.65 : 0.85))
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(fill, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -1821,7 +1823,8 @@ struct ClipboardCard: View {
             }
         }
         .padding(12)
-        .background(isSelected ? itemTint.opacity(0.1) : palette.softFill, in: RoundedRectangle(cornerRadius: 14))
+        .background(isSelected ? itemTint.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 14))
+        .background(palette.softFill, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14)
             .strokeBorder(isSelected ? itemTint.opacity(0.4) : palette.border.opacity(0.5), lineWidth: 1))
     }
@@ -2035,25 +2038,6 @@ struct ClipButtonStyle: ButtonStyle {
     }
 }
 
-struct DenseClipButtonStyle: ButtonStyle {
-    let fill: Color
-    var foreground: Color = Color.primary
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(foreground)
-            .padding(.horizontal, 13)
-            .padding(.vertical, 8)
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .background(
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(fill.opacity(configuration.isPressed ? 0.75 : 1))
-            )
-            .animation(ClipFlowMotion.press, value: configuration.isPressed)
-    }
-}
-
 struct ClipFlowPalette {
     let backgroundStart: Color
     let backgroundMiddle: Color
@@ -2077,8 +2061,8 @@ struct ClipFlowPalette {
                 orbB: Color(red: 0.25, green: 0.58, blue: 0.88).opacity(0.24),
                 border: Color.white.opacity(0.14),
                 shadow: Color.black.opacity(0.34),
-                softFill: Color.white.opacity(0.06),
-                inputFill: Color.white.opacity(0.08),
+                softFill: Color.white.opacity(0.09),
+                inputFill: Color.white.opacity(0.12),
                 primaryButtonFill: Color(red: 0.30, green: 0.59, blue: 0.92),
                 secondaryButtonFill: Color.white.opacity(0.10)
             )
@@ -2092,8 +2076,8 @@ struct ClipFlowPalette {
             orbB: Color(red: 0.40, green: 0.73, blue: 0.95).opacity(0.22),
             border: Color.white.opacity(0.7),
             shadow: Color.black.opacity(0.10),
-            softFill: Color.white.opacity(0.46),
-            inputFill: Color.white.opacity(0.68),
+            softFill: Color.white.opacity(0.66),
+            inputFill: Color.white.opacity(0.82),
             primaryButtonFill: Color(red: 0.30, green: 0.59, blue: 0.92),
             secondaryButtonFill: Color.white.opacity(0.74)
         )

@@ -5,8 +5,10 @@ enum ClipFlowLayout {
     static let sectionGap: CGFloat = 16
     static let rowGap: CGFloat = 8
     static let surfaceRadius: CGFloat = 16
-    static let libraryWidth: CGFloat = 500
-    static let settingsWidth: CGFloat = 500
+    static let controlRadius: CGFloat = 10
+    static let controlHeight: CGFloat = 32
+    static let libraryWidth: CGFloat = 460
+    static let settingsWidth: CGFloat = libraryWidth
     static let menuWidth: CGFloat = 360
     static let menuHeight: CGFloat = 600
 }
@@ -22,22 +24,39 @@ struct LayoutSurface<Content: View>: View {
                 RoundedRectangle(cornerRadius: ClipFlowLayout.surfaceRadius)
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
             }
-            .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+            .shadow(color: .black.opacity(0.025), radius: 8, y: 3)
     }
 }
 
 struct ClipFlowBrandMark: View {
     var icon = "cursorarrow.motionlines"
     var size: CGFloat = 36
+    var usesAppPalette = false
+
+    private var symbolFill: LinearGradient {
+        LinearGradient(colors: usesAppPalette
+            ? [Color(red: 0.843, green: 0.686, blue: 0.486),
+               Color(red: 0.694, green: 0.714, blue: 0.835),
+               Color(red: 0.345, green: 0.580, blue: 0.871)]
+            : [.white, .white], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    private var tileFill: LinearGradient {
+        LinearGradient(colors: usesAppPalette
+            ? [Color(red: 0.98, green: 0.95, blue: 0.90),
+               Color(red: 0.93, green: 0.96, blue: 0.99),
+               Color(red: 0.95, green: 0.93, blue: 0.98)]
+            : [Color(red: 0.96, green: 0.72, blue: 0.42), ClipCategory.all.tint],
+            startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
 
     var body: some View {
         Image(systemName: icon)
             .font(.system(size: size * 0.44, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(symbolFill)
             .frame(width: size, height: size)
             .background(
-                LinearGradient(colors: [Color(red: 0.96, green: 0.72, blue: 0.42), ClipCategory.all.tint],
-                    startPoint: .topLeading, endPoint: .bottomTrailing),
+                tileFill,
                 in: RoundedRectangle(cornerRadius: size * 0.3)
             )
             .overlay(RoundedRectangle(cornerRadius: size * 0.3).strokeBorder(.white.opacity(0.25), lineWidth: 1))
@@ -78,47 +97,11 @@ struct CompactStatusPill: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8).padding(.vertical, 8)
-        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius))
     }
 }
 
-struct PageSummaryHeader<Actions: View, Statistics: View>: View {
-    let title: String
-    let icon: String
-    let actions: Actions
-    let statistics: Statistics
-
-    init(title: String, icon: String,
-         @ViewBuilder actions: () -> Actions,
-         @ViewBuilder statistics: () -> Statistics) {
-        self.title = title
-        self.icon = icon
-        self.actions = actions()
-        self.statistics = statistics()
-    }
-
-    var body: some View {
-        ClipFlowBrandSurface {
-            VStack(spacing: 12) {
-                HStack(spacing: 10) {
-                    ClipFlowBrandMark(icon: icon, size: 36)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(title).font(.system(size: 22, weight: .bold, design: .rounded))
-                            .lineLimit(1)
-                        Text("ClipFlow 剪流").font(.system(size: 10)).foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 8)
-                    HStack(spacing: 8) { actions }
-                }
-                .frame(height: 44)
-                HStack(spacing: 8) { statistics }
-                    .frame(height: 48)
-            }
-        }
-    }
-}
-
-struct PageHeaderButtonStyle: ButtonStyle {
+struct ClipFlowActionButtonStyle: ButtonStyle {
     let fill: Color
     var foreground: Color = .primary
 
@@ -127,24 +110,25 @@ struct PageHeaderButtonStyle: ButtonStyle {
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(foreground)
             .padding(.horizontal, 10)
-            .frame(height: 32)
+            .frame(height: ClipFlowLayout.controlHeight)
             .background(fill.opacity(configuration.isPressed ? 0.75 : 1),
-                        in: RoundedRectangle(cornerRadius: 10))
+                        in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius))
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(ClipFlowMotion.press, value: configuration.isPressed)
     }
 }
 
-enum SettingsSection: String, CaseIterable, Identifiable, ClipFlowTab {
-    case general = "通用"
-    case privacy = "隐私"
-    case sync = "同步"
-    var id: Self { self }
-    var title: String { rawValue }
-    var icon: String {
-        switch self {
-        case .general: "slider.horizontal.3"
-        case .privacy: "lock.shield"
-        case .sync: "arrow.triangle.2.circlepath"
-        }
+/// Keep translucency on the floating shell, never on its text or image content.
+struct FloatingPanelBackground: View {
+    let palette: ClipFlowPalette
+    var tintOpacity: Double
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        Rectangle().fill(.regularMaterial)
+            .overlay {
+                AppBackground(palette: palette)
+                    .opacity(reduceTransparency ? 1 : tintOpacity)
+            }
     }
 }

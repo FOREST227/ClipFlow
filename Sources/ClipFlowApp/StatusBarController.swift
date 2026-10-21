@@ -1,6 +1,5 @@
 import AppKit
 import Combine
-import CoreText
 import SwiftUI
 
 @MainActor
@@ -231,106 +230,60 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
 private enum ClipFlowStatusBarIcon {
     static func make(paused: Bool) -> NSImage {
         let size = NSSize(width: 18, height: 18)
-        let image = NSImage(size: size)
-        image.lockFocus()
-
-        guard let context = NSGraphicsContext.current?.cgContext else {
-            image.unlockFocus()
-            image.isTemplate = true
-            return image
-        }
-
-        context.setAllowsAntialiasing(true)
-        context.setShouldAntialias(true)
-        context.setFillColor(NSColor.black.cgColor)
-
-        if let path = makeCPath(in: CGRect(origin: .zero, size: size), paused: paused) {
-            context.addPath(path)
+        let image = NSImage(size: size, flipped: false) { _ in
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            context.setAllowsAntialiasing(true)
+            context.setFillColor(NSColor.black.cgColor)
+            context.saveGState()
+            // SVG coordinates are top-down; AppKit drawing coordinates are bottom-up.
+            context.translateBy(x: -2.4, y: 21.16)
+            context.scaleBy(x: 0.095, y: -0.095)
+            context.addPath(flowPath())
             context.fillPath()
+            context.restoreGState()
+            if paused {
+                for x: CGFloat in [13.3, 15.7] {
+                    context.addPath(CGPath(roundedRect: CGRect(x: x, y: 2, width: 1.4, height: 4.5),
+                        cornerWidth: 0.7, cornerHeight: 0.7, transform: nil))
+                }
+                context.fillPath()
+            }
+            return true
         }
-
-        if paused {
-            drawPauseBars(in: context)
-        }
-
-        image.unlockFocus()
         image.isTemplate = true
-        image.size = size
+        image.accessibilityDescription = paused ? "剪流：监听已暂停" : "剪流：正在监听"
         return image
     }
 
-    private static func makeCPath(in rect: CGRect, paused: Bool) -> CGPath? {
-        guard let basePath = glyphPath() else { return nil }
-
-        let targetWidth: CGFloat = paused ? 12.4 : 13.2
-        let targetHeight: CGFloat = 13.8
-        let bounds = basePath.boundingBox
-        let scale = min(targetWidth / bounds.width, targetHeight / bounds.height)
-
-        var transform = CGAffineTransform(scaleX: scale, y: scale)
-        guard let scaledPath = basePath.copy(using: &transform) else { return nil }
-
-        let scaledBounds = scaledPath.boundingBox
-        let center = CGPoint(x: rect.midX - 0.15, y: rect.midY + 0.05)
-        transform = CGAffineTransform(
-            translationX: center.x - scaledBounds.midX - (paused ? 0.45 : 0.0),
-            y: center.y - scaledBounds.midY
-        )
-
-        return scaledPath.copy(using: &transform)
-    }
-
-    private static func drawPauseBars(in context: CGContext) {
-        let barColor = NSColor.black.cgColor
-        let leftBar = CGPath(
-            roundedRect: CGRect(x: 10.35, y: 5.0, width: 1.55, height: 7.9),
-            cornerWidth: 0.78,
-            cornerHeight: 0.78,
-            transform: nil
-        )
-        let rightBar = CGPath(
-            roundedRect: CGRect(x: 12.55, y: 5.0, width: 1.55, height: 7.9),
-            cornerWidth: 0.78,
-            cornerHeight: 0.78,
-            transform: nil
-        )
-
-        context.saveGState()
-        context.setFillColor(barColor)
-        context.addPath(leftBar)
-        context.addPath(rightBar)
-        context.fillPath()
-        context.restoreGState()
-    }
-
-    private static func glyphPath() -> CGPath? {
-        let font = preferredFont(size: 17)
-        let ctFont = font as CTFont
-
-        guard let scalar = Character("C").unicodeScalars.first else { return nil }
-        var character = UniChar(scalar.value)
-        var glyph = CGGlyph()
-
-        guard CTFontGetGlyphsForCharacters(ctFont, &character, &glyph, 1) else {
-            return nil
-        }
-
-        return CTFontCreatePathForGlyph(ctFont, glyph, nil)
-    }
-
-    private static func preferredFont(size: CGFloat) -> NSFont {
-        let names = [
-            "Avenir-Heavy",
-            "AvenirNext-Heavy",
-            "Avenir-Black"
-        ]
-
-        for name in names {
-            if let font = NSFont(name: name, size: size) {
-                return font
-            }
-        }
-
-        return NSFont.systemFont(ofSize: size, weight: .heavy)
+    /// Same filled outlines as assets/icon/ClipFlow-icon.svg, scaled for the menu bar.
+    private static func flowPath() -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 64, y: 176))
+        path.addCurve(to: CGPoint(x: 56, y: 168), control1: CGPoint(x: 59.5817, y: 176.0000), control2: CGPoint(x: 56.0000, y: 172.4183))
+        path.addLine(to: CGPoint(x: 56, y: 104))
+        path.addCurve(to: CGPoint(x: 104, y: 56), control1: CGPoint(x: 56.0000, y: 77.4903), control2: CGPoint(x: 77.4903, y: 56.0000))
+        path.addLine(to: CGPoint(x: 176, y: 56))
+        path.addCurve(to: CGPoint(x: 184, y: 64), control1: CGPoint(x: 180.4183, y: 56.0000), control2: CGPoint(x: 184.0000, y: 59.5817))
+        path.addLine(to: CGPoint(x: 184, y: 72))
+        path.addCurve(to: CGPoint(x: 176, y: 80), control1: CGPoint(x: 184.0000, y: 76.4183), control2: CGPoint(x: 180.4183, y: 80.0000))
+        path.addLine(to: CGPoint(x: 104, y: 80))
+        path.addCurve(to: CGPoint(x: 80, y: 104), control1: CGPoint(x: 90.7452, y: 80.0000), control2: CGPoint(x: 80.0000, y: 90.7452))
+        path.addLine(to: CGPoint(x: 80, y: 168))
+        path.addCurve(to: CGPoint(x: 72, y: 176), control1: CGPoint(x: 80.0000, y: 172.4183), control2: CGPoint(x: 76.4183, y: 176.0000))
+        path.closeSubpath()
+        path.move(to: CGPoint(x: 112, y: 200))
+        path.addCurve(to: CGPoint(x: 104, y: 192), control1: CGPoint(x: 107.5817, y: 200.0000), control2: CGPoint(x: 104.0000, y: 196.4183))
+        path.addLine(to: CGPoint(x: 104, y: 144))
+        path.addCurve(to: CGPoint(x: 144, y: 104), control1: CGPoint(x: 104.0000, y: 121.9086), control2: CGPoint(x: 121.9086, y: 104.0000))
+        path.addLine(to: CGPoint(x: 176, y: 104))
+        path.addCurve(to: CGPoint(x: 184, y: 112), control1: CGPoint(x: 180.4183, y: 104.0000), control2: CGPoint(x: 184.0000, y: 107.5817))
+        path.addLine(to: CGPoint(x: 184, y: 120))
+        path.addCurve(to: CGPoint(x: 176, y: 128), control1: CGPoint(x: 184.0000, y: 124.4183), control2: CGPoint(x: 180.4183, y: 128.0000))
+        path.addLine(to: CGPoint(x: 144, y: 128))
+        path.addCurve(to: CGPoint(x: 128, y: 144), control1: CGPoint(x: 135.1634, y: 128.0000), control2: CGPoint(x: 128.0000, y: 135.1634))
+        path.addLine(to: CGPoint(x: 128, y: 192))
+        path.addCurve(to: CGPoint(x: 120, y: 200), control1: CGPoint(x: 128.0000, y: 196.4183), control2: CGPoint(x: 124.4183, y: 200.0000))
+        path.closeSubpath()
+        return path
     }
 }

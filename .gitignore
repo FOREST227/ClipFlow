@@ -2,3 +2,6 @@
 .DS_Store
 dist/
 .claude/
+
+# Local icon explorations; approved assets live directly in assets/icon/.
+assets/icon/concepts-2026-10/

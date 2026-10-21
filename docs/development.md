@@ -50,5 +50,5 @@ GitHub 托管构建机没有本机私钥，因此现有发布流程显式使用 
 生成三种架构的安装包：
 
 ```bash
-zsh scripts/build_release_dmg.sh v0.0.6
+zsh scripts/build_release_dmg.sh v0.0.7
 ```

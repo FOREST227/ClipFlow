@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    var showsBackground = true
     @ObservedObject var store: ClipFlowStore
     @ObservedObject var draft: SettingsDraft
     @Environment(\.colorScheme) private var colorScheme
@@ -9,38 +10,23 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            GeometryReader { proxy in
-                AppBackground(palette: palette)
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .clipped()
+            if showsBackground {
+                GeometryReader { proxy in
+                    AppBackground(palette: palette)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                }
             }
             VStack(alignment: .leading, spacing: 16) {
-                PageSummaryHeader(title: "设置", icon: "slider.horizontal.3") {
-                    EmptyView()
-                } statistics: {
-                    CompactStatusPill(title: "监听", value: store.capturePaused ? "已暂停" : "运行中",
-                        icon: "waveform", tint: store.capturePaused ? .orange : .green)
-                    CompactStatusPill(title: "自动保护", value: store.autoProtectSecrets ? "开启" : "关闭",
-                        icon: "lock.shield", tint: ClipCategory.protected.tint)
-                    CompactStatusPill(title: "开机启动", value: store.launchAtLogin ? "已启用" : "未启用",
-                        icon: "power", tint: ClipCategory.all.tint)
-                    CompactStatusPill(title: "文稿同步", value: store.iCloudSyncStatusValue,
-                        icon: "folder", tint: store.iCloudSyncTint)
-                }
-                ClipFlowTabBar(options: SettingsSection.allCases, selection: $draft.section,
-                    accessibilityTitle: "设置分类")
-
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         if let error = store.historyLoadError {
                             Label(error, systemImage: "exclamationmark.triangle.fill")
                                 .font(.system(size: 12)).foregroundStyle(ClipCategory.protected.tint)
                         }
-                        switch draft.section {
-                        case .general: generalSettings
-                        case .privacy: privacySettings
-                        case .sync: syncSettings
-                        }
+                        generalSettings
+                        privacySettings
+                        syncSettings
                     }
                     .padding(.bottom, 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -115,11 +101,7 @@ struct SettingsView: View {
                         isOn: $store.capturePaused, showsDivider: true)
                     SettingsToggleCard(icon: "power", tint: ClipCategory.all.tint,
                         title: "开机自动启动", detail: "登录 macOS 后自动运行剪流。",
-                        isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }),
-                        showsDivider: true)
-                    SettingsToggleCard(icon: "menubar.rectangle", tint: ClipCategory.all.tint,
-                        title: "启动时打开菜单栏面板", detail: "开启时启动或再次打开 App 会展开菜单栏面板；关闭时打开剪贴历史。",
-                        isOn: Binding(get: { store.launchToStatusBar }, set: { store.setLaunchToStatusBar($0) }))
+                        isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
                 }
             }
         }
@@ -160,7 +142,7 @@ struct SettingsView: View {
                         .buttonStyle(.borderless)
                         Spacer()
                         Button("保存规则") { store.updateExcludedApps(from: draft.excludedAppsText) }
-                            .buttonStyle(DenseClipButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
+                            .buttonStyle(ClipFlowActionButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
                     }
                 }
             }

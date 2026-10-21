@@ -1,12 +1,13 @@
 import AppKit
 import QuartzCore
 
-/// Crossfades native and SwiftUI content together without rebuilding the pages.
+/// Let Core Animation blend the existing rendered layers rather than synchronously
+/// rasterizing whole SwiftUI windows on the input event thread.
 @MainActor
 final class AppearanceTransition {
     private var appliedMode: ClipFlowAppearance?
-    private var snapshots: [AppearanceSnapshotView] = []
-    private var generation = UUID()
+    // Core Animation stores CATransition under its reserved "transition" key.
+    static let animationKey = "transition"
 
     static func needsCrossfade(from current: NSAppearance, to target: NSAppearance) -> Bool {
         let schemes: [NSAppearance.Name] = [.aqua, .darkAqua]
@@ -18,78 +19,33 @@ final class AppearanceTransition {
         let previousAppearance = NSApp.effectiveAppearance
         let shouldAnimate = appliedMode != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         appliedMode = mode
-        generation = UUID()
-        let currentGeneration = generation
 
-        // Freeze an interrupted fade at its current opacity before capturing it.
-        // This avoids exposing the previous target appearance during rapid clicks.
-        for snapshot in snapshots {
-            let opacity = snapshot.layer?.presentation()?.opacity ?? Float(snapshot.alphaValue)
-            snapshot.layer?.removeAllAnimations()
-            snapshot.alphaValue = CGFloat(opacity)
+        let contents = NSApp.windows.compactMap { window -> NSView? in
+            guard window.isVisible, !window.isMiniaturized,
+                  window.contentViewController != nil || window is QuickPastePanel,
+                  let content = window.contentView, !content.bounds.isEmpty else { return nil }
+            return content
         }
 
-        var nextSnapshots: [(NSView, AppearanceSnapshotView)] = []
-        if shouldAnimate {
-            for window in NSApp.windows where window.isVisible && !window.isMiniaturized {
-                // Skip status-item and other system-managed windows.
-                guard window.contentViewController != nil || window is QuickPastePanel,
-                      let content = window.contentView,
-                      !content.bounds.isEmpty,
-                      let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { continue }
-                content.cacheDisplay(in: content.bounds, to: bitmap)
-                let image = NSImage(size: content.bounds.size)
-                image.addRepresentation(bitmap)
-                let snapshot = AppearanceSnapshotView(frame: content.bounds)
-                snapshot.image = image
-                snapshot.imageScaling = .scaleAxesIndependently
-                snapshot.autoresizingMask = [.width, .height]
-                snapshot.wantsLayer = true
-                snapshot.setAccessibilityElement(false)
-                nextSnapshots.append((content, snapshot))
-            }
-        }
-
-        snapshots.forEach { $0.removeFromSuperview() }
-        snapshots = nextSnapshots.map(\.1)
-        for (content, snapshot) in nextSnapshots {
-            content.addSubview(snapshot, positioned: .above, relativeTo: nil)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for content in contents {
+            content.layer?.removeAnimation(forKey: Self.animationKey)
+            if shouldAnimate { content.wantsLayer = true }
         }
 
         NSApp.appearance = mode.appKitAppearance
-        // Resolve after applying nil for System so we compare the actual system
-        // color, not the enum case or a stale saved macOS preference.
-        guard Self.needsCrossfade(from: previousAppearance, to: NSApp.effectiveAppearance) else {
-            snapshots.forEach { $0.removeFromSuperview() }
-            snapshots.removeAll()
-            return
-        }
-        guard !snapshots.isEmpty else { return }
-
-        // Give hosting views and popover appearance observers one run-loop turn
-        // to redraw underneath the unchanged old frame.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.generation == currentGeneration else { return }
-            let fadingSnapshots = self.snapshots
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = ClipFlowMotion.appearanceDuration
-                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                for snapshot in fadingSnapshots {
-                    snapshot.animator().alphaValue = 0
-                }
-            } completionHandler: { [weak self] in
-                Task { @MainActor [weak self] in
-                    fadingSnapshots.forEach { $0.removeFromSuperview() }
-                    if self?.generation == currentGeneration {
-                        self?.snapshots.removeAll()
-                    }
-                }
+        // Resolve System after clearing the override: equal actual colors never
+        // animate, and do not require a throwaway bitmap capture to discover that.
+        if shouldAnimate && Self.needsCrossfade(from: previousAppearance, to: NSApp.effectiveAppearance) {
+            for content in contents {
+                let fade = CATransition()
+                fade.type = .fade
+                fade.duration = ClipFlowMotion.appearanceDuration
+                fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                content.layer?.add(fade, forKey: Self.animationKey)
             }
         }
+        CATransaction.commit()
     }
-}
-
-/// The visual overlay never intercepts clicks or keyboard focus.
-private final class AppearanceSnapshotView: NSImageView {
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

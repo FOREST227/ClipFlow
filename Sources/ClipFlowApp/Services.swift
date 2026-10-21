@@ -530,13 +530,16 @@ struct QuickPastePanelView: View {
         ZStack {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Label("快速粘贴", systemImage: "cursorarrow.rays")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                    HStack(spacing: 8) {
+                        ClipFlowBrandMark(icon: "cursorarrow.rays", size: 28)
+                        Text("快速粘贴")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                    }
 
                     Spacer()
 
                     Button("关闭", action: onClose)
-                        .buttonStyle(HUDCompactButtonStyle(fill: palette.secondaryButtonFill))
+                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
                 }
 
                 HStack(spacing: 8) {
@@ -551,7 +554,7 @@ struct QuickPastePanelView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous)
                         .fill(palette.inputFill)
                 )
 
@@ -595,21 +598,26 @@ struct QuickPastePanelView: View {
                 }
 
                 HStack(spacing: 8) {
-                    Button("打开主窗口") {
+                    Button {
                         onClose()
                         onOpenLibrary()
+                    } label: {
+                        Text("历史记录").frame(width: 60)
                     }
-                    .buttonStyle(HUDCompactButtonStyle(fill: palette.secondaryButtonFill))
+                    .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
 
-                    Button("粘贴选中项") {
+                    Button {
                         if let selected = clips.first(where: { $0.id == selectedItemID }) ?? clips.first {
                             selectedItemID = selected.id
                             onClose()
                             onPaste(selected)
                         }
+                    } label: {
+                        Text("粘贴选中项").frame(width: 60)
                     }
-                    .buttonStyle(HUDCompactButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
+                    .buttonStyle(ClipFlowActionButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .blur(radius: inspectingItem == nil ? 0 : ClipFlowMotion.backgroundDefocusRadius)
 
@@ -633,7 +641,7 @@ struct QuickPastePanelView: View {
                 .transition(ClipFlowMotion.overlayTransition)
             }
         }
-        .padding(14)
+        .padding(ClipFlowLayout.pageInset)
         .frame(width: QuickPastePanelLayout.panelWidth, height: QuickPastePanelLayout.panelHeight, alignment: .topLeading)
         .onAppear {
             if selectedItemID == nil {
@@ -643,11 +651,15 @@ struct QuickPastePanelView: View {
         .onChangeBackward(of: query) {
             selectedItemID = clips.first?.id
         }
+        .background {
+            GeometryReader { proxy in
+                FloatingPanelBackground(palette: palette, tintOpacity: 0.82)
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+            }
+            .allowsHitTesting(false)
+        }
         .clipShape(RoundedRectangle(cornerRadius: QuickPastePanelLayout.cornerRadius, style: .continuous))
-        .background(
-            RoundedRectangle(cornerRadius: QuickPastePanelLayout.cornerRadius, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
         .overlay(
             RoundedRectangle(cornerRadius: QuickPastePanelLayout.cornerRadius, style: .continuous)
                 .stroke(palette.border, lineWidth: 1)
@@ -729,7 +741,9 @@ struct HUDRow: View {
         .padding(.vertical, 9)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(isSelected ? tint.opacity(0.18) : palette.softFill)
+                .fill(palette.softFill)
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(isSelected ? tint.opacity(0.16) : .clear))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -757,25 +771,6 @@ struct HUDRow: View {
         case .secret: "lock.fill"
         case .image: "photo.stack.fill"
         }
-    }
-}
-
-struct HUDCompactButtonStyle: ButtonStyle {
-    let fill: Color
-    var foreground: Color = Color.primary
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(foreground)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .background(
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(fill.opacity(configuration.isPressed ? 0.75 : 1))
-            )
-            .animation(ClipFlowMotion.press, value: configuration.isPressed)
     }
 }
 

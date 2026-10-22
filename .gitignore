@@ -5,3 +5,13 @@ dist/
 
 # Local icon explorations; approved assets live directly in assets/icon/.
 assets/icon/concepts-2026-10/
+
+# Local AI design context and superseded planning notes
+/.impeccable.md
+/docs/clipflow-design.md
+/docs/clipflow-technical-design.md
+/docs/project-inventory.md
+
+# Retired icon experiments (approved SVG/PNG sources are in assets/icon/)
+/scripts/render_icon.swift
+/scripts/render_icon_classic.swift

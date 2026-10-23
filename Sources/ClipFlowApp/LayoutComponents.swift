@@ -7,24 +7,65 @@ enum ClipFlowLayout {
     static let surfaceRadius: CGFloat = 16
     static let controlRadius: CGFloat = 10
     static let controlHeight: CGFloat = 32
-    static let libraryWidth: CGFloat = 460
+    static let libraryWidth: CGFloat = 620
     static let settingsWidth: CGFloat = libraryWidth
     static let menuWidth: CGFloat = 360
-    static let menuHeight: CGFloat = 600
+    static let menuHeight: CGFloat = 440
+}
+
+struct CleanGlassBackground: View {
+    var cornerRadius: CGFloat = ClipFlowLayout.surfaceRadius
+    var elevated = false
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        let dark = colorScheme == .dark
+        let opaque = reduceTransparency || elevated
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        shape.fill(LinearGradient(colors: dark
+            ? [Color(red: 0.17, green: 0.19, blue: 0.23).opacity(opaque ? 1 : 0.94),
+               Color(red: 0.14, green: 0.16, blue: 0.20).opacity(opaque ? 1 : 0.88)]
+            : [Color.white.opacity(reduceTransparency ? 1 : (elevated ? 0.98 : 0.88)),
+               Color.white.opacity(reduceTransparency ? 1 : (elevated ? 0.96 : 0.62))],
+            startPoint: .topLeading, endPoint: .bottomTrailing))
+            .overlay(shape.strokeBorder(LinearGradient(colors: [
+                .white.opacity(dark ? 0.20 : 0.95),
+                .white.opacity(dark ? 0.04 : 0.35)
+            ], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+            .shadow(color: .black.opacity(dark ? 0.12 : 0.035), radius: 8, y: 3)
+            .allowsHitTesting(false)
+    }
+}
+
+/// Detail overlays need a distinct floating shell, separate from the flat page cards.
+struct DetailGlassBackground: View {
+    var cornerRadius: CGFloat = 26
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        let dark = colorScheme == .dark
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        shape.fill(LinearGradient(colors: dark
+            ? [Color(red: 0.17, green: 0.19, blue: 0.23), Color(red: 0.14, green: 0.16, blue: 0.20)]
+            : [Color(red: 0.96, green: 0.975, blue: 0.99), Color(red: 0.91, green: 0.935, blue: 0.97)],
+            startPoint: .topLeading, endPoint: .bottomTrailing))
+        .overlay(shape.strokeBorder(LinearGradient(colors: [
+            .white.opacity(dark ? 0.32 : 0.85), .white.opacity(dark ? 0.08 : 0.26)
+        ], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+        .shadow(color: .black.opacity(dark ? 0.32 : 0.16), radius: 24, y: 12)
+        .shadow(color: .black.opacity(dark ? 0.12 : 0.05), radius: 4, y: 2)
+        .allowsHitTesting(false)
+    }
 }
 
 struct LayoutSurface<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        content
-            .padding(ClipFlowLayout.pageInset)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: ClipFlowLayout.surfaceRadius))
-            .overlay {
-                RoundedRectangle(cornerRadius: ClipFlowLayout.surfaceRadius)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(0.025), radius: 8, y: 3)
+        content.padding(ClipFlowLayout.pageInset)
+            .background(CleanGlassBackground())
     }
 }
 
@@ -66,18 +107,9 @@ struct ClipFlowBrandMark: View {
 
 struct ClipFlowBrandSurface<Content: View>: View {
     @ViewBuilder var content: Content
-
     var body: some View {
-        content
-            .padding(12)
-            .background {
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(LinearGradient(
-                        colors: [ClipCategory.quickPaste.tint.opacity(0.12), ClipCategory.all.tint.opacity(0.10)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing))
-            }
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+        content.padding(12)
+            .background(CleanGlassBackground(cornerRadius: 20))
     }
 }
 
@@ -121,14 +153,7 @@ struct ClipFlowActionButtonStyle: ButtonStyle {
 /// Keep translucency on the floating shell, never on its text or image content.
 struct FloatingPanelBackground: View {
     let palette: ClipFlowPalette
-    var tintOpacity: Double
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
     var body: some View {
-        Rectangle().fill(.regularMaterial)
-            .overlay {
-                AppBackground(palette: palette)
-                    .opacity(reduceTransparency ? 1 : tintOpacity)
-            }
+        AppBackground(palette: palette, restrained: true)
     }
 }

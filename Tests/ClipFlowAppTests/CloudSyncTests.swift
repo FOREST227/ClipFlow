@@ -2,6 +2,15 @@ import XCTest
 @testable import ClipFlowApp
 
 final class CloudSyncTests: XCTestCase {
+    func testStatusLabelsSeparateEnablementFromProgress() {
+        XCTAssertEqual(ClipFlowCloudSyncPhase.disabled.statusLabel, "未同步")
+        XCTAssertEqual(ClipFlowCloudSyncPhase.pending.statusLabel, "未同步")
+        XCTAssertEqual(ClipFlowCloudSyncPhase.syncing.statusLabel, "同步中")
+        XCTAssertEqual(ClipFlowCloudSyncPhase.active.statusLabel, "已同步")
+        XCTAssertEqual(ClipFlowCloudSyncPhase.unavailable.statusLabel, "同步失败")
+        XCTAssertEqual(ClipFlowCloudSyncPhase.failed("error").statusLabel, "同步失败")
+    }
+
     func testUnchangedSyncDoesNotRewriteHistory() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

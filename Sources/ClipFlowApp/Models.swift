@@ -53,8 +53,8 @@ enum ClipCategory: String, CaseIterable, Identifiable {
         case .all: Color(red: 0.34, green: 0.58, blue: 0.95)
         case .quickPaste: Color(red: 0.92, green: 0.58, blue: 0.23)
         case .smartStacks: Color(red: 0.39, green: 0.72, blue: 0.68)
-        case .code: Color(red: 0.42, green: 0.66, blue: 0.98)
-        case .links: Color(red: 0.29, green: 0.62, blue: 0.86)
+        case .code: Color(red: 0.58, green: 0.46, blue: 0.85)
+        case .links: Color(red: 0.36, green: 0.40, blue: 0.84)
         case .protected: Color(red: 0.83, green: 0.35, blue: 0.31)
         }
     }
@@ -66,6 +66,16 @@ enum ClipboardKind: String, Codable, CaseIterable, Sendable {
     case link
     case secret
     case image
+
+    var tint: Color {
+        switch self {
+        case .text: ClipCategory.all.tint
+        case .code: ClipCategory.code.tint
+        case .link: ClipCategory.links.tint
+        case .secret: ClipCategory.protected.tint
+        case .image: ClipCategory.smartStacks.tint
+        }
+    }
 
     var label: String {
         switch self {
@@ -297,10 +307,12 @@ enum ClipboardClassifier {
             }
         case .code:
             labels.append(isLikelyShellCommand(text, lowered: lowered) ? "命令" : "代码")
-            if lowered.contains("swift") || lowered.contains("import swiftui") || lowered.contains("import foundation") {
+            let swiftSyntax = lowered.range(of: #"(?m)^\s*(?:func\s+\w+\s*\(|import\s+(?:swiftui|foundation)\b|@(?:state|binding|published)\b)"#,
+                options: .regularExpression) != nil
+            if swiftSyntax || lowered.contains("import swiftui") || lowered.contains("import foundation") {
                 labels.append("Swift")
             }
-            if lowered.contains("python") || lowered.contains("def ") || lowered.contains("print(") {
+            if !swiftSyntax && (lowered.contains("python") || lowered.contains("def ") || lowered.contains("print(")) {
                 labels.append("Python")
             }
             if lowered.contains("select ") || lowered.contains("insert into") || lowered.contains("update ") || lowered.contains("delete from") {
@@ -465,6 +477,25 @@ enum ClipboardClassifier {
             return true
         }
 
+        // Syntax-shaped fragments also cover single-line calls and partial snippets.
+        let syntaxPatterns = [
+            #"(?m)^\s*(?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*\([^\n]*\)(?:\.[A-Za-z_$][\w$]*\([^\n]*\))*\s*;?\s*$"#,
+            #"(?m)^\s*\.[A-Za-z_][\w]*\([^\n]*\)\s*$"#,
+            #"(?m)^\s*#\s*(?:include|define|ifn?def|endif)\b"#,
+            #"(?m)^\s*(?:using\s+[\w.]+\s*;|package\s+[\w.]+\s*;?)\s*$"#,
+            #"(?m)^\s*(?:(?:unsigned|signed|static|final|volatile)\s+)*(?:int|long|short|double|float|bool|char|String|boolean|size_t)\s+\**[A-Za-z_]\w*\s*(?:=|;|\()"#,
+            #"(?m)^\s*(?:std::\w+\s*<<|\[\w+\s+\w+:.*\];)"#,
+            #"(?s)^[.#@]?[A-Za-z_][\w.# :>,-]*\s*\{\s*[\w-]+\s*:[^{}]+;\s*.*\}$"#
+        ]
+        if syntaxPatterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) {
+            return true
+        }
+        let yamlKeys = lines.filter { $0.range(of: #"^[A-Za-z_][\w.-]*:\s*(?:.*)$"#, options: .regularExpression) != nil }
+        if yamlKeys.count >= 2,
+           text.range(of: #"(?m)^[ \t]+[A-Za-z_][\w.-]*:"#, options: .regularExpression) != nil {
+            return true
+        }
+
         var score = 0
 
         if lines.count >= 2 {
@@ -479,6 +510,8 @@ enum ClipboardClassifier {
         let symbolHits = codeSymbolPatterns.filter {
             trimmed.range(of: $0, options: .regularExpression) != nil
         }.count
+        // English keywords alone ("from", "return", "class") are not code.
+        guard symbolHits > 0 else { return false }
         score += min(symbolHits, 2)
 
         let codeLikeLines = lines.filter { lineLooksLikeCode($0) }.count
@@ -617,7 +650,18 @@ enum ClipboardClassifier {
     }
 
     private static func isLikelyShellCommand(_ text: String, lowered: String) -> Bool {
-        let commandRegex = #"^(?:[$>%#]\s*)?(?:git|ssh|scp|brew|npm|pnpm|yarn|npx|node|python|python3|pip|pip3|curl|wget|docker|kubectl|defaults|chmod|chown|find|grep|sed|awk|cat|ls|cd|pwd|cp|mv|rm|mkdir|touch|swift|xcodebuild|pod|bundle|rails)\b"#
+        let structuredCommands = [
+            #"^(?:PS\s+[^>]+>\s*)?(?:Get|Set|New|Remove|Clear|Add|Copy|Move|Rename|Test|Start|Stop|Restart|Invoke|Import|Export|Install|Uninstall|Update|Write|Read|Select|Where|ForEach|Sort|Format|Out|ConvertTo|ConvertFrom|Enable|Disable|Resolve|Join|Split|Measure|Wait)-[A-Za-z][\w-]*\b"#,
+            #"^\$(?:env:)?[A-Za-z_]\w*\s*(?:\+?=)"#,
+            #"^\[System\.[\w.]+\]::\w+\("#,
+            #"^(?:export\s+)[A-Za-z_]\w*="#,
+            #"^open\s+(?:-|/|\./|~/|["'])"#,
+            #"^(?:\./|/usr/bin/|/bin/|/usr/sbin/|/opt/homebrew/bin/)[\w./-]+(?:\s|$)"#
+        ]
+        if structuredCommands.contains(where: { text.range(of: $0, options: [.regularExpression, .caseInsensitive]) != nil }) {
+            return true
+        }
+        let commandRegex = #"^(?:[$>%#]\s*)?(?:git|ssh|scp|brew|npm|pnpm|yarn|npx|node|python|python3|pip|pip3|curl|wget|docker|kubectl|defaults|chmod|chown|find|grep|sed|awk|cat|ls|cd|pwd|cp|mv|rm|mkdir|touch|swift|xcodebuild|pod|bundle|rails|sudo|launchctl|diskutil|plutil|osascript|ditto|codesign|xattr|kill|killall|ps|lsof|du|df|uname|whoami|which|env|printenv|echo|printf|pbcopy|pbpaste|source|zsh|bash|sh|fish|make|cmake|cargo|rustc|go|dotnet|pwsh|powershell|winget|choco|scoop)\b"#
         if lowered.range(of: commandRegex, options: .regularExpression) != nil {
             return true
         }
@@ -628,9 +672,16 @@ enum ClipboardClassifier {
     }
 
     private static func looksLikeSQL(_ text: String, lowered: String) -> Bool {
-        let sqlRegex = #"^(?:with|select|insert\s+into|update|delete\s+from|create\s+table|alter\s+table|drop\s+table)\b"#
-        return lowered.range(of: sqlRegex, options: .regularExpression) != nil
-            || text.range(of: #"\bfrom\b.+\bwhere\b"#, options: [.regularExpression, .caseInsensitive]) != nil
+        let patterns = [
+            #"(?s)^select\s+.+\s+from\s+[\w\[\]".]+(?:\s|;|$)"#,
+            #"(?s)^select\s+(?:\d+|count\s*\(|sum\s*\(|now\s*\(|version\s*\()"#,
+            #"(?s)^with\s+\w+\s+as\s*\("#,
+            #"^insert\s+into\s+\w+"#,
+            #"(?s)^update\s+\w+\s+set\s+"#,
+            #"^delete\s+from\s+\w+"#,
+            #"^(?:create|alter|drop)\s+(?:table|database|index|view)\s+\w+"#
+        ]
+        return patterns.contains { lowered.range(of: $0, options: .regularExpression) != nil }
     }
 
     private static func looksLikeJSON(_ text: String) -> Bool {
@@ -740,6 +791,12 @@ enum ClipboardClassifier {
     ]
 }
 
+/// Selection changes are independent of clipboard content and settings.
+@MainActor
+final class HistorySelection: ObservableObject {
+    @Published var itemID: ClipboardItem.ID?
+}
+
 @MainActor
 final class ClipFlowStore: ObservableObject {
     static let shared = ClipFlowStore()
@@ -750,7 +807,14 @@ final class ClipFlowStore: ObservableObject {
     @Published var selectedCategory: ClipCategory = .all {
         didSet { ensureSelectionStillValid() }
     }
-    @Published var selectedItemID: ClipboardItem.ID?
+    let historySelection = HistorySelection()
+    var selectedItemID: ClipboardItem.ID? {
+        get { historySelection.itemID }
+        set {
+            guard historySelection.itemID != newValue else { return }
+            historySelection.itemID = newValue
+        }
+    }
     @Published var capturePaused: Bool {
         didSet { defaults.set(capturePaused, forKey: Keys.capturePaused) }
     }
@@ -768,9 +832,6 @@ final class ClipFlowStore: ObservableObject {
         }
     }
     @Published var launchAtLogin: Bool
-    @Published var menuQuickPasteModeEnabled: Bool {
-        didSet { defaults.set(menuQuickPasteModeEnabled, forKey: Keys.menuQuickPasteModeEnabled) }
-    }
     @Published var iCloudSyncEnabled: Bool
     @Published var excludedBundleIDs: [String] {
         didSet { defaults.set(excludedBundleIDs, forKey: Keys.excludedBundleIDs) }
@@ -840,7 +901,6 @@ final class ClipFlowStore: ObservableObject {
         autoProtectSecrets = defaults.object(forKey: Keys.autoProtectSecrets) as? Bool ?? true
         sensitiveAutoExpireEnabled = defaults.object(forKey: Keys.sensitiveAutoExpireEnabled) as? Bool ?? true
         launchAtLogin = Self.currentLaunchAtLoginState()
-        menuQuickPasteModeEnabled = defaults.object(forKey: Keys.menuQuickPasteModeEnabled) as? Bool ?? true
         iCloudSyncEnabled = defaults.object(forKey: Keys.iCloudSyncEnabled) as? Bool ?? false
         excludedBundleIDs = defaults.stringArray(forKey: Keys.excludedBundleIDs) ?? Self.defaultExcludedBundleIDs
         iCloudLastSyncedAt = defaults.object(forKey: Keys.iCloudLastSyncedAt) as? Date
@@ -976,6 +1036,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     func select(_ item: ClipboardItem) {
+        guard selectedItemID != item.id else { return }
         selectedItemID = item.id
     }
 
@@ -1121,12 +1182,6 @@ final class ClipFlowStore: ObservableObject {
         }
     }
 
-    func toggleMenuQuickPasteMode() {
-        menuQuickPasteModeEnabled.toggle()
-        lastCaptureStatus = menuQuickPasteModeEnabled
-            ? "已开启快贴模式，双击最近条目会直接粘贴"
-            : "已关闭快贴模式，左键点击最近条目会复制到剪贴板"
-    }
 
     func setICloudSyncEnabled(_ enabled: Bool) {
         cloudSyncGeneration += 1
@@ -1268,25 +1323,12 @@ final class ClipFlowStore: ObservableObject {
         capturePaused ? "已暂停剪贴监听" : lastCaptureStatus
     }
 
-    var iCloudSyncStatusValue: String {
-        switch iCloudSyncPhase {
-        case .disabled:
-            return "未启用"
-        case .syncing:
-            return "整理中"
-        case .active:
-            return "已启用"
-        case .unavailable:
-            return "不可用"
-        case .failed:
-            return "异常"
-        }
-    }
+    var iCloudSyncStatusValue: String { iCloudSyncPhase.statusLabel }
 
     var iCloudSyncTint: Color {
         switch iCloudSyncPhase {
-        case .disabled:
-            return ClipCategory.all.tint
+        case .disabled, .pending:
+            return .secondary
         case .syncing:
             return ClipCategory.quickPaste.tint
         case .active:
@@ -1300,11 +1342,13 @@ final class ClipFlowStore: ObservableObject {
         switch iCloudSyncPhase {
         case .disabled:
             return "将普通文本与图片历史镜像到“文稿/ClipFlow”。如果系统已开启 iCloud Drive 的“桌面与文稿文件夹”，这些内容会随系统同步。"
+        case .pending:
+            return "本机有待同步的内容，正在等待下一次同步。"
         case .syncing:
             return "正在合并本机与“文稿/ClipFlow”中的历史内容。"
         case .active:
             if let iCloudLastSyncedAt {
-                return "已启用文稿目录同步，上次整理于 \(Self.syncFormatter.string(from: iCloudLastSyncedAt))。受保护内容不会写入“文稿/ClipFlow”。"
+                return "文稿目录已同步，上次完成于 \(Self.syncFormatter.string(from: iCloudLastSyncedAt))。受保护内容不会写入“文稿/ClipFlow”。"
             }
             return "已启用文稿目录同步。若系统已开启文稿同步，普通历史内容会随系统在设备间同步。"
         case .unavailable:
@@ -1481,6 +1525,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     private func scheduleICloudSync() {
+        if iCloudSyncEnabled && activeCloudSyncTask == nil { iCloudSyncPhase = .pending }
         pendingCloudSyncTask?.cancel()
         pendingCloudSyncTask = Task { [weak self] in
             do {
@@ -1694,7 +1739,6 @@ final class ClipFlowStore: ObservableObject {
         static let autoProtectSecrets = "autoProtectSecrets"
         static let sensitiveAutoExpireEnabled = "sensitiveAutoExpireEnabled"
         static let launchAtLogin = "launchAtLogin"
-        static let menuQuickPasteModeEnabled = "menuQuickPasteModeEnabled"
         static let iCloudSyncEnabled = "iCloudSyncEnabled"
         static let iCloudLastSyncedAt = "iCloudLastSyncedAt"
         static let iCloudSyncTombstones = "iCloudSyncTombstones"

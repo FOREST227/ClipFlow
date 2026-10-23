@@ -2,10 +2,20 @@ import Foundation
 
 enum ClipFlowCloudSyncPhase: Equatable {
     case disabled
+    case pending
     case syncing
     case active
     case unavailable
     case failed(String)
+
+    var statusLabel: String {
+        switch self {
+        case .disabled, .pending: "未同步"
+        case .syncing: "同步中"
+        case .active: "已同步"
+        case .unavailable, .failed: "同步失败"
+        }
+    }
 }
 
 struct ClipFlowCloudSyncState: Codable {

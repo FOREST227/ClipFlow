@@ -6,8 +6,8 @@ set -euo pipefail
 # build_release_dmg.sh — Build arm64, x86_64, and universal DMGs.
 #
 # Usage:
-#   ./scripts/build_release_dmg.sh v0.0.7
-#   ./scripts/build_release_dmg.sh            # uses CLIPFLOW_VERSION or v0.0.7
+#   ./scripts/build_release_dmg.sh v0.0.8
+#   ./scripts/build_release_dmg.sh            # uses CLIPFLOW_VERSION or v0.0.8
 #
 # Produces:
 #   dist/release/ClipFlow-<tag>-arm64.dmg
@@ -22,7 +22,7 @@ RELEASE_DIR="$DIST_DIR/release"
 APP_NAME="ClipFlow"
 PRODUCT_NAME="ClipFlowApp"
 
-RAW_VERSION="${1:-${CLIPFLOW_VERSION:-v0.0.7}}"
+RAW_VERSION="${1:-${CLIPFLOW_VERSION:-v0.0.8}}"
 TAG_NAME="${RAW_VERSION#refs/tags/}"
 BUNDLE_VERSION="${TAG_NAME#v}"
 BUILD_NUMBER="${CLIPFLOW_BUILD_NUMBER:-${GITHUB_RUN_NUMBER:-1}}"

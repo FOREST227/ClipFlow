@@ -11,7 +11,7 @@ set -euo pipefail
 #   ./scripts/build_app.sh x86_64           # Intel
 #
 # Environment variables:
-#   CLIPFLOW_VERSION       — bundle short version (default 0.0.7)
+#   CLIPFLOW_VERSION       — bundle short version (default 0.0.8)
 #   CLIPFLOW_BUILD_NUMBER  — bundle build number (default 1)
 #   CLIPFLOW_ADHOC_SIGN    — set to 1 for explicit ad-hoc signing (CI only)
 # ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ APP_NAME="ClipFlow"
 DIST_DIR="$ROOT_DIR/dist"
 ICON_PNG="$ROOT_DIR/assets/icon/ClipFlow-icon-1024.png"
 ICON_NAME="AppIcon"
-APP_VERSION="${CLIPFLOW_VERSION:-0.0.7}"
+APP_VERSION="${CLIPFLOW_VERSION:-0.0.8}"
 BUILD_NUMBER="${CLIPFLOW_BUILD_NUMBER:-1}"
 DEPLOYMENT_TARGET="12.0"
 
@@ -83,6 +83,7 @@ rm -rf "$ICONSET_DIR"
 mkdir -p "$ICONSET_DIR"
 
 cp "$BINARY_PATH" "$APP_DIR/Contents/MacOS/$PRODUCT_NAME"
+ditto "$ROOT_DIR/Sources/ClipFlowApp/Renderer" "$APP_DIR/Contents/Resources/Renderer"
 
 for size in 16 32 128 256 512; do
   sips -z "$size" "$size" "$ICON_PNG" --out "$ICONSET_DIR/icon_${size}x${size}.png" >/dev/null

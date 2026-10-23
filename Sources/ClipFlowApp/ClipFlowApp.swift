@@ -21,10 +21,7 @@ final class ClipFlowAppDelegate: NSObject, NSApplicationDelegate {
     private var statusBarController: StatusBarController?
     private var appearanceSubscription: AnyCancellable?
     private let appearanceTransition = AppearanceTransition()
-    private lazy var mainWindowController = MainWindowController(
-        store: ClipFlowStore.shared,
-        locale: Locale(identifier: "zh-Hans")
-    )
+    private var mainWindowController: MainWindowController?
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Native windows, popovers and every NSHostingView inherit this override.
         // nil removes it so future macOS appearance changes propagate normally.
@@ -111,12 +108,21 @@ final class ClipFlowAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
+    private func showMainWindow(page: MainWindowPage) {
+        if mainWindowController == nil {
+            mainWindowController = MainWindowController(store: ClipFlowStore.shared,
+                locale: Locale(identifier: "zh-Hans"), initialPage: page)
+        }
+        mainWindowController?.show(page: page)
+    }
+
+    @MainActor
     private func showLibraryWindow() {
-        mainWindowController.show(page: .history)
+        showMainWindow(page: .history)
     }
 
     @MainActor
     private func showSettingsWindow() {
-        mainWindowController.show(page: .settings)
+        showMainWindow(page: .settings)
     }
 }

@@ -50,5 +50,24 @@ GitHub 托管构建机没有本机私钥，因此现有发布流程显式使用 
 生成三种架构的安装包：
 
 ```bash
-zsh scripts/build_release_dmg.sh v0.0.7
+zsh scripts/build_release_dmg.sh v0.0.8
 ```
+
+## 离线渲染资源
+
+代码高亮使用 highlight.js 11.11.1，Markdown 使用 markdown-it 14.1.0。
+脚本和许可证位于 Sources/ClipFlowApp/Renderer/，随应用打包；运行时无需联网。
+替换依赖时请保留许可证，并执行 DetailTextRendererTests 验证语言资源、源码转义和预览隔离。
+
+## 更新 README 截图
+
+截图使用真实视图与临时演示数据，不读取个人剪贴历史：
+
+~~~bash
+CLIPFLOW_PROJECT_DIR="$PWD" \
+CLIPFLOW_SCREENSHOT_DIR="$PWD/docs/images" \
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+swift test --filter DocumentationScreenshotTests
+~~~
+
+未设置截图目录时，此导出测试会跳过。生成后需人工检查图片。

@@ -15,7 +15,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "ClipFlowApp",
-            path: "Sources/ClipFlowApp"
+            path: "Sources/ClipFlowApp",
+            resources: [.copy("Renderer")]
         ),
         .testTarget(
             name: "ClipFlowAppTests",

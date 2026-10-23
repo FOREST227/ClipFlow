@@ -60,7 +60,8 @@ final class DocumentationScreenshotTests: XCTestCase {
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
                 .write(to: output.appendingPathComponent(name + ".png"))
         }
-        func export<V: View>(_ view: V, size: NSSize, name: String) throws {
+        func export<V: View>(_ view: V, size: NSSize, name: String,
+            prepare: ((NSView) throws -> Void)? = nil) throws {
             let host = NSHostingController(rootView: view.environment(\.locale, Locale(identifier: "zh-Hans"))
                 .preferredColorScheme(.light))
             let window = NSWindow(contentViewController: host)
@@ -70,6 +71,8 @@ final class DocumentationScreenshotTests: XCTestCase {
             window.makeKeyAndOrderFront(nil)
             defer { window.close() }
             RunLoop.main.run(until: Date().addingTimeInterval(1))
+            try prepare?(host.view)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
             try save(host.view, name: name)
         }
         let controller = MainWindowController(store: store, locale: Locale(identifier: "zh-Hans"))
@@ -83,20 +86,75 @@ final class DocumentationScreenshotTests: XCTestCase {
         controller.navigation.selectSettings(.general)
         RunLoop.main.run(until: Date().addingTimeInterval(1.5))
         try save(try XCTUnwrap(window.contentView?.superview), name: "settings")
+        let backdrop = Color(red: 0.94, green: 0.96, blue: 0.98)
         try export(QuickPastePanelView(store: store, preferredTargetName: nil,
-            onPaste: { _ in }, onOpenLibrary: {}, onClose: {}),
-            size: NSSize(width: 360, height: 588), name: "quick-paste")
-        try export(MenuBarView(store: store), size: NSSize(width: 360, height: 440), name: "menu")
-        let code = try XCTUnwrap(store.items.first { $0.sourceApp == "Xcode" })
-        try export(ZStack {
-            Color(red: 0.94, green: 0.96, blue: 0.98)
-            LibraryInspectorOverlay(item: code, store: store, palette: .resolve(for: .light),
-                maxHeight: 500, onClose: {}).frame(width: 438).padding(16)
-        }.frame(width: 470, height: 360),
-            size: NSSize(width: 470, height: 360), name: "code-detail")
-        try export(DetailTextRenderer(
-            text: "# 项目笔记\n\n## 本周安排\n- 完成界面调整\n- 整理使用说明\n\n| 功能 | 状态 |\n| --- | --- |\n| 快速粘贴 | 已完成 |\n| 图片缩放 | 已完成 |\n\n> 复制过的内容，随时找回。",
-            markdown: true, language: "markdown", dark: false).frame(width: 438, height: 330),
-            size: NSSize(width: 438, height: 330), name: "markdown-preview")
+            onPaste: { _ in }, onOpenLibrary: {}, onClose: {})
+                .padding(12).background(backdrop),
+            size: NSSize(width: 384, height: 612), name: "quick-paste")
+        // NSPopover's compositor-owned edge is not included by cacheDisplay.
+        // Supply its rounded presentation frame around the unmodified app content.
+        try export(MenuBarView(store: store)
+            .frame(width: 360, height: 440)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.black.opacity(0.16), lineWidth: 1))
+            .shadow(color: Color.black.opacity(0.12), radius: 6, y: 3)
+            .padding(12).background(backdrop),
+            size: NSSize(width: 384, height: 464), name: "menu")
+
+        let codeText = """
+        import Foundation
+
+        struct ClipboardEntry {
+            let title: String
+            let content: String
+
+            func summary() -> String {
+                String(content.prefix(80))
+            }
+        }
+
+        let entry = ClipboardEntry(
+            title: "项目笔记",
+            content: "复制过的内容，随时找回。"
+        )
+        print(entry.summary())
+        """
+        let markdownText = """
+        # 项目笔记
+
+        - 完成界面调整
+        - 整理使用说明
+
+        | 功能 | 状态 |
+        | --- | --- |
+        | 快速粘贴 | 已完成 |
+        | 图片缩放 | 已完成 |
+
+        **复制过的内容，随时找回。**
+
+        ---
+
+        下一步：整理版本说明，检查下载链接。
+        """
+        let code = ClipboardClassifier.makeItem(text: codeText, sourceApp: "Xcode",
+            sourceBundleID: nil, autoProtectSecrets: false, existingItem: nil)
+        let markdown = ClipboardClassifier.makeItem(text: markdownText, sourceApp: "文本编辑",
+            sourceBundleID: nil, autoProtectSecrets: false, existingItem: nil)
+        func detail(_ item: ClipboardItem) -> some View {
+            ZStack(alignment: .top) {
+                Color.white
+                LibraryInspectorOverlay(item: item, store: store, palette: .resolve(for: .light),
+                    maxHeight: 660, onClose: {}).frame(width: 438).padding(16)
+            }.frame(width: 470, height: 520)
+        }
+        try export(detail(code), size: NSSize(width: 470, height: 520), name: "code-detail")
+        try export(detail(markdown), size: NSSize(width: 470, height: 520), name: "markdown-preview") { root in
+            func controls(_ view: NSView) -> [NSSegmentedControl] {
+                (view as? NSSegmentedControl).map { [$0] } ?? view.subviews.flatMap(controls)
+            }
+            let picker = try XCTUnwrap(controls(root).first { $0.segmentCount == 2 })
+            picker.selectedSegment = 1
+            XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(picker.action), to: picker.target, from: picker))
+        }
     }
 }

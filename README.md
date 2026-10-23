@@ -33,8 +33,8 @@
 以下均为 v0.0.8 实际应用组件的截图，内容使用演示数据。
 
 <p align="center">
-  <img src="docs/images/quick-paste.png" width="48%" align="top" alt="快速粘贴面板：搜索、类型卡片及粘贴操作">
-  <img src="docs/images/menu.png" width="48%" align="top" alt="菜单栏概览：监听状态、隐私开关、文稿同步与功能入口">
+  <img src="docs/images/quick-paste.png" width="48%" align="middle" alt="快速粘贴面板：搜索、类型卡片及粘贴操作">
+  <img src="docs/images/menu.png" width="48%" align="middle" alt="菜单栏概览：监听状态、隐私开关、文稿同步与功能入口">
 </p>
 <p align="center">快速粘贴 · 菜单栏概览</p>
 

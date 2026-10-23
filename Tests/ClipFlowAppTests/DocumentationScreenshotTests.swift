@@ -118,6 +118,12 @@ final class DocumentationScreenshotTests: XCTestCase {
             content: "复制过的内容，随时找回。"
         )
         print(entry.summary())
+
+        let entries = [entry]
+        let titles = entries.map { $0.title }
+        for title in titles {
+            print(title)
+        }
         """
         let markdownText = """
         # 项目笔记
@@ -135,6 +141,14 @@ final class DocumentationScreenshotTests: XCTestCase {
         ---
 
         下一步：整理版本说明，检查下载链接。
+
+        ## 发布检查
+
+        - 检查快捷键
+        - 检查历史记录
+        - 检查图片缩放
+        - 更新下载页面
+        - 整理使用反馈
         """
         let code = ClipboardClassifier.makeItem(text: codeText, sourceApp: "Xcode",
             sourceBundleID: nil, autoProtectSecrets: false, existingItem: nil)
@@ -144,7 +158,10 @@ final class DocumentationScreenshotTests: XCTestCase {
             ZStack(alignment: .top) {
                 Color.white
                 LibraryInspectorOverlay(item: item, store: store, palette: .resolve(for: .light),
-                    maxHeight: 564, contentWidth: 304, onClose: {}).frame(width: 304).padding(16)
+                    maxHeight: 564, contentWidth: 304, compactShadow: true, onClose: {}).frame(width: 304)
+                    .overlay(RoundedRectangle(cornerRadius: 22)
+                        .strokeBorder(Color.black.opacity(0.16), lineWidth: 1))
+                    .padding(16)
             }.frame(width: 336, height: 520)
         }
         try export(detail(code), size: NSSize(width: 336, height: 520), name: "code-detail")

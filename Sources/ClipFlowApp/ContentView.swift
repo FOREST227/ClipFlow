@@ -452,6 +452,7 @@ struct LibraryInspectorOverlay: View {
     let palette: ClipFlowPalette
     let maxHeight: CGFloat
     var contentWidth: CGFloat = 438
+    var compactShadow = false
     var onPasteAction: (() -> Void)? = nil
     let onClose: () -> Void
     @Environment(\.colorScheme) private var textColorScheme
@@ -598,7 +599,7 @@ struct LibraryInspectorOverlay: View {
             .font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .padding(20)
-        .background(DetailGlassBackground(cornerRadius: 22))
+        .background(DetailGlassBackground(cornerRadius: 22, compactShadow: compactShadow))
         .onChangeBackward(of: item.id) { showsInfo = false; copyFeedback = nil; showsMarkdownPreview = false; codeLanguage = "自动识别" }
     }
 

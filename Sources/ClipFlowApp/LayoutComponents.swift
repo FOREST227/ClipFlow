@@ -41,6 +41,7 @@ struct CleanGlassBackground: View {
 /// Detail overlays need a distinct floating shell, separate from the flat page cards.
 struct DetailGlassBackground: View {
     var cornerRadius: CGFloat = 26
+    var compactShadow = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -54,8 +55,9 @@ struct DetailGlassBackground: View {
         .overlay(shape.strokeBorder(LinearGradient(colors: [
             .white.opacity(dark ? 0.32 : 0.85), .white.opacity(dark ? 0.08 : 0.26)
         ], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
-        .shadow(color: .black.opacity(dark ? 0.32 : 0.16), radius: 24, y: 12)
-        .shadow(color: .black.opacity(dark ? 0.12 : 0.05), radius: 4, y: 2)
+        .shadow(color: .black.opacity(compactShadow ? 0.12 : (dark ? 0.32 : 0.16)),
+            radius: compactShadow ? 6 : 24, y: compactShadow ? 3 : 12)
+        .shadow(color: .black.opacity(compactShadow ? 0 : (dark ? 0.12 : 0.05)), radius: 4, y: 2)
         .allowsHitTesting(false)
     }
 }

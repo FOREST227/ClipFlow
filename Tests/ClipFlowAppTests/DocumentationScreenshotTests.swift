@@ -144,11 +144,11 @@ final class DocumentationScreenshotTests: XCTestCase {
             ZStack(alignment: .top) {
                 Color.white
                 LibraryInspectorOverlay(item: item, store: store, palette: .resolve(for: .light),
-                    maxHeight: 660, onClose: {}).frame(width: 438).padding(16)
-            }.frame(width: 470, height: 520)
+                    maxHeight: 564, contentWidth: 304, onClose: {}).frame(width: 304).padding(16)
+            }.frame(width: 336, height: 520)
         }
-        try export(detail(code), size: NSSize(width: 470, height: 520), name: "code-detail")
-        try export(detail(markdown), size: NSSize(width: 470, height: 520), name: "markdown-preview") { root in
+        try export(detail(code), size: NSSize(width: 336, height: 520), name: "code-detail")
+        try export(detail(markdown), size: NSSize(width: 336, height: 520), name: "markdown-preview") { root in
             func controls(_ view: NSView) -> [NSSegmentedControl] {
                 (view as? NSSegmentedControl).map { [$0] } ?? view.subviews.flatMap(controls)
             }

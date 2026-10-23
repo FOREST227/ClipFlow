@@ -544,7 +544,7 @@ struct LibraryInspectorOverlay: View {
                         .padding(12)
                 }
                 .frame(height: previewHeight)
-                .background(palette.inputFill, in: RoundedRectangle(cornerRadius: 12))
+                .background(textColorScheme == .dark ? palette.inputFill : Color.white, in: RoundedRectangle(cornerRadius: 12))
             }
 
             if item.isSensitive {

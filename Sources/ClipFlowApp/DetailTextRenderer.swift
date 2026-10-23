@@ -45,7 +45,7 @@ enum DetailTextDocument {
         let chosen = language == "自动识别" ? (DetailTextFormat.languageHint(text) ?? "") : language
         let safeLanguage = DetailTextFormat.languages.contains(chosen) ? chosen : ""
         let nonce = UUID().uuidString
-        let background = dark ? "#262b34" : "#f7f9fc"
+        let background = dark ? "#262b34" : "#ffffff"
         let foreground = dark ? "#d9e0eb" : "#263244"
         return """
         <!doctype html><html><head><meta charset="utf-8">
@@ -55,7 +55,7 @@ enum DetailTextDocument {
         :root{color-scheme:\(dark ? "dark" : "light")}*{box-sizing:border-box}
         body{margin:0;padding:12px;background:\(background);color:\(foreground);font:13px/1.6 -apple-system,BlinkMacSystemFont,sans-serif;overflow-wrap:anywhere}
         pre{margin:0;tab-size:4;overflow:auto;white-space:pre}code,pre{font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}
-        article pre{padding:12px;background:\(dark ? "#1e222a" : "#edf1f7");border-radius:8px;margin:12px 0}
+        article pre{padding:12px;background:\(dark ? "#1e222a" : "#ffffff");border-radius:8px;margin:12px 0}
         article :first-child{margin-top:0}article :last-child{margin-bottom:0}
         h1{font-size:22px}h2{font-size:19px}h3{font-size:16px}h1,h2,h3{line-height:1.35}
         a{color:\(dark ? "#91b8ff" : "#3569c8")}blockquote{margin:12px 0;padding-left:12px;border-left:3px solid #819ac1;color:\(dark ? "#aab6c7" : "#61718a")}

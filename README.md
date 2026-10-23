@@ -32,25 +32,21 @@
 
 以下均为 v0.0.8 实际应用组件的截图，内容使用演示数据。
 
-<table>
-  <tr><th>快速粘贴</th><th>菜单栏概览</th></tr>
-  <tr>
-    <td width="50%" align="center" valign="top"><img src="docs/images/quick-paste.png" width="360" alt="快速粘贴面板：搜索、类型卡片及粘贴操作"></td>
-    <td width="50%" align="center" valign="top"><img src="docs/images/menu.png" width="360" alt="菜单栏概览：监听状态、隐私开关、文稿同步与功能入口"></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/images/quick-paste.png" width="48%" align="top" alt="快速粘贴面板：搜索、类型卡片及粘贴操作">
+  <img src="docs/images/menu.png" width="48%" align="top" alt="菜单栏概览：监听状态、隐私开关、文稿同步与功能入口">
+</p>
+<p align="center">快速粘贴 · 菜单栏概览</p>
 
 ### 代码详情与 Markdown 预览
 
 高亮支持 PowerShell、Bash、Swift、Python、JavaScript、TypeScript、C / C++、C#、Java、Go、Rust、SQL、JSON、YAML、HTML、CSS 等常见语言。不能准确自动识别时，可在详情中手动指定语言。
 
-<table>
-  <tr><th>代码详情</th><th>Markdown 预览</th></tr>
-  <tr>
-    <td width="50%" align="center" valign="top"><img src="docs/images/code-detail.png" width="470" alt="完整代码详情卡片：语法高亮、语言选择与操作按钮"></td>
-    <td width="50%" align="center" valign="top"><img src="docs/images/markdown-preview.png" width="470" alt="完整 Markdown 详情卡片：源码与预览切换、排版内容与操作按钮"></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/images/code-detail.png" width="48%" align="top" alt="完整代码详情卡片：语法高亮、语言选择与操作按钮">
+  <img src="docs/images/markdown-preview.png" width="48%" align="top" alt="完整 Markdown 详情卡片：源码与预览切换、排版内容与操作按钮">
+</p>
+<p align="center">代码详情 · Markdown 预览</p>
 
 ### 设置
 

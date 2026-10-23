@@ -86,7 +86,7 @@ final class DocumentationScreenshotTests: XCTestCase {
         controller.navigation.selectSettings(.general)
         RunLoop.main.run(until: Date().addingTimeInterval(1.5))
         try save(try XCTUnwrap(window.contentView?.superview), name: "settings")
-        let backdrop = Color(red: 0.94, green: 0.96, blue: 0.98)
+        let backdrop = Color.white
         try export(QuickPastePanelView(store: store, preferredTargetName: nil,
             onPaste: { _ in }, onOpenLibrary: {}, onClose: {})
                 .padding(12).background(backdrop),

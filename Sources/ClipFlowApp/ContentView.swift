@@ -33,6 +33,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
                 .blur(radius: overlayActive ? ClipFlowMotion.backgroundDefocusRadius : 0)
+                .disabled(overlayActive)
 
                 if overlayActive {
                     Color.black.opacity(0.18)
@@ -324,6 +325,7 @@ struct EmptyLibraryView: View {
 }
 
 struct LibraryInteractiveCard: NSViewRepresentable {
+    @Environment(\.isEnabled) private var isEnabled
     let item: ClipboardItem
     let store: ClipFlowStore
     let displayedSnippet: String
@@ -333,6 +335,7 @@ struct LibraryInteractiveCard: NSViewRepresentable {
 
     func makeNSView(context: Context) -> LibraryInteractiveHostingView {
         let view = LibraryInteractiveHostingView()
+        view.interactionEnabled = isEnabled
         view.update(
             rootView: AnyView(
                 ClipboardCard(
@@ -351,6 +354,7 @@ struct LibraryInteractiveCard: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: LibraryInteractiveHostingView, context: Context) {
+        nsView.interactionEnabled = isEnabled
         nsView.update(
             rootView: AnyView(
                 ClipboardCard(
@@ -429,10 +433,12 @@ final class LibraryInteractiveHostingView: ClipboardRowHitView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        guard interactionEnabled else { return }
         onInspect()
     }
 
     override func otherMouseDown(with event: NSEvent) {
+        guard interactionEnabled else { return }
         if event.buttonNumber == 2 {
             onInspect()
         } else {
@@ -441,6 +447,7 @@ final class LibraryInteractiveHostingView: ClipboardRowHitView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
+        guard interactionEnabled else { return nil }
         onInspect()
         return nil
     }

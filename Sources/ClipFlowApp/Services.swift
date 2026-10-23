@@ -634,6 +634,7 @@ struct QuickPastePanelView: View {
             .blur(radius: inspectingItem == nil ? 0 : ClipFlowMotion.backgroundDefocusRadius)
             .animation(.easeOut(duration: 0.16), value: inspectingItem != nil)
             .allowsHitTesting(inspectingItem == nil)
+            .disabled(inspectingItem != nil)
 
             // Keep the scrim mounted and full-sized; it must not scale with the card
             // or inherit the content padding when the inspector opens/closes.
@@ -804,6 +805,7 @@ struct HUDRow: View {
 }
 
 struct HUDInteractiveRow: NSViewRepresentable {
+    @Environment(\.isEnabled) private var isEnabled
     let item: ClipboardItem
     let store: ClipFlowStore
     let selection: HistorySelection
@@ -813,6 +815,7 @@ struct HUDInteractiveRow: NSViewRepresentable {
 
     func makeNSView(context: Context) -> HUDInteractiveHostingView {
         let view = HUDInteractiveHostingView()
+        view.interactionEnabled = isEnabled
         view.update(
             itemID: item.id,
             rootView: AnyView(
@@ -831,6 +834,7 @@ struct HUDInteractiveRow: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: HUDInteractiveHostingView, context: Context) {
+        nsView.interactionEnabled = isEnabled
         nsView.update(
             itemID: item.id,
             rootView: AnyView(
@@ -940,6 +944,8 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
         }
     }
 
+    override func rowInteractionWasDisabled() { resetClickSequence() }
+
     private func resetClickSequence() {
         previousClick = nil
         if Self.lastClickedRow === self { Self.lastClickedRow = nil }
@@ -956,11 +962,13 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        guard interactionEnabled else { return }
         resetClickSequence()
         onInspect()
     }
 
     override func otherMouseDown(with event: NSEvent) {
+        guard interactionEnabled else { return }
         if event.buttonNumber == 2 {
             resetClickSequence()
             onInspect()
@@ -970,6 +978,7 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
+        guard interactionEnabled else { return nil }
         resetClickSequence()
         onInspect()
         return nil

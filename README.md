@@ -5,7 +5,7 @@
   <p>一款轻量的原生 macOS 剪贴板工具，集中管理文本、代码、链接与图片。</p>
   <p>
     <a href="https://github.com/FOREST227/ClipFlow/releases/latest">下载最新版</a>
-    · <a href="docs/releases/v0.1.0.md">v0.1.0 更新说明</a>
+    · <a href="docs/releases/v0.1.1.md">v0.1.1 更新说明</a>
     · <a href="https://github.com/FOREST227/ClipFlow/issues">反馈问题</a>
   </p>
   <p>macOS 12+ · Apple 芯片 / Intel / 通用版本 · 中文界面 · 本地保存</p>
@@ -62,9 +62,9 @@
 
 | 你的 Mac | 安装包 |
 | --- | --- |
-| Apple 芯片 | ClipFlow-v0.1.0-arm64.dmg |
-| Intel 处理器 | ClipFlow-v0.1.0-x86_64.dmg |
-| 两种架构通用，或不确定芯片类型 | ClipFlow-v0.1.0-universal.dmg |
+| Apple 芯片 | ClipFlow-v0.1.1-arm64.dmg |
+| Intel 处理器 | ClipFlow-v0.1.1-x86_64.dmg |
+| 两种架构通用，或不确定芯片类型 | ClipFlow-v0.1.1-universal.dmg |
 
 1. 打开 .dmg，将 **ClipFlow** 拖入“应用程序”。
 2. 从“应用程序”启动，点击菜单栏中的 ClipFlow 图标。
@@ -114,7 +114,7 @@
 
 构建目标覆盖 macOS 12，但旧系统实机与 Intel 实机仍需要更多验证。遇到问题，欢迎 [提交 Issue](https://github.com/FOREST227/ClipFlow/issues)，附上 macOS 版本、芯片型号、应用版本及复现步骤。分享截图前请遮住私人剪贴内容。
 
-- [更新说明](docs/releases/v0.1.0.md)
+- [更新说明](docs/releases/v0.1.1.md)
 - [开发、测试与打包](docs/development.md)
 - [离线渲染组件与许可证](Sources/ClipFlowApp/Renderer/NOTICE.txt)
 

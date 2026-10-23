@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Carbon
 import SwiftUI
 import UniformTypeIdentifiers
@@ -525,7 +526,8 @@ struct QuickPastePanelView: View {
     let onClose: () -> Void
 
     @ViewState private var query = ""
-    @ViewState private var selectedItemID: UUID?
+    // Keep selection independent of the parent view's layout/scroll identity.
+    @ViewState private var selection = HistorySelection()
     @ViewState private var inspectingItemID: UUID?
 
     var body: some View {
@@ -580,17 +582,17 @@ struct QuickPastePanelView: View {
                                 HUDInteractiveRow(
                                     item: item,
                                     store: store,
-                                    isSelected: selectedItemID == item.id,
+                                    selection: selection,
                                     onSelect: {
-                                        selectedItemID = item.id
+                                        selection.itemID = item.id
                                     },
                                     onPaste: {
-                                        selectedItemID = item.id
+                                        selection.itemID = item.id
                                         onClose()
                                         onPaste(item)
                                     },
                                     onInspect: {
-                                        selectedItemID = item.id
+                                        selection.itemID = item.id
                                         withAnimation(ClipFlowMotion.overlay) {
                                             inspectingItemID = inspectingItemID == item.id ? nil : item.id
                                         }
@@ -616,8 +618,8 @@ struct QuickPastePanelView: View {
                         cornerRadius: ClipFlowLayout.controlRadius))
 
                     Button {
-                        if let selected = clips.first(where: { $0.id == selectedItemID }) ?? clips.first {
-                            selectedItemID = selected.id
+                        if let selected = clips.first(where: { $0.id == selection.itemID }) ?? clips.first {
+                            selection.itemID = selected.id
                             onClose()
                             onPaste(selected)
                         }
@@ -665,12 +667,12 @@ struct QuickPastePanelView: View {
         .animation(.easeOut(duration: 0.16), value: inspectingItem != nil)
         .frame(width: QuickPastePanelLayout.panelWidth, height: QuickPastePanelLayout.panelHeight, alignment: .topLeading)
         .onAppear {
-            if selectedItemID == nil {
-                selectedItemID = clips.first?.id
+            if selection.itemID == nil {
+                selection.itemID = clips.first?.id
             }
         }
         .onChangeBackward(of: query) {
-            selectedItemID = clips.first?.id
+            selection.itemID = clips.first?.id
         }
         .background {
             GeometryReader { proxy in
@@ -693,13 +695,38 @@ struct QuickPastePanelView: View {
     }
 }
 
-struct HUDRow: View {
+/// Selection repaints a lightweight background, never the hosted row's content.
+struct HUDSelectionChrome: View {
+    let itemID: UUID
+    let selection: HistorySelection
+    let tint: Color
+    @ViewState private var isSelected = false
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let palette = ClipFlowPalette.resolve(for: colorScheme)
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(palette.rowFill)
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(isSelected ? tint.opacity(0.16) : .clear))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(isSelected ? tint.opacity(0.65) : palette.rowBorder,
+                    lineWidth: isSelected ? 1.5 : 1))
+            .animation(reduceMotion ? nil : ClipFlowMotion.rowSelection, value: isSelected)
+            .onReceive(selection.$itemID.map { $0 == itemID }.removeDuplicates()) {
+                if isSelected != $0 { isSelected = $0 }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+struct HUDRow: View {
     @Environment(\.colorScheme) private var colorScheme
     private var palette: ClipFlowPalette { .resolve(for: colorScheme) }
     let item: ClipboardItem
     let store: ClipFlowStore
-    let isSelected: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: item.isImage || item.kind == .code ? 6 : 4) {
@@ -735,17 +762,7 @@ struct HUDRow: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
         .frame(height: QuickPasteCardLayout.height(for: item.kind), alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(palette.rowFill)
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isSelected ? tint.opacity(0.16) : .clear))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(isSelected ? tint.opacity(0.65) : palette.rowBorder, lineWidth: isSelected ? 1.5 : 1)
-        )
-        .animation(reduceMotion ? nil : ClipFlowMotion.rowSelection, value: isSelected)
+
     }
 
     @ViewBuilder private var imageContent: some View {
@@ -789,7 +806,7 @@ struct HUDRow: View {
 struct HUDInteractiveRow: NSViewRepresentable {
     let item: ClipboardItem
     let store: ClipFlowStore
-    let isSelected: Bool
+    let selection: HistorySelection
     let onSelect: () -> Void
     let onPaste: () -> Void
     let onInspect: () -> Void
@@ -801,10 +818,11 @@ struct HUDInteractiveRow: NSViewRepresentable {
             rootView: AnyView(
                 HUDRow(
                     item: item,
-                    store: store,
-                    isSelected: isSelected
+                    store: store
                 )
             ),
+            selectionView: AnyView(HUDSelectionChrome(itemID: item.id, selection: selection,
+                tint: item.kind.tint)),
             onSelect: onSelect,
             onPaste: onPaste,
             onInspect: onInspect
@@ -818,10 +836,11 @@ struct HUDInteractiveRow: NSViewRepresentable {
             rootView: AnyView(
                 HUDRow(
                     item: item,
-                    store: store,
-                    isSelected: isSelected
+                    store: store
                 )
             ),
+            selectionView: AnyView(HUDSelectionChrome(itemID: item.id, selection: selection,
+                tint: item.kind.tint)),
             onSelect: onSelect,
             onPaste: onPaste,
             onInspect: onInspect
@@ -830,6 +849,9 @@ struct HUDInteractiveRow: NSViewRepresentable {
 }
 
 final class HUDInteractiveHostingView: ClipboardRowHitView {
+    private(set) var contentRevision = 0
+    var representedItemID: UUID? { itemID }
+    private let selectionHostingView = NSHostingView(rootView: AnyView(EmptyView()))
     private let hostingView = NSHostingView(rootView: AnyView(EmptyView()))
     private static weak var lastClickedRow: HUDInteractiveHostingView?
     private var previousClick: NSEvent?
@@ -843,6 +865,17 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
 
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+
+        selectionHostingView.translatesAutoresizingMaskIntoConstraints = false
+        selectionHostingView.wantsLayer = true
+        selectionHostingView.layer?.backgroundColor = NSColor.clear.cgColor
+        addSubview(selectionHostingView)
+        NSLayoutConstraint.activate([
+            selectionHostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            selectionHostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            selectionHostingView.topAnchor.constraint(equalTo: topAnchor),
+            selectionHostingView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
 
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         hostingView.wantsLayer = true
@@ -865,6 +898,7 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
     func update(
         itemID: UUID? = nil,
         rootView: AnyView,
+        selectionView: AnyView? = nil,
         onSelect: @escaping () -> Void,
         onPaste: @escaping () -> Void,
         onInspect: @escaping () -> Void
@@ -873,7 +907,9 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
             resetClickSequence()
             self.itemID = itemID
         }
+        contentRevision += 1
         hostingView.rootView = rootView
+        if let selectionView { selectionHostingView.rootView = selectionView }
         self.onSelect = onSelect
         self.onPaste = onPaste
         self.onInspect = onInspect

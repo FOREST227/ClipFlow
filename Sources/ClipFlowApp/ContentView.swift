@@ -461,7 +461,10 @@ struct LibraryInspectorOverlay: View {
     var contentWidth: CGFloat = 438
     var compactShadow = false
     var onPasteAction: (() -> Void)? = nil
+    var motion: InspectorMotionProgress? = nil
     let onClose: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var textColorScheme
     @ViewState private var showsMarkdownPreview = false
     @ViewState private var codeLanguage = "自动识别"
@@ -488,6 +491,8 @@ struct LibraryInspectorOverlay: View {
     }
 
     var body: some View {
+        InspectorMotionSurface(motion: motion ?? .settled, reduceMotion: reduceMotion,
+            reduceTransparency: reduceTransparency) { frame in
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -505,6 +510,8 @@ struct LibraryInspectorOverlay: View {
                 .buttonStyle(.plain).help("关闭详情").accessibilityLabel("关闭详情")
             }
 
+
+            Group {
             if item.isImage {
                 if (!item.isSensitive || store.isRevealed(item)), let url = store.imageURL(for: item) {
                     ZoomableDetailImage(url: url)
@@ -555,6 +562,10 @@ struct LibraryInspectorOverlay: View {
                 .background(textColorScheme == .dark ? palette.inputFill : Color.white, in: RoundedRectangle(cornerRadius: 12))
             }
 
+            }
+            .opacity(frame.contentOpacity)
+            .offset(y: frame.contentOffsetY)
+
             if item.isSensitive {
                 Label(item.autoExpire ? "仅本地保存 · 复制 5 分钟后过期" : "受保护内容 · 仅本地保存", systemImage: "lock.shield")
                     .font(.system(size: 10)).foregroundStyle(item.kind.tint)
@@ -592,6 +603,7 @@ struct LibraryInspectorOverlay: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .accessibilityLabel("更多操作")
             }
+            .offset(y: frame.contentOffsetY * 0.5)
             if let copyFeedback {
                 Text(copyFeedback).font(.system(size: 10)).foregroundStyle(.secondary)
             }
@@ -605,8 +617,21 @@ struct LibraryInspectorOverlay: View {
             }
             .font(.system(size: 11)).foregroundStyle(.secondary)
         }
+        .opacity(frame.chromeOpacity)
         .padding(20)
-        .background(DetailGlassBackground(cornerRadius: 22, compactShadow: compactShadow))
+        .mask(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .scaleEffect(x: 1, y: frame.shellScaleY, anchor: .bottom)
+                .offset(y: frame.shellOffsetY)
+        )
+        .background(
+            DetailGlassBackground(cornerRadius: 22, compactShadow: compactShadow)
+                .scaleEffect(x: 1, y: frame.shellScaleY, anchor: .bottom)
+                .offset(y: frame.shellOffsetY)
+                .opacity(frame.chromeOpacity)
+        )
+        }
+
         .onChangeBackward(of: item.id) { showsInfo = false; copyFeedback = nil; showsMarkdownPreview = false; codeLanguage = "自动识别" }
     }
 

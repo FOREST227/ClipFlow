@@ -7,7 +7,17 @@ struct ContentView: View {
     var showsPermissionOverlay = true
     @ObservedObject var store: ClipFlowStore
     @Environment(\.colorScheme) private var colorScheme
-    @ViewState private var inspectingItemID: ClipboardItem.ID?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @StateObject private var inspector: InspectorPresentation
+
+    init(showsBackground: Bool = true, showsPermissionOverlay: Bool = true,
+         store: ClipFlowStore, inspector: InspectorPresentation? = nil) {
+        self.showsBackground = showsBackground
+        self.showsPermissionOverlay = showsPermissionOverlay
+        self.store = store
+        _inspector = StateObject(wrappedValue: inspector ??
+            InspectorPresentation(driver: AppKitInspectorAnimationDriver()))
+    }
 
     var body: some View {
         let palette = ClipFlowPalette.resolve(for: colorScheme)
@@ -32,20 +42,17 @@ struct ContentView: View {
                 .frame(width: min(1100, proxy.size.width), height: proxy.size.height)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
-                .blur(radius: overlayActive ? ClipFlowMotion.backgroundDefocusRadius : 0)
+                .blur(radius: permissionOverlayActive ? ClipFlowMotion.backgroundDefocusRadius : 0)
+                .modifier(InspectorBackdropMotion(motion: inspector.motion))
                 .disabled(overlayActive)
 
-                if overlayActive {
-                    Color.black.opacity(0.18)
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            if inspectingItem != nil {
-                                withAnimation(ClipFlowMotion.overlay) {
-                                    inspectingItemID = nil
-                                }
-                            }
-                        }
-                        .zIndex(9)
+                if permissionOverlayActive {
+                    Color.black.opacity(0.18).ignoresSafeArea().zIndex(9)
+                } else if inspector.blocksBackground {
+                    InspectorScrim(motion: inspector.motion, opacity: 0.18) {
+                        inspector.dismiss(reduceMotion: reduceMotion)
+                    }
+                    .ignoresSafeArea().zIndex(9)
                 }
 
                 if let inspectingItem {
@@ -56,17 +63,20 @@ struct ContentView: View {
                         store: store,
                         palette: palette,
                         maxHeight: tallImage ? max(200, proxy.size.height - 32)
-                            : min(max(proxy.size.height - 96, 420), 760)
+                            : min(max(proxy.size.height - 96, 420), 760),
+                        onPasteAction: {
+                            inspector.dismiss(reduceMotion: reduceMotion) {
+                                ClipFlowRuntime.shared.paste(inspectingItem)
+                            }
+                        },
+                        motion: inspector.motion
                     ) {
-                        withAnimation(ClipFlowMotion.overlay) {
-                            inspectingItemID = nil
-                        }
+                        inspector.dismiss(reduceMotion: reduceMotion)
                     }
                     .frame(width: min(620, proxy.size.width - 48))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     .padding(.horizontal, 24)
                     .padding(.vertical, tallImage ? 16 : 48)
-                    .transition(ClipFlowMotion.overlayTransition)
                     .zIndex(10)
                 }
 
@@ -95,23 +105,41 @@ struct ContentView: View {
                 }
             }
         }
+        .background(
+            InspectorEscapeHandler {
+                guard inspector.blocksBackground, !permissionOverlayActive else { return false }
+                inspector.dismiss(reduceMotion: reduceMotion)
+                return true
+            }.frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
+        )
+        .onChangeBackward(of: store.items) {
+            inspector.invalidateIfMissing(availableIDs: Set(store.items.filter { !$0.isExpired() }.map(\.id)))
+        }
+        .onDisappear { inspector.reset() }
     }
 
     private var inspectingItem: ClipboardItem? {
-        guard let inspectingItemID else { return nil }
-        return store.item(withID: inspectingItemID)
+        guard let id = inspector.snapshot.itemID else { return nil }
+        return store.item(withID: id)
+    }
+
+    private var permissionOverlayActive: Bool {
+        showsPermissionOverlay && store.startupPermissionReport != nil
     }
 
     private var overlayActive: Bool {
-        inspectingItem != nil || (showsPermissionOverlay && store.startupPermissionReport != nil)
+        inspector.blocksBackground || permissionOverlayActive
     }
 
     private func toggleLibraryInspector(for item: ClipboardItem) {
-        withAnimation(ClipFlowMotion.overlay) {
-            store.select(item)
-            inspectingItemID = inspectingItemID == item.id ? nil : item.id
+        store.select(item)
+        if inspector.snapshot.itemID == item.id && inspector.snapshot.phase != .closing {
+            inspector.dismiss(reduceMotion: reduceMotion)
+        } else {
+            inspector.open(itemID: item.id, reduceMotion: reduceMotion)
         }
     }
+
 }
 
 struct StartupPermissionOverlay: View {
@@ -579,8 +607,7 @@ struct LibraryInspectorOverlay: View {
                 .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
                 Button("粘贴") {
                     if let onPasteAction { onPasteAction() }
-                    else { ClipFlowRuntime.shared.paste(item) }
-                    onClose()
+                    else { ClipFlowRuntime.shared.paste(item); onClose() }
                 }
                     .buttonStyle(ClipFlowActionButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
                 Button { store.togglePin(item.id) } label: {

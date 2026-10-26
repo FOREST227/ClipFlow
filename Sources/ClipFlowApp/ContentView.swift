@@ -7,7 +7,8 @@ struct ContentView: View {
     var showsPermissionOverlay = true
     @ObservedObject var store: ClipFlowStore
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var motionPreferences = InspectorMotionPreferences()
+    private var reduceMotion: Bool { motionPreferences.reduceMotion }
     @StateObject private var inspector: InspectorPresentation
 
     init(showsBackground: Bool = true, showsPermissionOverlay: Bool = true,
@@ -45,6 +46,7 @@ struct ContentView: View {
                 .blur(radius: permissionOverlayActive ? ClipFlowMotion.backgroundDefocusRadius : 0)
                 .modifier(InspectorBackdropMotion(motion: inspector.motion))
                 .disabled(overlayActive)
+                .accessibilityHidden(overlayActive)
 
                 if permissionOverlayActive {
                     Color.black.opacity(0.18).ignoresSafeArea().zIndex(9)
@@ -491,8 +493,9 @@ struct LibraryInspectorOverlay: View {
     var onPasteAction: (() -> Void)? = nil
     var motion: InspectorMotionProgress? = nil
     let onClose: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private var motionPreferences = InspectorMotionPreferences()
+    private var reduceMotion: Bool { motionPreferences.reduceMotion }
+    private var reduceTransparency: Bool { motionPreferences.reduceTransparency }
     @Environment(\.colorScheme) private var textColorScheme
     @ViewState private var showsMarkdownPreview = false
     @ViewState private var codeLanguage = "自动识别"

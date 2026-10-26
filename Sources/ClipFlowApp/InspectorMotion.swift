@@ -1,6 +1,28 @@
 import AppKit
 import SwiftUI
 
+struct InspectorMotionPolicy: Equatable, Sendable {
+    var reduceMotion: Bool
+    var reduceTransparency: Bool
+}
+private struct InspectorMotionPolicyKey: EnvironmentKey {
+    static let defaultValue: InspectorMotionPolicy? = nil
+}
+extension EnvironmentValues {
+    // System accessibility keys are read-only. A nil override always follows macOS.
+    var inspectorMotionPolicy: InspectorMotionPolicy? {
+        get { self[InspectorMotionPolicyKey.self] }
+        set { self[InspectorMotionPolicyKey.self] = newValue }
+    }
+}
+struct InspectorMotionPreferences: DynamicProperty {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
+    @Environment(\.inspectorMotionPolicy) private var override
+    var reduceMotion: Bool { override?.reduceMotion ?? systemReduceMotion }
+    var reduceTransparency: Bool { override?.reduceTransparency ?? systemReduceTransparency }
+}
+
 private final class InspectorTween: NSAnimation {
     var tick: ((CGFloat) -> Void)?
     override var currentProgress: NSAnimation.Progress {
@@ -101,8 +123,9 @@ struct InspectorMotionSurface<Content: View>: View {
 /// Applying visual effects as a modifier keeps the list content out of the tick observer.
 struct InspectorBackdropMotion: ViewModifier {
     @ObservedObject var motion: InspectorMotionProgress
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private var preferences = InspectorMotionPreferences()
+    private var reduceMotion: Bool { preferences.reduceMotion }
+    private var reduceTransparency: Bool { preferences.reduceTransparency }
     func body(content: Content) -> some View {
         content.blur(radius: InspectorMotionValues.resolve(progress: motion.value,
             reduceMotion: reduceMotion, reduceTransparency: reduceTransparency).backgroundBlur)
@@ -113,8 +136,9 @@ struct InspectorScrim: View {
     @ObservedObject var motion: InspectorMotionProgress
     let opacity: Double
     let onDismiss: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private var preferences = InspectorMotionPreferences()
+    private var reduceMotion: Bool { preferences.reduceMotion }
+    private var reduceTransparency: Bool { preferences.reduceTransparency }
     var body: some View {
         let values = InspectorMotionValues.resolve(progress: motion.value,
             reduceMotion: reduceMotion, reduceTransparency: reduceTransparency)

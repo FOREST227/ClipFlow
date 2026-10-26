@@ -355,6 +355,7 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
     private let onPaste: (ClipboardItem) -> Void
     private let onOpenLibrary: () -> Void
     private var panel: QuickPastePanel?
+    private var inspector: InspectorPresentation?
 
     init(store: ClipFlowStore, onPaste: @escaping (ClipboardItem) -> Void, onOpenLibrary: @escaping () -> Void) {
         self.store = store
@@ -371,7 +372,16 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
     }
 
     func show(anchorAt mouseLocation: CGPoint, preferredTarget: NSRunningApplication?) {
+        inspector?.reset()
         let panel = makePanel()
+        let inspector = InspectorPresentation(driver: AppKitInspectorAnimationDriver())
+        self.inspector = inspector
+        panel.onCancelInspector = { [weak inspector] in
+            guard let inspector, inspector.blocksBackground else { return false }
+            inspector.dismiss(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+            return true
+        }
+        panel.onCancelPanel = { [weak self] in self?.hide() }
         panel.contentView = NSHostingView(
             rootView: QuickPastePanelView(
                 store: store,
@@ -380,7 +390,8 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
                 onOpenLibrary: onOpenLibrary,
                 onClose: { [weak self] in
                     self?.hide()
-                }
+                },
+                inspector: inspector
             )
         )
 
@@ -393,7 +404,11 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
     }
 
     func hide() {
+        inspector?.reset()
+        inspector = nil
         guard let panel else { return }
+        panel.onCancelInspector = nil
+        panel.onCancelPanel = nil
         panel.delegate = nil
         panel.contentView = nil
         panel.orderOut(nil)
@@ -509,11 +524,15 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
 }
 
 final class QuickPastePanel: NSPanel {
+    var onCancelInspector: (() -> Bool)?
+    var onCancelPanel: (() -> Void)?
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
     override func cancelOperation(_ sender: Any?) {
-        orderOut(nil)
+        if onCancelInspector?() == true { return }
+        if let onCancelPanel { onCancelPanel() }
+        else { orderOut(nil) }
     }
 }
 
@@ -528,7 +547,21 @@ struct QuickPastePanelView: View {
     @ViewState private var query = ""
     // Keep selection independent of the parent view's layout/scroll identity.
     @ViewState private var selection = HistorySelection()
-    @ViewState private var inspectingItemID: UUID?
+    @StateObject private var inspector: InspectorPresentation
+    private var motionPreferences = InspectorMotionPreferences()
+    private var reduceMotion: Bool { motionPreferences.reduceMotion }
+
+    init(store: ClipFlowStore, preferredTargetName: String?, onPaste: @escaping (ClipboardItem) -> Void,
+         onOpenLibrary: @escaping () -> Void, onClose: @escaping () -> Void,
+         inspector: InspectorPresentation? = nil) {
+        self.store = store
+        self.preferredTargetName = preferredTargetName
+        self.onPaste = onPaste
+        self.onOpenLibrary = onOpenLibrary
+        self.onClose = onClose
+        _inspector = StateObject(wrappedValue: inspector ??
+            InspectorPresentation(driver: AppKitInspectorAnimationDriver()))
+    }
 
     var body: some View {
         let palette = ClipFlowPalette.resolve(for: colorScheme)
@@ -593,8 +626,10 @@ struct QuickPastePanelView: View {
                                     },
                                     onInspect: {
                                         selection.itemID = item.id
-                                        withAnimation(ClipFlowMotion.overlay) {
-                                            inspectingItemID = inspectingItemID == item.id ? nil : item.id
+                                        if inspector.snapshot.itemID == item.id && inspector.snapshot.phase != .closing {
+                                            inspector.dismiss(reduceMotion: reduceMotion)
+                                        } else {
+                                            inspector.open(itemID: item.id, reduceMotion: reduceMotion)
                                         }
                                     }
                                 )
@@ -631,42 +666,44 @@ struct QuickPastePanelView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(ClipFlowLayout.pageInset)
-            .blur(radius: inspectingItem == nil ? 0 : ClipFlowMotion.backgroundDefocusRadius)
-            .animation(.easeOut(duration: 0.16), value: inspectingItem != nil)
-            .allowsHitTesting(inspectingItem == nil)
-            .disabled(inspectingItem != nil)
+            .modifier(InspectorBackdropMotion(motion: inspector.motion))
+            .allowsHitTesting(!inspector.blocksBackground)
+            .disabled(inspector.blocksBackground)
+            .accessibilityHidden(inspector.blocksBackground)
 
-            // Keep the scrim mounted and full-sized; it must not scale with the card
-            // or inherit the content padding when the inspector opens/closes.
-            Color.black.opacity(inspectingItem == nil ? 0 : 0.16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .onTapGesture { inspectingItemID = nil }
-                .allowsHitTesting(inspectingItem != nil)
-                .animation(.easeOut(duration: 0.16), value: inspectingItem != nil)
+            // The full-sized scrim survives every last closing frame.
+            if inspector.blocksBackground {
+                InspectorScrim(motion: inspector.motion, opacity: 0.16) {
+                    inspector.dismiss(reduceMotion: reduceMotion)
+                }
+            }
 
             if let inspectingItem {
                 HUDInspectorOverlay(
-                    item: inspectingItem,
-                    store: store,
-                    onClose: {
-                        withAnimation(ClipFlowMotion.overlay) {
-                            inspectingItemID = nil
-                        }
-                    },
+                    item: inspectingItem, store: store,
+                    motion: inspector.motion,
+                    onClose: { inspector.dismiss(reduceMotion: reduceMotion) },
                     onPaste: {
-                        withAnimation(ClipFlowMotion.overlay) {
-                            inspectingItemID = nil
+                        inspector.dismiss(reduceMotion: reduceMotion) {
+                            onClose()
+                            onPaste(inspectingItem)
                         }
-                        onClose()
-                        onPaste(inspectingItem)
                     }
                 )
-                .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.16), value: inspectingItem != nil)
         .frame(width: QuickPastePanelLayout.panelWidth, height: QuickPastePanelLayout.panelHeight, alignment: .topLeading)
+        .background(
+            InspectorEscapeHandler {
+                guard inspector.blocksBackground else { return false }
+                inspector.dismiss(reduceMotion: reduceMotion)
+                return true
+            }.frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
+        )
+        .onChangeBackward(of: store.items) {
+            inspector.invalidateIfMissing(availableIDs: Set(store.items.filter { !$0.isExpired() }.map(\.id)))
+        }
+        .onDisappear { inspector.reset() }
         .onAppear {
             if selection.itemID == nil {
                 selection.itemID = clips.first?.id
@@ -691,8 +728,8 @@ struct QuickPastePanelView: View {
     }
 
     private var inspectingItem: ClipboardItem? {
-        guard let inspectingItemID else { return nil }
-        return store.item(withID: inspectingItemID)
+        guard let id = inspector.snapshot.itemID else { return nil }
+        return store.item(withID: id)
     }
 }
 
@@ -989,6 +1026,7 @@ struct HUDInspectorOverlay: View {
     @Environment(\.colorScheme) private var colorScheme
     let item: ClipboardItem
     @ObservedObject var store: ClipFlowStore
+    var motion: InspectorMotionProgress? = nil
     let onClose: () -> Void
     let onPaste: () -> Void
 
@@ -998,7 +1036,7 @@ struct HUDInspectorOverlay: View {
             ZStack {
                 LibraryInspectorOverlay(item: item, store: store,
                     palette: .resolve(for: colorScheme), maxHeight: max(280, proxy.size.height - 24),
-                    contentWidth: cardWidth, onPasteAction: onPaste, onClose: onClose)
+                    contentWidth: cardWidth, onPasteAction: onPaste, motion: motion, onClose: onClose)
                     .frame(width: cardWidth)
                     .padding(12)
             }

@@ -10,7 +10,7 @@
 
 **Spec:** /Users/wuqicheng/Documents/AI 代码项目/剪切板/docs/superpowers/specs/2026-10-26-detail-expansion-animation-design.md
 
-**Status:** 仅实施计划，尚未修改产品代码。基线e714289；用户确认本计划后再实施，不把提交设计文档当作动画已完成。
+**Status:** 已在隔离分支顺序实施；功能/自动化/构建及组件演示已验证，物理手势与稳态性能的人工验收待补。基线e714289。
 
 ## Global Constraints
 
@@ -50,7 +50,7 @@ Models.swift、ClipboardRowHitView.swift、ZoomableDetailImage.swift原则上不
 - InspectorPresentation: ObservableObject，init(driver: any InspectorAnimationDriving)；Phase=closed/opening/open/closing。@Published private(set) snapshot: Snapshot包含phase/itemID: UUID?/revision: UInt64；let motion: InspectorMotionProgress；var blocksBackground: Bool。
 - open(itemID: UUID, reduceMotion: Bool)；dismiss(reduceMotion: Bool, afterClose: (() -> Void)? = nil)；reset()；invalidateIfMissing(availableIDs: Set<UUID>)。
 
-- [ ] **1 RED测试：** FakeDriver手动emit/finish，无任意sleep。testClosingRetainsIdentity的核心断言：
+- [x] **1 RED测试：** FakeDriver手动emit/finish，无任意sleep。testClosingRetainsIdentity的核心断言：
   ~~~swift
   state.open(itemID: id, reduceMotion: false)
   driver.finishLatest()
@@ -62,10 +62,10 @@ Models.swift、ClipboardRowHitView.swift、ZoomableDetailImage.swift原则上不
   XCTAssertFalse(state.blocksBackground)
   ~~~
   同文件：testReopenRejectsStaleCompletion断言新id保留；testReverseStartsAtDisplayedProgress从0.45反向；testDismissActionRunsOnce；testResetCancelsPendingPaste；testExpiredItemClearsImmediately；testUsesSpecDurations断言完整开0.28秒、关0.20秒、减弱动态0.11秒，从0.45关闭为0.09秒。
-- [ ] **2 运行RED：** swift test --filter InspectorPresentationTests。Expected：新接口缺失，失败。
-- [ ] **3 实现：** 只有closed不阻挡背景；关闭保留id至有效完成。重开/reset使旧update/completion及待执行动作失效。时长按剩余距离缩短；同条目已open重复请求无动作；重复dismiss不重复动作。过期/删除立即无动画清除，隐私优先。
-- [ ] **4 运行GREEN：** 同一命令。Expected：0失败；多次进度emit不触发snapshot发布。
-- [ ] **5 提交：** 只暂存上述两文件；git commit -m "feat: add interruptible inspector presentation lifecycle"。
+- [x] **2 运行RED：** swift test --filter InspectorPresentationTests。Expected：新接口缺失，失败。
+- [x] **3 实现：** 只有closed不阻挡背景；关闭保留id至有效完成。重开/reset使旧update/completion及待执行动作失效。时长按剩余距离缩短；同条目已open重复请求无动作；重复dismiss不重复动作。过期/删除立即无动画清除，隐私优先。
+- [x] **4 运行GREEN：** 同一命令。Expected：0失败；多次进度emit不触发snapshot发布。
+- [x] **5 提交：** 只暂存上述两文件；git commit -m "feat: add interruptible inspector presentation lifecycle"。
 
 ### Task 2: 共用盖板与独立正文
 
@@ -76,22 +76,22 @@ Models.swift、ClipboardRowHitView.swift、ZoomableDetailImage.swift原则上不
 - InspectorMotionSurface<Content: View>，init(motion: InspectorMotionProgress, reduceMotion: Bool, reduceTransparency: Bool, content: @escaping (InspectorMotionValues) -> Content)。
 - LibraryInspectorOverlay增加可选motion: InspectorMotionProgress? = nil；nil为完全展开，既有截图调用兼容。
 
-- [ ] **1 RED测试：** testMotionEndpoints断言p=1的scaleY=1/offsetY=0/contentOpacity=1、p=0的正文opacity=0；testReducedMotion断言任意p不缩放/位移/模糊；testClampedFiniteProgress覆盖-1/2/0.5；testTicksPreserveRendererAndCanvasIdentity断言原生对象及RenderKey不变，同图不重新加载。
-- [ ] **2 运行RED：** swift test --filter InspectorMotionTests。Expected：新接口缺失，失败。
-- [ ] **3 实现：** 壳层从scaleY=0.90、下移16pt开始，quart-out；正文最多下移8pt，仅淡入/移动，标准线性进度约0.18至0.72显现。同一进度映射相同视觉值保证反向连续。背景blur最大1.4；backdropProgress为0…1，由历史/快捷入口分别乘0.18/0.16，避免共用解析器隐含窗口类型；减少透明度改不透明表面，不叠白雾。
-- [ ] **4 分层与GREEN：** 壳层缩放只作用背景/裁剪，正文最终尺寸布局；操作区不增重复标题。只动效子树订阅进度。swift test --filter 'InspectorMotionTests|DetailTextRendererTests|ImagePinchTests|ImageViewportTests'；Expected：0失败、无重复WKWebView加载。
-- [ ] **5 提交：** 只暂存本任务文件；git commit -m "feat: add layered inspector cover motion"。
+- [x] **1 RED测试：** testMotionEndpoints断言p=1的scaleY=1/offsetY=0/contentOpacity=1、p=0的正文opacity=0；testReducedMotion断言任意p不缩放/位移/模糊；testClampedFiniteProgress覆盖-1/2/0.5；testTicksPreserveRendererAndCanvasIdentity断言原生对象及RenderKey不变，同图不重新加载。
+- [x] **2 运行RED：** swift test --filter InspectorMotionTests。Expected：新接口缺失，失败。
+- [x] **3 实现：** 壳层从scaleY=0.90、下移16pt开始，quart-out；正文最多下移8pt，仅淡入/移动，标准线性进度约0.18至0.72显现。同一进度映射相同视觉值保证反向连续。背景blur最大1.4；backdropProgress为0…1，由历史/快捷入口分别乘0.18/0.16，避免共用解析器隐含窗口类型；减少透明度改不透明表面，不叠白雾。
+- [x] **4 分层与GREEN：** 壳层缩放只作用背景/裁剪，正文最终尺寸布局；操作区不增重复标题。只动效子树订阅进度。swift test --filter 'InspectorMotionTests|DetailTextRendererTests|ImagePinchTests|ImageViewportTests'；Expected：0失败、无重复WKWebView加载。
+- [x] **5 提交：** 只暂存本任务文件；git commit -m "feat: add layered inspector cover motion"。
 
 ### Task 3: 历史页接入
 
 **Files:** Modify Sources/ClipFlowApp/ContentView.swift；Test Tests/ClipFlowAppTests/HistoryInspectorMotionTests.swift。
 **Interfaces:** 消费Task 1/2；ContentView保留原参数并增加inspector: InspectorPresentation? = nil测试注入。右键open，关闭按钮/背景/Esc统一dismiss。用store.item(withID:)获取当前有效条目，不为退场缓存敏感全文。
 
-- [ ] **1 RED测试：** testClosingKeepsNativeRowsDisabled：FakeDriver尚未完成时向保留行直接派发mouseDown也不选择；完成后恢复。testScrolledOpenClosePreservesRowsAndOffset：80条混排下滚两屏，每阶段行身份/偏移不变，进度tick不增加contentRevision。
-- [ ] **2 运行RED：** swift test --filter HistoryInspectorMotionTests。Expected：缺少注入/关闭保护，失败。
-- [ ] **3 接入：** 替换即时nil逻辑，详情mounted/blocking/opacity分开；权限弹层保持旧逻辑。右键先store.select(item)。背景直到closed才可操作；不引入hover打开/单击复制。过期/删除立即清除可读内容。
-- [ ] **4 补测并GREEN：** testEscapeWithWebFocusClosesInspectorNotWindow；testWrongWindowEscapeIsIgnored；testPortraitAndShortTextFitWindow；testInvalidatedSensitiveItemDisappearsImmediately。swift test --filter 'HistoryInspectorMotionTests|HistorySelectionPerformanceTests|RowInteractionTests|StaleRowTargetTests|LibraryCardLayoutTests'；Expected：0失败、偏移误差≤1pt、无误选、主窗口不被Esc关闭；长图仍用现有DetailImageLayout。
-- [ ] **5 提交：** 只暂存本任务文件；git commit -m "feat: integrate cover transition in history inspector"。
+- [x] **1 RED测试：** testClosingKeepsNativeRowsDisabled：FakeDriver尚未完成时向保留行直接派发mouseDown也不选择；完成后恢复。testScrolledOpenClosePreservesRowsAndOffset：80条混排下滚两屏，每阶段行身份/偏移不变，进度tick不增加contentRevision。
+- [x] **2 运行RED：** swift test --filter HistoryInspectorMotionTests。Expected：缺少注入/关闭保护，失败。
+- [x] **3 接入：** 替换即时nil逻辑，详情mounted/blocking/opacity分开；权限弹层保持旧逻辑。右键先store.select(item)。背景直到closed才可操作；不引入hover打开/单击复制。过期/删除立即清除可读内容。
+- [x] **4 补测并GREEN：** testEscapeWithWebFocusClosesInspectorNotWindow；testWrongWindowEscapeIsIgnored；testPortraitAndShortTextFitWindow；testInvalidatedSensitiveItemDisappearsImmediately。swift test --filter 'HistoryInspectorMotionTests|HistorySelectionPerformanceTests|RowInteractionTests|StaleRowTargetTests|LibraryCardLayoutTests'；Expected：0失败、偏移误差≤1pt、无误选、主窗口不被Esc关闭；长图仍用现有DetailImageLayout。
+- [x] **5 提交：** 只暂存本任务文件；git commit -m "feat: integrate cover transition in history inspector"。
 
 ### Task 4: 快捷面板、Esc与实机验收
 
@@ -101,12 +101,12 @@ Models.swift、ClipboardRowHitView.swift、ZoomableDetailImage.swift原则上不
 - QuickPastePanel增加onCancelInspector: (() -> Bool)?；有详情含closing时消费Esc，无详情则维持关闭整个快捷面板。hide/销毁调用reset。
 - 详情粘贴只捕获准确ClipboardItem，并在有效关闭完成后执行原onPaste一次；失焦hide取消待执行动作，不回落到第一条。onPasteAction和onClose不得重复关闭。
 
-- [ ] **1 RED测试：** testLastClosingFrameCannotPasteUnderlyingRow：FakeDriver到0.01仍未完成，底层双击pasteCount=0；testEscapeWithWebFocusDismissesInspectorFirst：第一次Esc不关面板，完成后再按才关；testHideOrReopenRejectsOldPasteCompletion：旧完成不影响新窗口或粘贴。
-- [ ] **2 运行RED：** swift test --filter QuickPasteInspectorMotionTests。Expected：仍是即时关闭路径，失败。
-- [ ] **3 接入与GREEN：** 移除叠加160ms隐式详情动画，复用共用详情而非再造一套；保持激活式NSPanel/阴影/捏合桥/外部目标。补testScrolledOpenClosePreservesOffset、testPinchSurvivesMotion、testRepeatedPasteInvokesExactItemOnce、testReducedMotionAndTransparency。运行本任务测试，Expected：0失败。窗口失焦仍按原策略隐藏，不因鼠标移动关闭。
-- [ ] **4 全量：** DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test；git diff --check；zsh -n scripts/build_app.sh；DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer zsh scripts/build_app.sh。Expected：退出0，记录实际通过/跳过数，不预写成功。
-- [ ] **5 实机：** 用临时演示数据覆盖两入口的文本/代码/链接/方图/长图/敏感内容，下滚后右键、连续反向开关、Esc/背景/按钮退出、捏合。录制并逐帧检查白雾尾帧、裁剪、形变；用Instruments Animation Hitches观察60fps目标，不把单测/录屏帧率当实测。记录机型/系统/尺寸；无macOS 12或Intel实机则保留验证缺口。
-- [ ] **6 收尾提交：** 通过验收才把设计状态改“已实施”，归档实际测试与未覆盖项。只暂存任务文件，git commit -m "feat: unify quick paste inspector cover transition"；不推送/发版/安装，等待用户整合决定。
+- [x] **1 RED测试：** testLastClosingFrameCannotPasteUnderlyingRow：FakeDriver到0.01仍未完成，底层双击pasteCount=0；testEscapeWithWebFocusDismissesInspectorFirst：第一次Esc不关面板，完成后再按才关；testHideOrReopenRejectsOldPasteCompletion：旧完成不影响新窗口或粘贴。
+- [x] **2 运行RED：** swift test --filter QuickPasteInspectorMotionTests。Expected：仍是即时关闭路径，失败。
+- [x] **3 接入与GREEN：** 移除叠加160ms隐式详情动画，复用共用详情而非再造一套；保持激活式NSPanel/阴影/捏合桥/外部目标。补testScrolledOpenClosePreservesOffset、testPinchSurvivesMotion、testRepeatedPasteInvokesExactItemOnce、testReducedMotionAndTransparency。运行本任务测试，Expected：0失败。窗口失焦仍按原策略隐藏，不因鼠标移动关闭。
+- [x] **4 全量：** DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test；git diff --check；zsh -n scripts/build_app.sh；DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer zsh scripts/build_app.sh。Expected：退出0，记录实际通过/跳过数，不预写成功。
+- [ ] **5 实机（组件录制已做；物理手势/稳态性能待补）：** 用临时演示数据覆盖两入口的文本/代码/链接/方图/长图/敏感内容，下滚后右键、连续反向开关、Esc/背景/按钮退出、捏合。录制并逐帧检查白雾尾帧、裁剪、形变；用Instruments Animation Hitches观察60fps目标，不把单测/录屏帧率当实测。记录机型/系统/尺寸；无macOS 12或Intel实机则保留验证缺口。
+- [x] **6 收尾提交：** 通过验收才把设计状态改“已实施”，归档实际测试与未覆盖项。只暂存任务文件，git commit -m "feat: unify quick paste inspector cover transition"；不推送/发版/安装，等待用户整合决定。
 
 ## 自审与交接
 

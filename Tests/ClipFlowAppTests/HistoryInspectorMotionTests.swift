@@ -11,11 +11,11 @@ final class HistoryInspectorHarness {
     let inspector: InspectorPresentation
     let host: NSHostingController<AnyView>
     let window: NSWindow
-    init(context: InspectorTestContext) {
+    init(context: InspectorTestContext, showsBackground: Bool = false) {
         _ = NSApplication.shared
         self.context = context
         inspector = InspectorPresentation(driver: driver)
-        host = NSHostingController(rootView: AnyView(ContentView(showsBackground: false,
+        host = NSHostingController(rootView: AnyView(ContentView(showsBackground: showsBackground,
             showsPermissionOverlay: false, store: context.store, inspector: inspector)
             .frame(width: 620, height: 850)))
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 850),

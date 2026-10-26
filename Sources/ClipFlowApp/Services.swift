@@ -685,8 +685,9 @@ struct QuickPastePanelView: View {
                     onClose: { inspector.dismiss(reduceMotion: reduceMotion) },
                     onPaste: {
                         inspector.dismiss(reduceMotion: reduceMotion) {
+                            guard let current = store.item(withID: inspectingItem.id) else { return }
                             onClose()
-                            onPaste(inspectingItem)
+                            onPaste(current)
                         }
                     }
                 )
@@ -694,11 +695,11 @@ struct QuickPastePanelView: View {
         }
         .frame(width: QuickPastePanelLayout.panelWidth, height: QuickPastePanelLayout.panelHeight, alignment: .topLeading)
         .background(
-            InspectorEscapeHandler {
+            InspectorEscapeHandler(onEscape: {
                 guard inspector.blocksBackground else { return false }
                 inspector.dismiss(reduceMotion: reduceMotion)
                 return true
-            }.frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
+            }, onWindowInactive: { inspector.reset() }).frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
         )
         .onChangeBackward(of: store.items) {
             inspector.invalidateIfMissing(availableIDs: Set(store.items.filter { !$0.isExpired() }.map(\.id)))

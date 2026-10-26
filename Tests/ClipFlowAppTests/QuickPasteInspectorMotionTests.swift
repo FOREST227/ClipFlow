@@ -156,6 +156,23 @@ final class QuickPasteInspectorMotionTests: XCTestCase {
         XCTAssertEqual(fixture.probe.closes, 0)
     }
 
+    func testDeletingPendingPasteItemCancelsBeforeViewUpdate() throws {
+        let context = try InspectorTestContext()
+        defer { context.cleanup() }
+        let wanted = try context.text("Expires or is deleted while closing")
+        let fixture = InspectorHUDHarness(context: context)
+        defer { fixture.close() }
+        fixture.inspector.open(itemID: wanted.id, reduceMotion: false)
+        fixture.driver.finishLatest(); fixture.pump()
+        try fixture.clickPaste()
+        XCTAssertEqual(fixture.inspector.snapshot.phase, .closing)
+        context.store.delete(wanted.id)
+        // Deliberately do not pump SwiftUI's onChange before the completion.
+        fixture.driver.finishLatest()
+        XCTAssertTrue(fixture.probe.pasted.isEmpty)
+        XCTAssertEqual(fixture.probe.closes, 0)
+    }
+
     func testScrolledOpenClosePreservesOffset() throws {
         let context = try InspectorTestContext()
         defer { context.cleanup() }

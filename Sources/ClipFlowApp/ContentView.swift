@@ -7,6 +7,7 @@ struct ContentView: View {
     var showsPermissionOverlay = true
     @ObservedObject var store: ClipFlowStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isPageEnabled
     private var motionPreferences = InspectorMotionPreferences()
     private var reduceMotion: Bool { motionPreferences.reduceMotion }
     @StateObject private var inspector: InspectorPresentation
@@ -68,7 +69,8 @@ struct ContentView: View {
                             : min(max(proxy.size.height - 96, 420), 760),
                         onPasteAction: {
                             inspector.dismiss(reduceMotion: reduceMotion) {
-                                ClipFlowRuntime.shared.paste(inspectingItem)
+                                guard let current = store.item(withID: inspectingItem.id) else { return }
+                                ClipFlowRuntime.shared.paste(current)
                             }
                         },
                         motion: inspector.motion
@@ -108,14 +110,21 @@ struct ContentView: View {
             }
         }
         .background(
-            InspectorEscapeHandler {
-                guard inspector.blocksBackground, !permissionOverlayActive else { return false }
+            InspectorEscapeHandler(onEscape: {
+                guard isPageEnabled, inspector.blocksBackground,
+                      store.startupPermissionReport == nil else { return false }
                 inspector.dismiss(reduceMotion: reduceMotion)
                 return true
-            }.frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
+            }, onWindowInactive: { inspector.reset() }).frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
         )
         .onChangeBackward(of: store.items) {
             inspector.invalidateIfMissing(availableIDs: Set(store.items.filter { !$0.isExpired() }.map(\.id)))
+        }
+        .onChangeBackward(of: isPageEnabled) {
+            if !isPageEnabled { inspector.reset() }
+        }
+        .onChangeBackward(of: store.startupPermissionReport != nil) {
+            if store.startupPermissionReport != nil { inspector.reset() }
         }
         .onDisappear { inspector.reset() }
     }

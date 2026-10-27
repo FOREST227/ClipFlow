@@ -12,50 +12,60 @@
 </div>
 
 <p align="center">
-  <img src="docs/images/history.png" width="720" alt="ClipFlow 剪贴历史：左侧导航、类型筛选与文本、代码、图片卡片">
+  <img src="docs/images/v0.1.2/history.png" width="720" alt="ClipFlow 剪贴历史：左侧导航、类型筛选与文本、代码、图片卡片">
 </p>
 
-## 不止保存历史，也让内容更好用
+## 复制之后，不用再找一遍
 
-- **随手呼出，快速粘贴**：默认按 <code>⌥ Option + V</code> 在鼠标附近打开面板，搜索后双击条目粘贴。常用内容可以置顶。
-- **原生快捷列表**：滚动与点击由同一原生列表管理，置顶或重新捕获后保持未变化条目的位置，减少滚动中误选与视口跳动。
-- **抽屉式详情**：右键后从条目位置展开详情，正文与操作分层呈现；支持反向收回和系统“减少动态效果”。
-- **分类查找**：保存最近 80 条历史，按代码、链接、敏感内容等分类筛选，也可以搜索内容、来源应用和标签。
-- **代码更容易阅读**：改进 PowerShell、macOS 终端命令与常见代码片段识别。详情支持多语言语法高亮，可自动识别或手动选择语言。
-- **Markdown 源码与预览**：识别到 Markdown 后，可切换源码和排版预览，查看标题、列表、表格、引用与代码块。
-- **图片看得更清楚**：列表提供缩略图，详情支持滚轮缩放、触摸板双指捏合、拖动查看局部，双击恢复完整显示。
-- **菜单栏状态概览**：查看运行状态与同步进度，快速开关监听、敏感内容保护和开机启动。
-- **统一的原生界面**：浅色、深色与跟随系统外观；设置与历史共用侧栏，卡片采用一致的高度比例和类型强调色。
-- **记录范围由你决定**：暂停监听、排除指定应用，或为敏感记录启用 5 分钟自动过期。文稿目录同步可单独开关。
+- **随手呼出，快速粘贴**：默认按 <code>⌥ Option + V</code> 在鼠标附近打开面板。单击选中、双击粘贴，常用内容随手置顶。
+- **一眼分清内容**：文本蓝、代码紫、链接靛青、图片青绿、敏感内容红。保存最近 80 条历史，支持按类型、来源和标签搜索。
+- **右键展开详情**：从条目位置展开抽屉，内容与操作分层呈现；复制、粘贴、置顶集中在底部，不打断浏览。
+- **代码与 Markdown，都能好好读**：常见语言语法高亮，支持手动指定语言；Markdown 可切换源码与排版预览。
+- **图片不只是一张缩略图**：详情支持滚轮与双指捏合缩放、拖动查看局部，双击恢复完整显示。
+- **状态与隐私，清楚可控**：菜单栏集中放置监听和隐私开关；可排除应用、设置敏感内容自动过期，并单独控制文稿目录同步。
 
 > 代码高亮与 Markdown 预览离线可用，不会执行复制的代码。复制、粘贴保留原始文本及其缩进、换行；分类和语法识别仍可能有误，可通过语言选择调整显示。
 
 ## 界面一览
 
-以下均为 v0.1.0 实际应用组件的截图，内容使用演示数据。
+以下由当前 **v0.1.2 的真实应用组件**重新生成，全部使用演示数据，不包含个人剪贴历史。图片外部的白色留白仅用于文档展示。
+
+### 快速粘贴与菜单栏
+
+快捷面板专注搜索、选中与粘贴；菜单栏专注运行状态和关键开关。两者分工明确，不重复堆放历史列表。
 
 <p align="center">
-  <img src="docs/images/quick-paste.png" width="48%" align="middle" alt="快速粘贴面板：搜索、类型卡片及粘贴操作">
-  <img src="docs/images/menu.png" width="48%" align="middle" alt="菜单栏概览：监听状态、隐私开关、文稿同步与功能入口">
+  <img src="docs/images/v0.1.2/quick-paste.png" width="48%" align="middle" alt="v0.1.2 原生快速粘贴面板：搜索、类型卡片、置顶及粘贴操作">
+  <img src="docs/images/v0.1.2/menu.png" width="48%" align="middle" alt="菜单栏概览：监听状态、隐私开关、同步状态与功能入口">
 </p>
 <p align="center">快速粘贴 · 菜单栏概览</p>
 
-### 代码详情与 Markdown 预览
+### 抽屉详情：代码与 Markdown
 
-高亮支持 PowerShell、Bash、Swift、Python、JavaScript、TypeScript、C / C++、C#、Java、Go、Rust、SQL、JSON、YAML、HTML、CSS 等常见语言。不能准确自动识别时，可在详情中手动指定语言。
+右键展开后，正文保持独立阅读区域，底部抽屉集中放置来源摘要和操作。两张详情卡片按相同尺寸并排展示，正文、来源摘要和底部操作一目了然。
+
+高亮支持 PowerShell、Bash、Swift、Python、JavaScript、TypeScript、C / C++、C#、Java、Go、Rust、SQL、JSON、YAML、HTML、CSS 等常见语言。自动识别不准确时，可在详情中手动指定语言。
 
 <p align="center">
-  <img src="docs/images/code-detail.png" width="48%" align="top" alt="完整代码详情卡片：语法高亮、语言选择与操作按钮">
-  <img src="docs/images/markdown-preview.png" width="48%" align="top" alt="完整 Markdown 详情卡片：源码与预览切换、排版内容与操作按钮">
+  <img src="docs/images/v0.1.2/code-detail.png" width="48%" align="middle" alt="完整代码抽屉详情：语法高亮、语言选择、来源摘要和复制粘贴操作">
+  <img src="docs/images/v0.1.2/markdown-preview.png" width="48%" align="middle" alt="完整 Markdown 抽屉详情：源码预览切换、排版内容和底部操作">
 </p>
 <p align="center">代码详情 · Markdown 预览</p>
+
+### 图片详情
+
+图片在独立画布中查看：滚轮或双指捏合缩放，放大后可拖动查看局部；双击恢复完整显示。
+
+<p align="center">
+  <img src="docs/images/v0.1.2/image-detail.png" width="420" alt="图片抽屉详情：独立缩放画布、图片尺寸及复制粘贴操作">
+</p>
 
 ### 设置
 
 按「通用 / 隐私 / 同步」分组管理选项，修改外观、快捷键和运行方式；排除应用规则需点击保存。
 
 <p align="center">
-  <img src="docs/images/settings.png" width="680" alt="设置页面：侧栏分类、外观模式、快捷键和启动选项">
+  <img src="docs/images/v0.1.2/settings.png" width="680" alt="设置页面：侧栏分类、外观模式、快捷键和启动选项">
 </p>
 
 ## 下载与安装
@@ -64,9 +74,9 @@
 
 | 你的 Mac | 安装包 |
 | --- | --- |
-| Apple 芯片 | ClipFlow-v0.1.2-arm64.dmg |
-| Intel 处理器 | ClipFlow-v0.1.2-x86_64.dmg |
-| 两种架构通用，或不确定芯片类型 | ClipFlow-v0.1.2-universal.dmg |
+| Apple 芯片 | [ClipFlow-v0.1.2-arm64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.2/ClipFlow-v0.1.2-arm64.dmg) |
+| Intel 处理器 | [ClipFlow-v0.1.2-x86_64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.2/ClipFlow-v0.1.2-x86_64.dmg) |
+| 两种架构通用，或不确定芯片类型 | [ClipFlow-v0.1.2-universal.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.2/ClipFlow-v0.1.2-universal.dmg) |
 
 1. 打开 .dmg，将 **ClipFlow** 拖入“应用程序”。
 2. 从“应用程序”启动，点击菜单栏中的 ClipFlow 图标。

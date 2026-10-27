@@ -11,6 +11,9 @@ final class DocumentationScreenshotTests: XCTestCase {
             throw XCTSkip("Set CLIPFLOW_SCREENSHOT_DIR to export documentation screenshots")
         }
         _ = NSApplication.shared
+        let oldAppearance = NSApp.appearance
+        NSApp.appearance = NSAppearance(named: .aqua)
+        defer { NSApp.appearance = oldAppearance }
         let oldPolicy = NSApp.activationPolicy()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -51,6 +54,7 @@ final class DocumentationScreenshotTests: XCTestCase {
         let image = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(sample.tiffRepresentation)))
         store.ingestCopiedImage(try XCTUnwrap(image.representation(using: .png, properties: [:])),
             size: sample.size, sourceApp: "预览", sourceBundleID: nil)
+        let imageItem = try XCTUnwrap(store.items.first(where: \.isImage))
         store.lastCaptureStatus = "正在监听系统剪贴板"
 
         func save(_ view: NSView, name: String) throws {
@@ -158,14 +162,14 @@ final class DocumentationScreenshotTests: XCTestCase {
             ZStack(alignment: .top) {
                 Color.white
                 LibraryInspectorOverlay(item: item, store: store, palette: .resolve(for: .light),
-                    maxHeight: 564, contentWidth: 304, compactShadow: true, onClose: {}).frame(width: 304)
+                    maxHeight: 576, contentWidth: 340, compactShadow: true, onClose: {}).frame(width: 340)
                     .overlay(RoundedRectangle(cornerRadius: 22)
                         .strokeBorder(Color.black.opacity(0.16), lineWidth: 1))
-                    .padding(16)
-            }.frame(width: 336, height: 520)
+                    .padding(24)
+            }.frame(width: 388, height: 624)
         }
-        try export(detail(code), size: NSSize(width: 336, height: 520), name: "code-detail")
-        try export(detail(markdown), size: NSSize(width: 336, height: 520), name: "markdown-preview") { root in
+        try export(detail(code), size: NSSize(width: 388, height: 624), name: "code-detail")
+        try export(detail(markdown), size: NSSize(width: 388, height: 624), name: "markdown-preview") { root in
             func controls(_ view: NSView) -> [NSSegmentedControl] {
                 (view as? NSSegmentedControl).map { [$0] } ?? view.subviews.flatMap(controls)
             }
@@ -173,5 +177,6 @@ final class DocumentationScreenshotTests: XCTestCase {
             picker.selectedSegment = 1
             XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(picker.action), to: picker.target, from: picker))
         }
+        try export(detail(imageItem), size: NSSize(width: 388, height: 624), name: "image-detail")
     }
 }

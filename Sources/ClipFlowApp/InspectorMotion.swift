@@ -127,6 +127,11 @@ struct InspectorBackdropMotion: ViewModifier {
     private var preferences = InspectorMotionPreferences()
     private var reduceMotion: Bool { preferences.reduceMotion }
     private var reduceTransparency: Bool { preferences.reduceTransparency }
+
+    init(motion: InspectorMotionProgress) {
+        _motion = ObservedObject(wrappedValue: motion)
+    }
+
     func body(content: Content) -> some View {
         let values = InspectorMotionValues.resolve(progress: motion.value,
             reduceMotion: reduceMotion, reduceTransparency: reduceTransparency)
@@ -143,6 +148,13 @@ struct InspectorScrim: View {
     private var preferences = InspectorMotionPreferences()
     private var reduceMotion: Bool { preferences.reduceMotion }
     private var reduceTransparency: Bool { preferences.reduceTransparency }
+
+    init(motion: InspectorMotionProgress, opacity: Double, onDismiss: @escaping () -> Void) {
+        _motion = ObservedObject(wrappedValue: motion)
+        self.opacity = opacity
+        self.onDismiss = onDismiss
+    }
+
     var body: some View {
         let values = InspectorMotionValues.resolve(progress: motion.value,
             reduceMotion: reduceMotion, reduceTransparency: reduceTransparency)

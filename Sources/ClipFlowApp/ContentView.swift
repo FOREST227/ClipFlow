@@ -527,6 +527,24 @@ struct LibraryInspectorOverlay: View {
     @ViewState private var showsInfo = false
     @ViewState private var copyFeedback: String?
 
+    // Explicit API: Swift 6.2 gives the synthesized memberwise initializer
+    // private access because of the stored DynamicProperty preferences.
+    init(item: ClipboardItem, store: ClipFlowStore, palette: ClipFlowPalette,
+         maxHeight: CGFloat, contentWidth: CGFloat = 438, compactShadow: Bool = false,
+         onPasteAction: (() -> Void)? = nil, sourceRectInWindow: CGRect? = nil,
+         motion: InspectorMotionProgress? = nil, onClose: @escaping () -> Void) {
+        self.item = item
+        _store = ObservedObject(wrappedValue: store)
+        self.palette = palette
+        self.maxHeight = maxHeight
+        self.contentWidth = contentWidth
+        self.compactShadow = compactShadow
+        self.onPasteAction = onPasteAction
+        self.sourceRectInWindow = sourceRectInWindow
+        self.motion = motion
+        self.onClose = onClose
+    }
+
     private let drawerHeaderHeight: CGFloat = 84
     private var drawerFooterHeight: CGFloat {
         124 + (showsInfo ? 72 : 0) + (item.isSensitive ? 22 : 0) + (copyFeedback == nil ? 0 : 20)

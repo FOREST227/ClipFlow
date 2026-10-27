@@ -524,6 +524,18 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
 }
 
 final class QuickPastePanel: NSPanel {
+    weak var clipboardList: QuickPasteListView?
+    private var routedRowPress = false
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown {
+            routedRowPress = clipboardList?.routeMouseDown(event) == true
+            if routedRowPress { return }
+        } else if routedRowPress && (event.type == .leftMouseUp || event.type == .leftMouseDragged) {
+            if event.type == .leftMouseUp { routedRowPress = false }
+            return
+        }
+        super.sendEvent(event)
+    }
     var onCancelInspector: (() -> Bool)?
     var onCancelPanel: (() -> Void)?
     override var canBecomeKey: Bool { true }
@@ -609,35 +621,30 @@ struct QuickPastePanelView: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .frame(height: QuickPasteCardLayout.viewportHeight, alignment: .top)
                 } else {
-                    SoftEdgeScrollView(showsEdgeEffects: false) {
-                        LazyVStack(spacing: QuickPasteCardLayout.spacing) {
-                            ForEach(clips) { item in
-                                HUDInteractiveRow(
-                                    item: item,
-                                    store: store,
-                                    selection: selection,
-                                    onSelect: {
-                                        selection.itemID = item.id
-                                    },
-                                    onPaste: {
-                                        selection.itemID = item.id
-                                        onClose()
-                                        onPaste(item)
-                                    },
-                                    onInspect: {
-                                        selection.itemID = item.id
-                                        if inspector.snapshot.itemID == item.id && inspector.snapshot.phase != .closing {
-                                            inspector.dismiss(reduceMotion: reduceMotion)
-                                        } else {
-                                            inspector.open(itemID: item.id, reduceMotion: reduceMotion)
-                                        }
-                                    }
-                                )
-                                .frame(maxWidth: .infinity)
-                                .frame(height: QuickPasteCardLayout.height(for: item.kind))
+                    QuickPasteNativeList(items: clips, store: store, selection: selection,
+                        isBlocked: { [weak inspector] in inspector?.blocksBackground != false },
+                        onSelect: { item in selection.itemID = item.id },
+                        onPaste: { item in
+                            selection.itemID = item.id
+                            onClose()
+                            onPaste(item)
+                        },
+                        onInspect: { item in
+                            selection.itemID = item.id
+                            if inspector.snapshot.itemID == item.id && inspector.snapshot.phase != .closing {
+                                inspector.dismiss(reduceMotion: reduceMotion)
+                            } else {
+                                inspector.open(itemID: item.id, reduceMotion: reduceMotion)
                             }
-                        }
-                    }
+                        },
+                        onInspectFrom: { item, source in
+                            selection.itemID = item.id
+                            if inspector.snapshot.itemID == item.id && inspector.snapshot.phase != .closing {
+                                inspector.dismiss(reduceMotion: reduceMotion)
+                            } else {
+                                inspector.open(itemID: item.id, reduceMotion: reduceMotion, source: source)
+                            }
+                        })
                     .frame(height: QuickPasteCardLayout.viewportHeight)
                 }
 
@@ -681,6 +688,7 @@ struct QuickPastePanelView: View {
             if let inspectingItem {
                 HUDInspectorOverlay(
                     item: inspectingItem, store: store,
+                    sourceRectInWindow: inspector.snapshot.sourceRectInWindow,
                     motion: inspector.motion,
                     onClose: { inspector.dismiss(reduceMotion: reduceMotion) },
                     onPaste: {
@@ -746,7 +754,7 @@ struct HUDSelectionChrome: View {
     var body: some View {
         let palette = ClipFlowPalette.resolve(for: colorScheme)
         RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(palette.rowFill)
+            .fill(isSelected ? palette.selectedRowFill : palette.rowFill)
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(isSelected ? tint.opacity(0.16) : .clear))
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -765,7 +773,7 @@ struct HUDRow: View {
     @Environment(\.colorScheme) private var colorScheme
     private var palette: ClipFlowPalette { .resolve(for: colorScheme) }
     let item: ClipboardItem
-    let store: ClipFlowStore
+    @ObservedObject var store: ClipFlowStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: item.isImage || item.kind == .code ? 6 : 4) {
@@ -847,6 +855,7 @@ struct HUDInteractiveRow: NSViewRepresentable {
     let item: ClipboardItem
     let store: ClipFlowStore
     let selection: HistorySelection
+    var onInspectFrom: ((InspectorSourceAnchor) -> Void)? = nil
     let onSelect: () -> Void
     let onPaste: () -> Void
     let onInspect: () -> Void
@@ -854,6 +863,7 @@ struct HUDInteractiveRow: NSViewRepresentable {
     func makeNSView(context: Context) -> HUDInteractiveHostingView {
         let view = HUDInteractiveHostingView()
         view.interactionEnabled = isEnabled
+        view.identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
         view.update(
             itemID: item.id,
             rootView: AnyView(
@@ -866,13 +876,14 @@ struct HUDInteractiveRow: NSViewRepresentable {
                 tint: item.kind.tint)),
             onSelect: onSelect,
             onPaste: onPaste,
-            onInspect: onInspect
+            onInspect: InspectorSourceAnchor.callback(for: view, fallback: onInspect, anchored: onInspectFrom)
         )
         return view
     }
 
     func updateNSView(_ nsView: HUDInteractiveHostingView, context: Context) {
         nsView.interactionEnabled = isEnabled
+        nsView.identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
         nsView.update(
             itemID: item.id,
             rootView: AnyView(
@@ -885,7 +896,7 @@ struct HUDInteractiveRow: NSViewRepresentable {
                 tint: item.kind.tint)),
             onSelect: onSelect,
             onPaste: onPaste,
-            onInspect: onInspect
+            onInspect: InspectorSourceAnchor.callback(for: nsView, fallback: onInspect, anchored: onInspectFrom)
         )
     }
 }
@@ -1027,19 +1038,20 @@ struct HUDInspectorOverlay: View {
     @Environment(\.colorScheme) private var colorScheme
     let item: ClipboardItem
     @ObservedObject var store: ClipFlowStore
+    var sourceRectInWindow: CGRect? = nil
     var motion: InspectorMotionProgress? = nil
     let onClose: () -> Void
     let onPaste: () -> Void
 
     var body: some View {
         GeometryReader { proxy in
-            let cardWidth = min(304, max(280, proxy.size.width - 24))
+            let cardWidth = max(280, proxy.size.width - 12)
             ZStack {
                 LibraryInspectorOverlay(item: item, store: store,
-                    palette: .resolve(for: colorScheme), maxHeight: max(280, proxy.size.height - 24),
-                    contentWidth: cardWidth, onPasteAction: onPaste, motion: motion, onClose: onClose)
+                    palette: .resolve(for: colorScheme), maxHeight: max(280, proxy.size.height - 12),
+                    contentWidth: cardWidth, onPasteAction: onPaste, sourceRectInWindow: sourceRectInWindow, motion: motion, onClose: onClose)
                     .frame(width: cardWidth)
-                    .padding(12)
+                    .padding(6)
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
         }

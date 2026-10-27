@@ -82,6 +82,7 @@ final class AppKitInspectorAnimationDriver: NSObject, InspectorAnimationDriving,
 }
 
 struct InspectorMotionValues: Equatable {
+    let progress: CGFloat
     let shellScaleY: CGFloat
     let shellOffsetY: CGFloat
     let contentOpacity: CGFloat
@@ -93,13 +94,13 @@ struct InspectorMotionValues: Equatable {
     static func resolve(progress: CGFloat, reduceMotion: Bool, reduceTransparency: Bool) -> Self {
         let p = min(1, max(0, progress.isFinite ? progress : 0))
         let eased = 1 - pow(1 - p, 4)
-        let reveal = min(1, max(0, (p - 0.18) / 0.54))
+        let reveal = min(1, max(0, (p - 0.64) / 0.30))
         let content = reveal * reveal * (3 - 2 * reveal)
-        return Self(shellScaleY: reduceMotion ? 1 : 0.90 + 0.10 * eased,
-            shellOffsetY: reduceMotion ? 0 : 16 * (1 - eased),
+        return Self(progress: p, shellScaleY: 1,
+            shellOffsetY: 0,
             contentOpacity: reduceMotion ? p : content,
             contentOffsetY: reduceMotion ? 0 : 8 * (1 - content),
-            chromeOpacity: reduceMotion ? p : min(1, p / 0.18),
+            chromeOpacity: reduceMotion ? p : min(1, max(0, (p - 0.06) / 0.22)),
             backdropProgress: eased,
             backgroundBlur: reduceMotion || reduceTransparency ? 0 : ClipFlowMotion.backgroundDefocusRadius * eased)
     }
@@ -127,8 +128,10 @@ struct InspectorBackdropMotion: ViewModifier {
     private var reduceMotion: Bool { preferences.reduceMotion }
     private var reduceTransparency: Bool { preferences.reduceTransparency }
     func body(content: Content) -> some View {
-        content.blur(radius: InspectorMotionValues.resolve(progress: motion.value,
-            reduceMotion: reduceMotion, reduceTransparency: reduceTransparency).backgroundBlur)
+        let values = InspectorMotionValues.resolve(progress: motion.value,
+            reduceMotion: reduceMotion, reduceTransparency: reduceTransparency)
+        content.blur(radius: values.backgroundBlur)
+            .opacity(1 - 0.60 * Double(values.backdropProgress))
     }
 }
 
@@ -136,13 +139,14 @@ struct InspectorScrim: View {
     @ObservedObject var motion: InspectorMotionProgress
     let opacity: Double
     let onDismiss: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
     private var preferences = InspectorMotionPreferences()
     private var reduceMotion: Bool { preferences.reduceMotion }
     private var reduceTransparency: Bool { preferences.reduceTransparency }
     var body: some View {
         let values = InspectorMotionValues.resolve(progress: motion.value,
             reduceMotion: reduceMotion, reduceTransparency: reduceTransparency)
-        Color.black.opacity(opacity * Double(values.backdropProgress))
+        (colorScheme == .dark ? Color.black : Color.white).opacity(opacity * Double(values.backdropProgress))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
             .onTapGesture(perform: onDismiss)

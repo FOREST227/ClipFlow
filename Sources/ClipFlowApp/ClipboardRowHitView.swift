@@ -6,6 +6,11 @@ import SwiftUI
 private protocol SwiftUIHitTestOwner {}
 extension NSHostingView: SwiftUIHitTestOwner {}
 
+@MainActor
+protocol ClipboardRowEventOwner: AnyObject {
+    func clipboardRow(for event: NSEvent) -> ClipboardRowHitView?
+}
+
 /// Row content is display-only; the row owns selection, paste and inspector actions.
 /// Keep wheel events on the normal responder chain so the enclosing scroll view still scrolls.
 class ClipboardRowHitView: NSView {
@@ -31,11 +36,25 @@ class ClipboardRowHitView: NSView {
     /// Validate the re-hit-test against visible native geometry before forwarding.
     /// A hosting tree can briefly report an old row during layout/scroll updates.
     func redirectLeftClickIfNeeded(_ event: NSEvent) -> Bool {
+        // Native lists resolve through their own current row-index/UUID map.
+        // Never re-enter the outer SwiftUI hosting hit-test while it is scrolling.
+        var ancestor = superview
+        while let view = ancestor {
+            if let owner = view as? ClipboardRowEventOwner {
+                guard let target = owner.clipboardRow(for: event) else { return true }
+                guard target !== self else { return false }
+                target.mouseDown(with: event)
+                return true
+            }
+            ancestor = view.superview
+        }
         // The first event after reopening can retain an old view. Its window is
         // not authoritative: use the event's actual window for coordinates.
         guard let eventWindow = event.window ?? window,
               let root = eventWindow.contentView else { return hasBelongedToWindow || !interactionEnabled }
-        root.layoutSubtreeIfNeeded()
+        // Resolve against the geometry that received this press. Flushing a
+        // pending lazy-list layout here can move the scroll anchor (especially
+        // during live scrolling or pin reordering) and retarget the same press.
         let point = root.superview.map { $0.convert(event.locationInWindow, from: nil) }
             ?? event.locationInWindow
         var hit = root.hitTest(point)
@@ -70,9 +89,20 @@ class ClipboardRowHitView: NSView {
 
     /// Bypassing a stale hosting hit-test must not bypass a real foreground view.
     /// Walk each native branch above the row without dispatching another click.
-    private func isCoveredByForegroundSibling(in root: NSView, event: NSEvent) -> Bool {
+    func isCoveredByForegroundSibling(in root: NSView, event: NSEvent) -> Bool {
+        Self.isCoveredByForegroundSibling(above: self, in: root, event: event)
+    }
+    static func isCoveredByForegroundSibling(above start: NSView, in root: NSView, event: NSEvent) -> Bool {
         if root is SwiftUIHitTestOwner { return false }
-        var branch: NSView = self
+        var branch: NSView = start
+        // A hosted tree's native drawing siblings are not independent controls.
+        // If wrapped in an ordinary native root, inspect only siblings outside
+        // its hosting owner; SwiftUI input is gated by the shared model as well.
+        var ancestor = start.superview
+        while let view = ancestor, view !== root {
+            if view is SwiftUIHitTestOwner { branch = view }
+            ancestor = view.superview
+        }
         while branch !== root, let parent = branch.superview {
             guard let index = parent.subviews.firstIndex(where: { $0 === branch }) else { return true }
             let point = parent.convert(event.locationInWindow, from: nil)
@@ -80,7 +110,7 @@ class ClipboardRowHitView: NSView {
                 guard !sibling.isHiddenOrHasHiddenAncestor, sibling.alphaValue > 0,
                       let hit = sibling.hitTest(point),
                       hit === sibling || hit.isDescendant(of: sibling),
-                      hit.window === window, !hit.isHiddenOrHasHiddenAncestor, hit.alphaValue > 0 else { continue }
+                      hit.window === start.window, !hit.isHiddenOrHasHiddenAncestor, hit.alphaValue > 0 else { continue }
                 let location = hit.convert(event.locationInWindow, from: nil)
                 if hit.bounds.contains(location), hit.visibleRect.contains(location) { return true }
             }

@@ -28,21 +28,26 @@ final class InspectorPresentation: ObservableObject {
         var phase: Phase
         var itemID: UUID?
         var revision: UInt64
+        var sourceRectInWindow: CGRect? = nil
     }
     @Published private(set) var snapshot = Snapshot(phase: .closed, itemID: nil, revision: 0)
     let motion = InspectorMotionProgress()
     private let driver: any InspectorAnimationDriving
     private var afterClose: (() -> Void)?
+    private var sourceAnchor: InspectorSourceAnchor?
     var blocksBackground: Bool { snapshot.phase != .closed }
 
     init(driver: any InspectorAnimationDriving) { self.driver = driver }
 
-    func open(itemID: UUID, reduceMotion: Bool) {
+    func open(itemID: UUID, reduceMotion: Bool, source: InspectorSourceAnchor? = nil) {
         if snapshot.itemID == itemID, snapshot.phase == .open || snapshot.phase == .opening { return }
         let switchingItem = snapshot.itemID != nil && snapshot.itemID != itemID
         let revision = snapshot.revision &+ 1
         afterClose = nil
-        snapshot = Snapshot(phase: .opening, itemID: itemID, revision: revision)
+        if let source { sourceAnchor = source }
+        else if switchingItem { sourceAnchor = nil }
+        let origin = sourceAnchor?.rectInWindow() ?? (switchingItem ? nil : snapshot.sourceRectInWindow)
+        snapshot = Snapshot(phase: .opening, itemID: itemID, revision: revision, sourceRectInWindow: origin)
         driver.cancel()
         if switchingItem { motion.setValue(0) }
         drive(to: 1, duration: reduceMotion ? 0.11 : 0.28, revision: revision)
@@ -52,12 +57,14 @@ final class InspectorPresentation: ObservableObject {
         guard snapshot.phase != .closed, snapshot.phase != .closing else { return }
         let revision = snapshot.revision &+ 1
         afterClose = action
-        snapshot = Snapshot(phase: .closing, itemID: snapshot.itemID, revision: revision)
+        snapshot = Snapshot(phase: .closing, itemID: snapshot.itemID, revision: revision,
+            sourceRectInWindow: sourceAnchor?.rectInWindow() ?? snapshot.sourceRectInWindow)
         driver.cancel()
         drive(to: 0, duration: reduceMotion ? 0.11 : 0.20, revision: revision)
     }
 
     func reset() {
+        sourceAnchor = nil
         afterClose = nil
         snapshot = Snapshot(phase: .closed, itemID: nil, revision: snapshot.revision &+ 1)
         driver.cancel()
@@ -75,10 +82,12 @@ final class InspectorPresentation: ObservableObject {
                   self.snapshot.phase == (target == 1 ? .opening : .closing) else { return }
             self.motion.setValue(target)
             if target == 1 {
-                self.snapshot = Snapshot(phase: .open, itemID: self.snapshot.itemID, revision: revision)
+                self.snapshot = Snapshot(phase: .open, itemID: self.snapshot.itemID, revision: revision,
+                    sourceRectInWindow: self.snapshot.sourceRectInWindow)
             } else {
                 let action = self.afterClose
                 self.afterClose = nil
+                self.sourceAnchor = nil
                 self.snapshot = Snapshot(phase: .closed, itemID: nil, revision: revision)
                 action?()
             }

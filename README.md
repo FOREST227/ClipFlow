@@ -5,7 +5,7 @@
   <p>一款轻量的原生 macOS 剪贴板工具，集中管理文本、代码、链接与图片。</p>
   <p>
     <a href="https://github.com/FOREST227/ClipFlow/releases/latest">下载最新版</a>
-    · <a href="docs/releases/v0.1.1.md">v0.1.1 更新说明</a>
+    · <a href="docs/releases/v0.1.2.md">v0.1.2 更新说明</a>
     · <a href="https://github.com/FOREST227/ClipFlow/issues">反馈问题</a>
   </p>
   <p>macOS 12+ · Apple 芯片 / Intel / 通用版本 · 中文界面 · 本地保存</p>
@@ -18,6 +18,8 @@
 ## 不止保存历史，也让内容更好用
 
 - **随手呼出，快速粘贴**：默认按 <code>⌥ Option + V</code> 在鼠标附近打开面板，搜索后双击条目粘贴。常用内容可以置顶。
+- **原生快捷列表**：滚动与点击由同一原生列表管理，置顶或重新捕获后保持未变化条目的位置，减少滚动中误选与视口跳动。
+- **抽屉式详情**：右键后从条目位置展开详情，正文与操作分层呈现；支持反向收回和系统“减少动态效果”。
 - **分类查找**：保存最近 80 条历史，按代码、链接、敏感内容等分类筛选，也可以搜索内容、来源应用和标签。
 - **代码更容易阅读**：改进 PowerShell、macOS 终端命令与常见代码片段识别。详情支持多语言语法高亮，可自动识别或手动选择语言。
 - **Markdown 源码与预览**：识别到 Markdown 后，可切换源码和排版预览，查看标题、列表、表格、引用与代码块。
@@ -62,9 +64,9 @@
 
 | 你的 Mac | 安装包 |
 | --- | --- |
-| Apple 芯片 | ClipFlow-v0.1.1-arm64.dmg |
-| Intel 处理器 | ClipFlow-v0.1.1-x86_64.dmg |
-| 两种架构通用，或不确定芯片类型 | ClipFlow-v0.1.1-universal.dmg |
+| Apple 芯片 | ClipFlow-v0.1.2-arm64.dmg |
+| Intel 处理器 | ClipFlow-v0.1.2-x86_64.dmg |
+| 两种架构通用，或不确定芯片类型 | ClipFlow-v0.1.2-universal.dmg |
 
 1. 打开 .dmg，将 **ClipFlow** 拖入“应用程序”。
 2. 从“应用程序”启动，点击菜单栏中的 ClipFlow 图标。
@@ -114,7 +116,7 @@
 
 构建目标覆盖 macOS 12，但旧系统实机与 Intel 实机仍需要更多验证。遇到问题，欢迎 [提交 Issue](https://github.com/FOREST227/ClipFlow/issues)，附上 macOS 版本、芯片型号、应用版本及复现步骤。分享截图前请遮住私人剪贴内容。
 
-- [更新说明](docs/releases/v0.1.1.md)
+- [更新说明](docs/releases/v0.1.2.md)
 - [开发、测试与打包](docs/development.md)
 - [离线渲染组件与许可证](Sources/ClipFlowApp/Renderer/NOTICE.txt)
 

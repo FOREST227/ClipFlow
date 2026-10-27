@@ -18,15 +18,19 @@ final class InspectorMotionEvidenceTests: XCTestCase {
         let output = URL(fileURLWithPath: path)
         let context = try InspectorTestContext()
         defer { context.cleanup() }
+        _ = NSApplication.shared
+        let previousAppearance = NSApp.appearance
+        NSApp.appearance = NSAppearance(named: .aqua)
+        defer { NSApp.appearance = previousAppearance }
         _ = try context.text("https://example.com/project")
-        _ = try context.text("一条普通的演示记录")
+        _ = try context.text("func greeting(_ name: String) -> String {\n    return \"Hello, \\(name)!\"\n}\n\nprint(greeting(\"ClipFlow\"))")
         let project = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let icon = try Data(contentsOf: project.appendingPathComponent("assets/icon/ClipFlow-icon-1024.png"))
         context.store.ingestCopiedImage(icon, size: CGSize(width: 1024, height: 1024),
             sourceApp: "预览", sourceBundleID: nil)
         let image = try XCTUnwrap(context.store.items.first)
-        let code = try context.text("func greeting(_ name: String) -> String {\n    return \"Hello, \\(name)!\"\n}\n\nprint(greeting(\"ClipFlow\"))")
+        _ = try context.text("ClipFlow 品牌设计：暖金、雾蓝，与顺畅的工作节奏。")
         let history = HistoryInspectorHarness(context: context, showsBackground: true)
         defer { history.close() }
         context.store.select(image)
@@ -35,7 +39,7 @@ final class InspectorMotionEvidenceTests: XCTestCase {
             directory: output.appendingPathComponent("history"), pump: history.pump)
         let hud = InspectorHUDHarness(context: context)
         defer { hud.close() }
-        try export(view: hud.host.view, state: hud.inspector, driver: hud.driver, itemID: code.id,
+        try export(view: hud.host.view, state: hud.inspector, driver: hud.driver, itemID: image.id,
             directory: output.appendingPathComponent("quick-paste"), pump: hud.pump)
         try "Native SwiftUI/AppKit component frames, synthetic data, deterministic progress at 60 samples/sec. Not a frame-rate benchmark.\n".write(
             to: output.appendingPathComponent("CAPTURE.txt"), atomically: true, encoding: .utf8)
@@ -64,7 +68,14 @@ final class InspectorMotionEvidenceTests: XCTestCase {
             }
         }
         try hold(45)
-        state.open(itemID: itemID, reduceMotion: false)
+        let source = try XCTUnwrap(InspectorTestContext.descendants(view, ClipboardRowHitView.self)
+            .first { $0.identifier?.rawValue == itemID.uuidString })
+        let event = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown,
+            location: source.convert(CGPoint(x: source.bounds.midX, y: source.bounds.midY), to: nil),
+            modifierFlags: [], timestamp: 10, windowNumber: try XCTUnwrap(source.window).windowNumber,
+            context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        source.rightMouseDown(with: event)
+        XCTAssertEqual(state.snapshot.itemID, itemID)
         for step in 1...17 { driver.emit(CGFloat(step) / 17); try capture() }
         driver.finishLatest()
         try hold(45)

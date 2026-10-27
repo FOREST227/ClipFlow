@@ -35,7 +35,8 @@ struct ContentView: View {
                 VStack(spacing: ClipFlowLayout.sectionGap) {
                     HeaderView(store: store, palette: palette)
                     SidebarView(store: store, palette: palette)
-                    LibraryView(store: store, palette: palette) { item in
+                    LibraryView(store: store, palette: palette,
+                        onInspectFrom: { item, source in toggleLibraryInspector(for: item, source: source) }) { item in
                         toggleLibraryInspector(for: item)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -59,6 +60,7 @@ struct ContentView: View {
                 }
 
                 if let inspectingItem {
+                    let cardWidth = min(620, proxy.size.width - 24)
                     let tallImage = inspectingItem.isImage && LibraryImageShape.resolve(
                         width: inspectingItem.imageWidth, height: inspectingItem.imageHeight) == .portrait
                     LibraryInspectorOverlay(
@@ -66,21 +68,23 @@ struct ContentView: View {
                         store: store,
                         palette: palette,
                         maxHeight: tallImage ? max(200, proxy.size.height - 32)
-                            : min(max(proxy.size.height - 96, 420), 760),
+                            : min(max(proxy.size.height - 32, 420), 760),
+                        contentWidth: cardWidth,
                         onPasteAction: {
                             inspector.dismiss(reduceMotion: reduceMotion) {
                                 guard let current = store.item(withID: inspectingItem.id) else { return }
                                 ClipFlowRuntime.shared.paste(current)
                             }
                         },
+                        sourceRectInWindow: inspector.snapshot.sourceRectInWindow,
                         motion: inspector.motion
                     ) {
                         inspector.dismiss(reduceMotion: reduceMotion)
                     }
-                    .frame(width: min(620, proxy.size.width - 48))
+                    .frame(width: cardWidth)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, tallImage ? 16 : 48)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 16)
                     .zIndex(10)
                 }
 
@@ -142,12 +146,12 @@ struct ContentView: View {
         inspector.blocksBackground || permissionOverlayActive
     }
 
-    private func toggleLibraryInspector(for item: ClipboardItem) {
+    private func toggleLibraryInspector(for item: ClipboardItem, source: InspectorSourceAnchor? = nil) {
         store.select(item)
         if inspector.snapshot.itemID == item.id && inspector.snapshot.phase != .closing {
             inspector.dismiss(reduceMotion: reduceMotion)
         } else {
-            inspector.open(itemID: item.id, reduceMotion: reduceMotion)
+            inspector.open(itemID: item.id, reduceMotion: reduceMotion, source: source)
         }
     }
 
@@ -293,6 +297,7 @@ struct SidebarView: View {
 struct LibraryView: View {
     @ObservedObject var store: ClipFlowStore
     let palette: ClipFlowPalette
+    var onInspectFrom: ((ClipboardItem, InspectorSourceAnchor) -> Void)? = nil
     let onInspectItem: (ClipboardItem) -> Void
 
     var body: some View {
@@ -324,9 +329,12 @@ struct LibraryView: View {
                         LazyVStack(spacing: LibraryCardLayout.spacing) {
                             ForEach(store.filteredItems) { item in
                                 LibraryInteractiveCard(item: item, store: store,
-                                    displayedSnippet: store.displaySnippet(for: item), palette: palette) {
-                                    store.select(item)
-                                } onInspect: { onInspectItem(item) }
+                                    displayedSnippet: store.displaySnippet(for: item), palette: palette,
+                                    onInspectFrom: { source in
+                                        if let onInspectFrom { onInspectFrom(item, source) }
+                                        else { onInspectItem(item) }
+                                    }, onSelect: { store.select(item) },
+                                    onInspect: { onInspectItem(item) })
                                 .frame(maxWidth: .infinity)
                                 .frame(height: LibraryCardLayout.height(for: item.kind))
                             }
@@ -369,12 +377,14 @@ struct LibraryInteractiveCard: NSViewRepresentable {
     let store: ClipFlowStore
     let displayedSnippet: String
     let palette: ClipFlowPalette
+    var onInspectFrom: ((InspectorSourceAnchor) -> Void)? = nil
     let onSelect: () -> Void
     let onInspect: () -> Void
 
     func makeNSView(context: Context) -> LibraryInteractiveHostingView {
         let view = LibraryInteractiveHostingView()
         view.interactionEnabled = isEnabled
+        view.identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
         view.update(
             rootView: AnyView(
                 ClipboardCard(
@@ -387,13 +397,14 @@ struct LibraryInteractiveCard: NSViewRepresentable {
             selectionView: AnyView(LibrarySelectionChrome(itemID: item.id,
                 selection: store.historySelection, tint: item.kind.tint, palette: palette)),
             onSelect: onSelect,
-            onInspect: onInspect
+            onInspect: InspectorSourceAnchor.callback(for: view, fallback: onInspect, anchored: onInspectFrom)
         )
         return view
     }
 
     func updateNSView(_ nsView: LibraryInteractiveHostingView, context: Context) {
         nsView.interactionEnabled = isEnabled
+        nsView.identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
         nsView.update(
             rootView: AnyView(
                 ClipboardCard(
@@ -406,7 +417,7 @@ struct LibraryInteractiveCard: NSViewRepresentable {
             selectionView: AnyView(LibrarySelectionChrome(itemID: item.id,
                 selection: store.historySelection, tint: item.kind.tint, palette: palette)),
             onSelect: onSelect,
-            onInspect: onInspect
+            onInspect: InspectorSourceAnchor.callback(for: nsView, fallback: onInspect, anchored: onInspectFrom)
         )
     }
 }
@@ -500,7 +511,9 @@ struct LibraryInspectorOverlay: View {
     var contentWidth: CGFloat = 438
     var compactShadow = false
     var onPasteAction: (() -> Void)? = nil
+    var sourceRectInWindow: CGRect? = nil
     var motion: InspectorMotionProgress? = nil
+    @ViewState private var destinationRectInWindow: CGRect = .zero
     let onClose: () -> Void
     private var motionPreferences = InspectorMotionPreferences()
     private var reduceMotion: Bool { motionPreferences.reduceMotion }
@@ -514,32 +527,140 @@ struct LibraryInspectorOverlay: View {
     @ViewState private var showsInfo = false
     @ViewState private var copyFeedback: String?
 
-    private var previewHeight: CGFloat {
-        let limit = max(80, min(320, maxHeight - (showsInfo ? 270 : 180)))
-        if item.isImage {
-            return DetailImageLayout.previewHeight(
-                shape: LibraryImageShape.resolve(width: item.imageWidth, height: item.imageHeight),
-                availableHeight: maxHeight, expandedInfo: showsInfo)
-        }
-        let text = store.displayFullText(for: item)
-        let width = max(160, contentWidth - 64)
-        let font = item.kind == .code ? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-            : NSFont.systemFont(ofSize: 13)
-        let bounds = (text as NSString).boundingRect(with: NSSize(width: width, height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font])
-        return min(limit, max(64, ceil(bounds.height) + 24))
+    private let drawerHeaderHeight: CGFloat = 84
+    private var drawerFooterHeight: CGFloat {
+        124 + (showsInfo ? 72 : 0) + (item.isSensitive ? 22 : 0) + (copyFeedback == nil ? 0 : 20)
     }
+    private var drawerHeight: CGFloat {
+        if item.isImage || item.kind == .code || markdownAvailable { return maxHeight }
+        let font = NSFont.systemFont(ofSize: 13)
+        let bounds = (store.displayFullText(for: item) as NSString).boundingRect(
+            with: CGSize(width: max(160, contentWidth - 64), height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font])
+        return min(maxHeight, drawerHeaderHeight + max(64, ceil(bounds.height) + 24) + drawerFooterHeight + 24)
+    }
+    private var drawerBodyHeight: CGFloat { max(64, drawerHeight - drawerHeaderHeight - drawerFooterHeight - 24) }
+    private var previewHeight: CGFloat { item.isImage ? max(64, drawerBodyHeight - 24) : drawerBodyHeight }
 
     var body: some View {
-        InspectorMotionSurface(motion: motion ?? .settled, reduceMotion: reduceMotion,
+        // Build rich content and measure text once per content/state change, not per animation tick.
+        let height = drawerHeight
+        let bodyHeight = max(64, height - drawerHeaderHeight - drawerFooterHeight - 24)
+        let footerHeight = drawerFooterHeight
+        let header = drawerHeader
+        let preview = drawerPreview
+        let actions = drawerActions
+        let info = drawerInfo
+        let summary = drawerSourceSummary
+        return InspectorMotionSurface(motion: motion ?? .settled, reduceMotion: reduceMotion,
             reduceTransparency: reduceTransparency) { frame in
-        VStack(alignment: .leading, spacing: 12) {
+            let destination = CGRect(x: destinationRectInWindow.minX, y: destinationRectInWindow.minY,
+                width: contentWidth, height: height)
+            let drawer = InspectorDrawerLayout.resolve(progress: frame.progress,
+                sourceRectInWindow: sourceRectInWindow, destinationRectInWindow: destination,
+                footerHeight: footerHeight, reduceMotion: reduceMotion)
+            let coverRect = CGRect(x: drawer.shellRect.minX, y: drawer.coverTop,
+                width: drawer.shellRect.width, height: drawer.coverHeight)
+            let coverOpacity = reduceMotion ? frame.progress : min(1, frame.progress / 0.10)
+
+            return ZStack(alignment: .topLeading) {
+                DetailGlassBackground(cornerRadius: 22, compactShadow: compactShadow)
+                    .frame(width: drawer.shellRect.width, height: drawer.shellRect.height)
+                    .position(x: drawer.shellRect.midX, y: drawer.shellRect.midY)
+                    .opacity(coverOpacity)
+
+                ZStack(alignment: .topLeading) {
+                    header
+                        .padding(20)
+                        .frame(width: contentWidth, alignment: .topLeading)
+                        .opacity(frame.chromeOpacity)
+                    VStack(alignment: .leading, spacing: 8) { preview }
+                        .frame(width: max(1, contentWidth - 40), height: bodyHeight, alignment: .top)
+                        .opacity(frame.contentOpacity)
+                        .offset(x: 20, y: drawerHeaderHeight + frame.contentOffsetY)
+                }
+                .frame(width: contentWidth, height: height, alignment: .topLeading)
+                .mask(Path(roundedRect: drawer.shellRect, cornerRadius: 22))
+
+                ZStack(alignment: .topLeading) {
+                    InspectorDrawerCoverShape(lipDepth: drawer.lipDepth)
+                        .path(in: coverRect)
+                        .fill(textColorScheme == .dark
+                            ? Color(red: 0.19, green: 0.21, blue: 0.25)
+                            : Color(red: 0.85, green: 0.90, blue: 0.96))
+                    VStack(alignment: .leading, spacing: 8) {
+                        summary
+                        Group {
+                            if item.isSensitive {
+                                Label(item.autoExpire ? "仅本地保存 · 复制 5 分钟后过期" : "受保护内容 · 仅本地保存", systemImage: "lock.shield")
+                                    .font(.system(size: 10)).foregroundStyle(item.kind.tint)
+                            }
+                            actions
+                            if let copyFeedback {
+                                Text(copyFeedback).font(.system(size: 10)).foregroundStyle(.secondary)
+                                    .lineLimit(1).help(copyFeedback)
+                            }
+                            info
+                        }
+                        .opacity(frame.contentOpacity)
+                        .allowsHitTesting(frame.contentOpacity >= 0.99)
+                        .accessibilityHidden(frame.contentOpacity < 0.99)
+                    }
+                    .frame(width: max(1, contentWidth - 24), alignment: .topLeading)
+                    .offset(x: drawer.shellRect.minX + 12, y: drawer.coverTop + 16)
+                }
+                .frame(width: contentWidth, height: height, alignment: .topLeading)
+                .mask(InspectorDrawerCoverShape(lipDepth: drawer.lipDepth).path(in: coverRect))
+                .opacity(coverOpacity)
+            }
+        }
+        .frame(width: contentWidth, height: height, alignment: .topLeading)
+        .opacity(sourceRectInWindow == nil || destinationRectInWindow.width > 0 ? 1 : 0)
+        .background(InspectorFrameReader { rect in
+            if destinationRectInWindow != rect { destinationRectInWindow = rect }
+        })
+        .onChangeBackward(of: item.id) {
+            showsInfo = false; copyFeedback = nil; showsMarkdownPreview = false; codeLanguage = "自动识别"
+        }
+    }
+
+    private var drawerSymbol: String {
+        switch item.kind {
+        case .text: "text.alignleft"
+        case .code: "chevron.left.forwardslash.chevron.right"
+        case .link: "link"
+        case .secret: "lock.shield"
+        case .image: "photo.on.rectangle"
+        }
+    }
+
+    private var drawerSourceSummary: some View {
+        HStack(spacing: 8) {
+            Image(systemName: drawerSymbol)
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(item.kind.tint)
+                .frame(width: 26, height: 26)
+                .background(item.kind.tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.isSensitive && !store.isRevealed(item) ? "受保护的敏感内容" : item.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                Text(item.sourceApp).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            Button(action: onClose) {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    .font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 22, height: 26)
+            }
+            .buttonStyle(.plain).help("收起详情").accessibilityLabel("收起详情")
+        }
+        .frame(height: 28)
+    }
+
+    private var drawerHeader: some View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.kind.label).font(.system(size: 16, weight: .semibold))
                     Text(headerMetadata)
                         .font(.system(size: 11)).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(2).help(headerMetadata)
                 }
                 Spacer()
                 Button(action: onClose) {
@@ -547,11 +668,11 @@ struct LibraryInspectorOverlay: View {
                         .frame(width: 26, height: 26)
                         .background(Color.primary.opacity(0.05), in: Circle())
                 }
-                .buttonStyle(.plain).help("关闭详情").accessibilityLabel("关闭详情")
+                .buttonStyle(.plain).background(InspectorFrameReader(name: "ClipFlowInspector.close")).help("关闭详情").accessibilityLabel("关闭详情")
             }
+    }
 
-
-            Group {
+    @ViewBuilder private var drawerPreview: some View {
             if item.isImage {
                 if (!item.isSensitive || store.isRevealed(item)), let url = store.imageURL(for: item) {
                     ZoomableDetailImage(url: url)
@@ -602,15 +723,9 @@ struct LibraryInspectorOverlay: View {
                 .background(textColorScheme == .dark ? palette.inputFill : Color.white, in: RoundedRectangle(cornerRadius: 12))
             }
 
-            }
-            .opacity(frame.contentOpacity)
-            .offset(y: frame.contentOffsetY)
+    }
 
-            if item.isSensitive {
-                Label(item.autoExpire ? "仅本地保存 · 复制 5 分钟后过期" : "受保护内容 · 仅本地保存", systemImage: "lock.shield")
-                    .font(.system(size: 10)).foregroundStyle(item.kind.tint)
-            }
-
+    private var drawerActions: some View {
             HStack(spacing: 8) {
                 Button("复制") {
                     let copied = ClipFlowRuntime.shared.copyToClipboard(item)
@@ -622,6 +737,7 @@ struct LibraryInspectorOverlay: View {
                     else { ClipFlowRuntime.shared.paste(item); onClose() }
                 }
                     .buttonStyle(ClipFlowActionButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
+                    .background(InspectorFrameReader(name: "ClipFlowInspector.paste"))
                 Button { store.togglePin(item.id) } label: {
                     Image(systemName: item.pinned ? "pin.fill" : "pin").frame(width: 14)
                 }
@@ -642,10 +758,9 @@ struct LibraryInspectorOverlay: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .accessibilityLabel("更多操作")
             }
-            .offset(y: frame.contentOffsetY * 0.5)
-            if let copyFeedback {
-                Text(copyFeedback).font(.system(size: 10)).foregroundStyle(.secondary)
-            }
+    }
+
+    private var drawerInfo: some View {
             DisclosureGroup("更多信息", isExpanded: $showsInfo) {
                 VStack(alignment: .leading, spacing: 6) {
                     infoRow("隐私级别", value: item.privacy.label)
@@ -655,23 +770,6 @@ struct LibraryInspectorOverlay: View {
                 .font(.system(size: 11)).padding(.top, 8)
             }
             .font(.system(size: 11)).foregroundStyle(.secondary)
-        }
-        .opacity(frame.chromeOpacity)
-        .padding(20)
-        .mask(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .scaleEffect(x: 1, y: frame.shellScaleY, anchor: .bottom)
-                .offset(y: frame.shellOffsetY)
-        )
-        .background(
-            DetailGlassBackground(cornerRadius: 22, compactShadow: compactShadow)
-                .scaleEffect(x: 1, y: frame.shellScaleY, anchor: .bottom)
-                .offset(y: frame.shellOffsetY)
-                .opacity(frame.chromeOpacity)
-        )
-        }
-
-        .onChangeBackward(of: item.id) { showsInfo = false; copyFeedback = nil; showsMarkdownPreview = false; codeLanguage = "自动识别" }
     }
 
     private var headerMetadata: String {
@@ -1940,6 +2038,7 @@ struct ClipFlowPalette {
     let shadow: Color
     let softFill: Color
     let rowFill: Color
+    let selectedRowFill: Color
     let rowBorder: Color
     let inputFill: Color
     let primaryButtonFill: Color
@@ -1957,6 +2056,7 @@ struct ClipFlowPalette {
                 shadow: Color.black.opacity(0.34),
                 softFill: Color.white.opacity(0.09),
                 rowFill: Color(red: 0.18, green: 0.20, blue: 0.25),
+                selectedRowFill: Color(red: 0.18, green: 0.20, blue: 0.25),
                 rowBorder: Color.white.opacity(0.15),
                 inputFill: Color.white.opacity(0.12),
                 primaryButtonFill: Color(red: 0.30, green: 0.59, blue: 0.92),
@@ -1973,7 +2073,8 @@ struct ClipFlowPalette {
             border: Color.white.opacity(0.7),
             shadow: Color.black.opacity(0.10),
             softFill: Color.white.opacity(0.66),
-            rowFill: Color(red: 0.935, green: 0.95, blue: 0.975),
+            rowFill: Color(red: 0.965, green: 0.969, blue: 0.975),
+            selectedRowFill: Color(red: 0.935, green: 0.95, blue: 0.975),
             rowBorder: Color(red: 0.65, green: 0.70, blue: 0.78).opacity(0.40),
             inputFill: Color.white.opacity(0.82),
             primaryButtonFill: Color(red: 0.30, green: 0.59, blue: 0.92),

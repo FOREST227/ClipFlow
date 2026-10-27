@@ -153,7 +153,7 @@ final class DetailImageCanvas: NSView {
         needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.withAlphaComponent(0.1).setFill()
+        NSColor.textBackgroundColor.setFill()
         bounds.fill()
         guard let image else {
             let message = loading == nil ? "图片不可用" : "正在加载图片…"

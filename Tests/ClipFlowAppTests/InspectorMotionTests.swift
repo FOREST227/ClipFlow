@@ -48,7 +48,7 @@ final class InspectorMotionTests: XCTestCase {
         XCTAssertEqual(open.contentOpacity, 1)
         let closed = InspectorMotionValues.resolve(progress: 0, reduceMotion: false, reduceTransparency: false)
         XCTAssertEqual(closed.contentOpacity, 0)
-        XCTAssertEqual(closed.shellScaleY, 0.9, accuracy: 0.001)
+        XCTAssertEqual(closed.shellScaleY, 1, "Drawer geometry replaces popup scaling")
         for value in stride(from: 0.0, through: 1, by: 0.1) {
             let frame = InspectorMotionValues.resolve(progress: CGFloat(value), reduceMotion: true, reduceTransparency: true)
             XCTAssertEqual(frame.shellScaleY, 1)

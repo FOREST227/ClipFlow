@@ -54,9 +54,9 @@ final class InspectorHUDHarness {
             charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
     }
     func clickPaste() throws {
-        // Render-verified center of the plain-text inspector's existing paste button.
-        // The fixture has fixed 360x588 geometry and minimum-height text content.
-        let point = host.view.convert(NSPoint(x: 122, y: host.view.bounds.midY + 45), to: nil)
+        let anchor = try XCTUnwrap(InspectorTestContext.descendants(host.view, InspectorGeometryView.self)
+            .first { $0.identifier?.rawValue == "ClipFlowInspector.paste" })
+        let point = anchor.convert(CGPoint(x: anchor.bounds.midX, y: anchor.bounds.midY), to: nil)
         let down = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: point,
             modifierFlags: [], timestamp: 20, windowNumber: window.windowNumber,
             context: nil, eventNumber: 1, clickCount: 1, pressure: 1))

@@ -192,11 +192,22 @@ final class QuickPasteMomentumTests: XCTestCase {
                 context.store.togglePin(pin.id)
                 RunLoop.main.run(until: Date().addingTimeInterval(0.001))
             }
-            let visible = f.rows.filter { row in
-                let rect = row.convert(row.bounds, to: scroll.contentView)
-                return rect.height > 40 && scroll.contentView.bounds.insetBy(dx: 0, dy: 12).contains(rect)
+            func visibleTarget() -> HUDInteractiveHostingView? {
+                f.rows.first { row in
+                    let rect = row.convert(row.bounds, to: scroll.contentView)
+                    return rect.height > 40 && scroll.contentView.bounds.insetBy(dx: 0, dy: 12).contains(rect)
+                }
             }
-            let row = try XCTUnwrap(visible.first, "Stress iteration \(n) must have a visible target")
+            // A click needs a displayed row, not an assumption that every runner
+            // materializes native cells within 1ms. This does not wait for scroll
+            // completion; both presses still follow immediately with no idle gap.
+            InspectorTestContext.settle(until: {
+                // XCTest pumps RunLoop, not NSApplication.run's display pass.
+                f.host.view.layoutSubtreeIfNeeded()
+                f.window.displayIfNeeded()
+                return visibleTarget() != nil
+            })
+            let row = try XCTUnwrap(visibleTarget(), "Stress iteration \(n) must have a visible target")
             let wanted = try XCTUnwrap(row.representedItemID)
             let point = row.convert(CGPoint(x: row.bounds.midX, y: row.bounds.midY), to: nil)
             let before = scroll.contentView.bounds.minY

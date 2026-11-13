@@ -153,7 +153,8 @@ struct ContentView: View {
     }
 
     private func handleKeyCommand(_ command: ListKeyCommand) -> Bool {
-        guard isPageEnabled, !overlayActive else { return false }
+        // The main window presents the permission report itself, above this page.
+        guard isPageEnabled, !overlayActive, store.startupPermissionReport == nil else { return false }
         let items = store.filteredItems
         switch command {
         case .moveUp, .moveDown:

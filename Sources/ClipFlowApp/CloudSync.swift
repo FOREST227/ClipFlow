@@ -78,58 +78,35 @@ struct ClipFlowCloudSyncCoordinator: Sendable {
         maxItems: Int
     ) throws -> ClipFlowCloudSyncResult {
         let locations = try resolveLocations()
-        let remoteState = try loadRemoteState(from: locations.historyURL)
-        let mergedTombstones = pruneTombstones(mergeTombstones(remoteState.tombstones, with: tombstones))
-        let localSyncedItems = localItems.filter(isEligibleForCloudSync(_:))
+        try prepareUbiquitousItem(at: locations.historyURL)
 
-        var mergedByID: [UUID: ClipboardItem] = [:]
-        remoteState.items.filter(isEligibleForCloudSync(_:)).forEach { mergedByID[$0.id] = $0 }
-
-        for item in localSyncedItems {
-            guard shouldKeep(item, tombstones: mergedTombstones) else { continue }
-
-            if let existing = mergedByID[item.id] {
-                if item.createdAt >= existing.createdAt {
-                    mergedByID[item.id] = item
-                }
-            } else {
-                mergedByID[item.id] = item
-            }
-        }
-
-        var mergedItems = Array(mergedByID.values)
-            .filter { shouldKeep($0, tombstones: mergedTombstones) }
-            .sorted(by: sortItems(lhs:rhs:))
-
-        if mergedItems.count > maxItems {
-            let pinned = mergedItems.filter(\.pinned)
-            mergedItems = pinned + mergedItems.filter { !$0.pinned }.prefix(max(0, maxItems - pinned.count))
-        }
-
-        for item in mergedItems where item.isImage {
-            try prepareCloudAssetIfNeeded(for: item, cloudImagesDirectoryURL: locations.imagesURL)
-        }
-
-        let localReadyItems = mergedItems.filter {
-            ensureLocalAssetIfNeeded(for: $0, cloudImagesDirectoryURL: locations.imagesURL)
-        }
-
-        if remoteState.items != mergedItems || remoteState.tombstones != mergedTombstones {
-            let stateToWrite = ClipFlowCloudSyncState(
-                updatedAt: Date(),
-                items: mergedItems,
-                tombstones: mergedTombstones
+        let merged = try ClipFlowCloudSyncFile.coordinate(historyAt: locations.historyURL) { readURL, writeURL in
+            let remoteState = try ClipFlowCloudSyncFile.readState(at: readURL)
+            let merged = ClipFlowHistoryMerge.merge(
+                localItems: localItems,
+                remoteItems: remoteState.items,
+                localTombstones: tombstones,
+                remoteTombstones: remoteState.tombstones,
+                maxItems: maxItems
             )
-            try persistRemoteStateIfNeeded(stateToWrite, to: locations.historyURL)
+            for item in merged.items where item.isImage {
+                try prepareCloudAssetIfNeeded(for: item, cloudImagesDirectoryURL: locations.imagesURL)
+            }
+            try ClipFlowCloudSyncFile.writeIfChanged(merged, replacing: remoteState, at: writeURL)
+            return merged
         }
+
         // iCloud may deliver an image before the history that references it.
         // A single device's snapshot cannot prove a remote asset is orphaned.
         // Only local assets are garbage-collected until coordinated remote GC exists.
+        let localReadyItems = merged.items.filter {
+            ensureLocalAssetIfNeeded(for: $0, cloudImagesDirectoryURL: locations.imagesURL)
+        }
 
         return ClipFlowCloudSyncResult(
-            cloudItems: mergedItems,
+            cloudItems: merged.items,
             localItems: localReadyItems,
-            tombstones: mergedTombstones
+            tombstones: merged.tombstones
         )
     }
 
@@ -158,73 +135,6 @@ struct ClipFlowCloudSyncCoordinator: Sendable {
             throw ClipFlowCloudSyncError.unavailable
         }
         return ClipFlowCloudSyncLocations(historyURL: historyURL, imagesURL: imagesURL)
-    }
-
-    private func loadRemoteState(from historyURL: URL) throws -> ClipFlowCloudSyncState {
-        try prepareUbiquitousItem(at: historyURL)
-
-        guard fileManager.fileExists(atPath: historyURL.path) else {
-            return ClipFlowCloudSyncState()
-        }
-
-        do {
-            let data = try Data(contentsOf: historyURL)
-            return try JSONDecoder().decode(ClipFlowCloudSyncState.self, from: data)
-        } catch {
-            throw ClipFlowCloudSyncError.invalidState
-        }
-    }
-
-    private func persistRemoteStateIfNeeded(_ state: ClipFlowCloudSyncState, to historyURL: URL) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(state)
-        let existingData = try? Data(contentsOf: historyURL)
-
-        if existingData == data {
-            return
-        }
-
-        do {
-            try data.write(to: historyURL, options: [.atomic])
-        } catch {
-            throw ClipFlowCloudSyncError.writeFailed
-        }
-    }
-
-    private func shouldKeep(_ item: ClipboardItem, tombstones: [UUID: Date]) -> Bool {
-        guard let tombstone = tombstones[item.id] else { return true }
-        return item.createdAt > tombstone
-    }
-
-    private func mergeTombstones(_ remote: [UUID: Date], with local: [UUID: Date]) -> [UUID: Date] {
-        var merged = remote
-        for (id, date) in local {
-            if let existing = merged[id] {
-                if date > existing {
-                    merged[id] = date
-                }
-            } else {
-                merged[id] = date
-            }
-        }
-        return merged
-    }
-
-    private func pruneTombstones(_ tombstones: [UUID: Date]) -> [UUID: Date] {
-        let cutoff = Date().addingTimeInterval(-30 * 24 * 60 * 60)
-        return tombstones.filter { $0.value >= cutoff }
-    }
-
-    private func sortItems(lhs: ClipboardItem, rhs: ClipboardItem) -> Bool {
-        if lhs.pinned != rhs.pinned {
-            return lhs.pinned && !rhs.pinned
-        }
-        return lhs.createdAt > rhs.createdAt
-    }
-
-    private func isEligibleForCloudSync(_ item: ClipboardItem) -> Bool {
-        !item.isSensitive
     }
 
     private func prepareCloudAssetIfNeeded(for item: ClipboardItem, cloudImagesDirectoryURL: URL) throws {
@@ -298,4 +208,170 @@ actor ClipFlowCloudSyncWorker {
 private struct ClipFlowCloudSyncLocations {
     let historyURL: URL
     let imagesURL: URL
+}
+
+struct ClipFlowMergedHistory: Equatable, Sendable {
+    var items: [ClipboardItem]
+    var tombstones: [UUID: Date]
+}
+
+/// Item identity wins over whole-file replacement. Capture time picks the version;
+/// a pin cannot move that timestamp, so a tombstone stays a tombstone.
+final class ClipFlowHistoryMerge {
+    private init() {}
+
+    static func merge(
+        localItems: [ClipboardItem],
+        remoteItems: [ClipboardItem],
+        localTombstones: [UUID: Date],
+        remoteTombstones: [UUID: Date],
+        maxItems: Int,
+        now: Date = Date()
+    ) -> ClipFlowMergedHistory {
+        let tombstones = prune(mergeTombstones(localTombstones, remoteTombstones), now: now)
+        var byID: [UUID: ClipboardItem] = [:]
+        for item in remoteItems + localItems {
+            guard !item.isSensitive, shouldKeep(item, tombstones: tombstones) else { continue }
+            if let existing = byID[item.id] {
+                byID[item.id] = preferred(existing, item)
+            } else {
+                byID[item.id] = item
+            }
+        }
+
+        var items = byID.values.sorted(by: ClipboardItemOrder.isBefore)
+        if items.count > maxItems {
+            let pinned = items.filter(\.pinned)
+            let rest = items.filter { !$0.pinned }
+            items = pinned + rest.prefix(max(0, maxItems - pinned.count))
+        }
+        return ClipFlowMergedHistory(items: items, tombstones: tombstones)
+    }
+
+    private static func shouldKeep(_ item: ClipboardItem, tombstones: [UUID: Date]) -> Bool {
+        guard let tombstone = tombstones[item.id] else { return true }
+        // No capture time means createdAt may be a legacy pin bump. A deletion wins.
+        guard let capturedAt = item.capturedAt else { return false }
+        return capturedAt > tombstone
+    }
+
+    private static func mergeTombstones(_ lhs: [UUID: Date], _ rhs: [UUID: Date]) -> [UUID: Date] {
+        var merged = lhs
+        for (id, date) in rhs {
+            if let existing = merged[id] {
+                if date > existing {
+                    merged[id] = date
+                }
+            } else {
+                merged[id] = date
+            }
+        }
+        return merged
+    }
+
+    private static func prune(_ tombstones: [UUID: Date], now: Date) -> [UUID: Date] {
+        let cutoff = now.addingTimeInterval(-30 * 24 * 60 * 60)
+        return tombstones.filter { $0.value >= cutoff }
+    }
+
+    /// Newer capture wins. When the capture is unchanged, the later pin edit wins.
+    /// Equal versions fall back to a byte order so argument order cannot change the result.
+    private static func preferred(_ lhs: ClipboardItem, _ rhs: ClipboardItem) -> ClipboardItem {
+        if lhs.captureTimestamp != rhs.captureTimestamp {
+            return lhs.captureTimestamp > rhs.captureTimestamp ? lhs : rhs
+        }
+        let leftPin = ClipboardItemOrder.pinTimestamp(of: lhs)
+        let rightPin = ClipboardItemOrder.pinTimestamp(of: rhs)
+        if leftPin != rightPin {
+            return leftPin > rightPin ? lhs : rhs
+        }
+        return canonical(lhs, rhs)
+    }
+
+    private static func canonical(_ lhs: ClipboardItem, _ rhs: ClipboardItem) -> ClipboardItem {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let left = [UInt8]((try? encoder.encode(lhs)) ?? Data())
+        let right = [UInt8]((try? encoder.encode(rhs)) ?? Data())
+        return left.lexicographicallyPrecedes(right) ? rhs : lhs
+    }
+}
+
+/// Coordinated read plus atomic replace. Callers merge inside the block so a
+/// concurrent iCloud write is folded in instead of overwritten.
+final class ClipFlowCloudSyncFile {
+    private init() {}
+
+    static func coordinate<T: Sendable>(
+        historyAt url: URL,
+        _ body: (URL, URL) throws -> T
+    ) throws -> T {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        let outcome = CoordinationOutcome<T>()
+        coordinator.coordinate(
+            readingItemAt: url,
+            options: [],
+            writingItemAt: url,
+            options: .forReplacing,
+            error: &coordinationError
+        ) { readURL, writeURL in
+            outcome.result = Result { try body(readURL, writeURL) }
+        }
+        if coordinationError != nil {
+            throw ClipFlowCloudSyncError.writeFailed
+        }
+        guard let result = outcome.result else {
+            throw ClipFlowCloudSyncError.writeFailed
+        }
+        return try result.get()
+    }
+
+    static func readState(at url: URL) throws -> ClipFlowCloudSyncState {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return ClipFlowCloudSyncState()
+        }
+        do {
+            let data = try Data(contentsOf: url)
+            return try JSONDecoder().decode(ClipFlowCloudSyncState.self, from: data)
+        } catch {
+            throw ClipFlowCloudSyncError.invalidState
+        }
+    }
+
+    static func writeIfChanged(
+        _ merged: ClipFlowMergedHistory,
+        replacing remote: ClipFlowCloudSyncState,
+        at url: URL
+    ) throws {
+        guard remote.items != merged.items || remote.tombstones != merged.tombstones else {
+            return
+        }
+        let state = ClipFlowCloudSyncState(
+            schemaVersion: remote.schemaVersion,
+            updatedAt: Date(),
+            items: merged.items,
+            tombstones: merged.tombstones
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data: Data
+        do {
+            data = try encoder.encode(state)
+        } catch {
+            throw ClipFlowCloudSyncError.writeFailed
+        }
+        if let existing = try? Data(contentsOf: url), existing == data {
+            return
+        }
+        do {
+            try data.write(to: url, options: [.atomic])
+        } catch {
+            throw ClipFlowCloudSyncError.writeFailed
+        }
+    }
+}
+
+private final class CoordinationOutcome<T>: @unchecked Sendable {
+    var result: Result<T, Error>?
 }

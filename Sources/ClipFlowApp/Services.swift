@@ -226,8 +226,15 @@ final class ClipboardMonitor {
         let sourceApp = sourceApplication?.localizedName ?? "未知应用"
         switch choice {
         case .text(let text):
+            let richContent = ClipboardRepresentations.capture(from: pasteboard)
+            guard pasteboard.changeCount == changeCount else { return }
             lastChangeCount = changeCount
-            store.ingestCopiedText(text, sourceApp: sourceApp, sourceBundleID: sourceBundleID)
+            store.ingestCopiedText(
+                text,
+                sourceApp: sourceApp,
+                sourceBundleID: sourceBundleID,
+                richContent: richContent
+            )
         case .image(let source):
             startImageCapture(
                 source: source,
@@ -356,7 +363,7 @@ final class PasteService {
         return true
     }
 
-    private func restore(_ item: ClipboardItem, to pasteboard: NSPasteboard) -> Bool {
+    func restore(_ item: ClipboardItem, to pasteboard: NSPasteboard) -> Bool {
         if item.isImage {
             guard let imageData = store.imageData(for: item),
                   let image = NSImage(data: imageData) else {
@@ -370,7 +377,12 @@ final class PasteService {
             return pasteboard.setData(imageData, forType: .png)
         }
 
-        return pasteboard.setString(item.fullText, forType: .string)
+        let snapshot = ClipboardRepresentations.Snapshot(
+            rtfData: item.rtfData,
+            htmlData: item.htmlData,
+            fileURLs: item.fileURLs ?? []
+        )
+        return ClipboardRepresentations.write(plainText: item.fullText, snapshot: snapshot, to: pasteboard)
     }
 }
 

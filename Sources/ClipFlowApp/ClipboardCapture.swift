@@ -10,12 +10,12 @@ struct EncodedClipboardImage: Sendable, Equatable {
     let signature: String
 }
 
-/// Decides whether a pasteboard change is text or an image.
+/// Decides whether a pasteboard change is text, copied files, or an image.
 ///
 /// Web pages often attach a rendered preview beside the copied string, RTF, or HTML.
 /// That preview is not the copy. An image is recorded when there is no meaningful
-/// text, or when the pasteboard is an image file or an image-only document such as
-/// a copied picture.
+/// text or file list, or when the pasteboard is an image file or an image-only
+/// document such as a copied picture.
 final class ClipboardCapture {
     enum Choice: Equatable {
         case text(String)
@@ -37,6 +37,10 @@ final class ClipboardCapture {
             return .text(text)
         }
 
+        if let fileText = ClipboardRepresentations.fallbackText(forFileURLsOn: pasteboard) {
+            return .text(fileText)
+        }
+
         if let image = imageData(on: pasteboard) {
             return .image(.data(image))
         }
@@ -53,7 +57,7 @@ final class ClipboardCapture {
             return string
         }
 
-        for type in rtfTypes {
+        for type in ClipboardRepresentations.rtfTypes {
             guard let data = pasteboard.data(forType: type) else { continue }
             let text = type == .rtfd
                 ? NSAttributedString(rtfd: data, documentAttributes: nil)?.string
@@ -74,7 +78,7 @@ final class ClipboardCapture {
     }
 
     private static func htmlString(on pasteboard: NSPasteboard) -> String? {
-        for type in htmlTypes {
+        for type in ClipboardRepresentations.htmlTypes {
             if let string = pasteboard.string(forType: type), !string.isEmpty {
                 return string
             }
@@ -129,16 +133,185 @@ final class ClipboardCapture {
         return nil
     }
 
-    private static let rtfTypes: [NSPasteboard.PasteboardType] = [
+    private init() {}
+}
+
+/// Reads and writes the rich pasteboard representations stored with a history item.
+///
+/// Plain text stays on the item. RTF, HTML, and file URLs are captured beside it and
+/// written back together so formatting and copied files survive a paste or copy-back.
+final class ClipboardRepresentations {
+    struct Snapshot: Equatable, Sendable {
+        var rtfData: Data?
+        var htmlData: Data?
+        var fileURLs: [String]
+
+        static let empty = Snapshot(rtfData: nil, htmlData: nil, fileURLs: [])
+    }
+
+    static let rtfTypes: [NSPasteboard.PasteboardType] = [
         .rtf,
         NSPasteboard.PasteboardType("NeXT Rich Text Format v1.0 pasteboard type"),
         .rtfd
     ]
 
-    private static let htmlTypes: [NSPasteboard.PasteboardType] = [
+    static let htmlTypes: [NSPasteboard.PasteboardType] = [
         .html,
         NSPasteboard.PasteboardType("Apple HTML pasteboard type")
     ]
+
+    static let filenamesType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
+
+    static func capture(from pasteboard: NSPasteboard) -> Snapshot {
+        Snapshot(
+            rtfData: rtfData(on: pasteboard),
+            htmlData: htmlData(on: pasteboard),
+            fileURLs: fileURLs(on: pasteboard).map(\.absoluteString)
+        )
+    }
+
+    /// Display text for a file copy that has no string, RTF, or HTML of its own.
+    /// A single image file is left for `ClipboardCapture` to record as an image.
+    static func fallbackText(forFileURLsOn pasteboard: NSPasteboard) -> String? {
+        let urls = fileURLs(on: pasteboard)
+        guard !urls.isEmpty else { return nil }
+        if urls.count == 1,
+           let type = UTType(filenameExtension: urls[0].pathExtension),
+           type.conforms(to: .image) {
+            return nil
+        }
+        let text = urls.map(\.path).joined(separator: "\n")
+        return ClipboardCapture.isMeaningful(text) ? text : nil
+    }
+
+    @discardableResult
+    static func write(plainText: String, snapshot: Snapshot, to pasteboard: NSPasteboard) -> Bool {
+        pasteboard.clearContents()
+
+        let files = snapshot.fileURLs.compactMap(fileURL(from:))
+        let rtf = nonempty(snapshot.rtfData)
+        let html = nonempty(snapshot.htmlData)
+        if files.isEmpty && rtf == nil && html == nil {
+            return pasteboard.setString(plainText, forType: .string)
+        }
+
+        var items: [NSPasteboardItem] = []
+        if files.isEmpty {
+            let item = NSPasteboardItem()
+            fill(item, plainText: plainText, rtf: rtf, html: html)
+            items = [item]
+        } else {
+            for (index, url) in files.enumerated() {
+                let item = NSPasteboardItem()
+                item.setString(url.absoluteString, forType: .fileURL)
+                if index == 0 {
+                    fill(item, plainText: plainText, rtf: rtf, html: html)
+                }
+                items.append(item)
+            }
+        }
+        return pasteboard.writeObjects(items)
+    }
+
+    static func fileURLs(on pasteboard: NSPasteboard) -> [URL] {
+        var collected = readFileURLObjects(on: pasteboard)
+        let paths = filenamePaths(on: pasteboard)
+        if paths.count > collected.count {
+            collected = paths.map { URL(fileURLWithPath: $0) }
+        }
+        if collected.isEmpty {
+            for item in pasteboard.pasteboardItems ?? [] {
+                guard let value = item.string(forType: .fileURL),
+                      let url = fileURL(from: value) else { continue }
+                collected.append(url)
+            }
+        }
+
+        var seen = Set<String>()
+        return collected.filter { url in
+            seen.insert(canonicalPath(url)).inserted
+        }
+    }
+
+    private static func fill(_ item: NSPasteboardItem, plainText: String, rtf: Data?, html: Data?) {
+        if !plainText.isEmpty {
+            item.setString(plainText, forType: .string)
+        }
+        if let rtf {
+            item.setData(rtf, forType: .rtf)
+        }
+        if let html {
+            setHTML(html, on: item)
+        }
+    }
+
+    private static func rtfData(on pasteboard: NSPasteboard) -> Data? {
+        for type in rtfTypes where type != .rtfd {
+            if let data = nonempty(pasteboard.data(forType: type)) {
+                return data
+            }
+        }
+        guard let rtfd = nonempty(pasteboard.data(forType: .rtfd)),
+              let attributed = NSAttributedString(rtfd: rtfd, documentAttributes: nil),
+              attributed.length > 0 else {
+            return nil
+        }
+        return nonempty(attributed.rtf(from: NSRange(location: 0, length: attributed.length), documentAttributes: [:]))
+    }
+
+    private static func htmlData(on pasteboard: NSPasteboard) -> Data? {
+        for type in htmlTypes {
+            if let string = pasteboard.string(forType: type), !string.isEmpty {
+                return Data(string.utf8)
+            }
+            if let data = nonempty(pasteboard.data(forType: type)) {
+                return data
+            }
+        }
+        return nil
+    }
+
+    private static func readFileURLObjects(on pasteboard: NSPasteboard) -> [URL] {
+        pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] ?? []
+    }
+
+    private static func filenamePaths(on pasteboard: NSPasteboard) -> [String] {
+        guard pasteboard.types?.contains(filenamesType) == true else { return [] }
+        if let paths = pasteboard.propertyList(forType: filenamesType) as? [String], !paths.isEmpty {
+            return paths
+        }
+        for item in pasteboard.pasteboardItems ?? [] {
+            if let paths = item.propertyList(forType: filenamesType) as? [String], !paths.isEmpty {
+                return paths
+            }
+        }
+        return []
+    }
+
+    private static func setHTML(_ data: Data, on item: NSPasteboardItem) {
+        if let string = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16), !string.isEmpty {
+            item.setString(string, forType: .html)
+        } else {
+            item.setData(data, forType: .html)
+        }
+    }
+
+    private static func fileURL(from string: String) -> URL? {
+        guard let url = URL(string: string), url.isFileURL else { return nil }
+        return url
+    }
+
+    private static func nonempty(_ data: Data?) -> Data? {
+        guard let data, !data.isEmpty else { return nil }
+        return data
+    }
+
+    private static func canonicalPath(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
+    }
 
     private init() {}
 }

@@ -155,6 +155,12 @@ struct ClipboardItem: Identifiable, Hashable, Codable, Sendable {
     var secretPayloadRef: String?
     /// Set when the Keychain entry could not be read. The secret text stays empty.
     var secretPayloadUnavailable: Bool? = nil
+    /// Original `public.rtf` bytes. Nil when the copy had no formatted text, and on history written before rich restore.
+    var rtfData: Data? = nil
+    /// Original HTML bytes (`public.html` or the Apple HTML pasteboard type).
+    var htmlData: Data? = nil
+    /// `file://` URLs captured with the copy (`public.file-url`).
+    var fileURLs: [String]? = nil
 
     var captureTimestamp: Date {
         capturedAt ?? createdAt
@@ -445,7 +451,8 @@ enum ClipboardClassifier {
         sourceBundleID: String?,
         autoProtectSecrets: Bool,
         existingItem: ClipboardItem?,
-        recentSourceBundleIDs: [String] = []
+        recentSourceBundleIDs: [String] = [],
+        richContent: ClipboardRepresentations.Snapshot = .empty
     ) -> ClipboardItem {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let kind = kind(for: normalized, sourceBundleID: sourceBundleID, recentSourceBundleIDs: recentSourceBundleIDs)
@@ -486,7 +493,10 @@ enum ClipboardClassifier {
             imageSignature: nil,
             capturedAt: capturedAt,
             pinnedAt: existingItem?.pinnedAt,
-            secretPayloadRef: nil
+            secretPayloadRef: nil,
+            rtfData: richContent.rtfData.flatMap { $0.isEmpty ? nil : $0 },
+            htmlData: richContent.htmlData.flatMap { $0.isEmpty ? nil : $0 },
+            fileURLs: richContent.fileURLs.isEmpty ? nil : richContent.fileURLs
         )
     }
 
@@ -1190,7 +1200,12 @@ final class ClipFlowStore: ObservableObject {
         lastCaptureStatus = pinned.isEmpty ? "历史记录已清空" : "历史记录已清空，已保留置顶内容"
     }
 
-    func ingestCopiedText(_ text: String, sourceApp: String, sourceBundleID: String?) {
+    func ingestCopiedText(
+        _ text: String,
+        sourceApp: String,
+        sourceBundleID: String?,
+        richContent: ClipboardRepresentations.Snapshot = .empty
+    ) {
         guard !text.isEmpty else { return }
         guard text.count <= 20_000 else {
             lastCaptureStatus = "已跳过过大的剪贴内容"
@@ -1208,7 +1223,8 @@ final class ClipFlowStore: ObservableObject {
             sourceBundleID: sourceBundleID,
             autoProtectSecrets: autoProtectSecrets,
             existingItem: existing,
-            recentSourceBundleIDs: recentSourceBundleIDs
+            recentSourceBundleIDs: recentSourceBundleIDs,
+            richContent: richContent
         ).applyingExpirationPolicy(enabled: sensitiveAutoExpireEnabled)
 
         items.insert(item, at: 0)

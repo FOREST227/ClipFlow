@@ -56,6 +56,8 @@ final class DocumentationScreenshotTests: XCTestCase {
             size: sample.size, sourceApp: "预览", sourceBundleID: nil)
         let imageItem = try XCTUnwrap(store.items.first(where: \.isImage))
         store.lastCaptureStatus = "正在监听系统剪贴板"
+        // Rows render their relative time once; items under a second old read "0秒后".
+        RunLoop.main.run(until: Date().addingTimeInterval(1.1))
 
         func save(_ view: NSView, name: String) throws {
             view.layoutSubtreeIfNeeded()
@@ -160,6 +162,7 @@ final class DocumentationScreenshotTests: XCTestCase {
             sourceBundleID: nil, autoProtectSecrets: false, existingItem: nil)
         let markdown = ClipboardClassifier.makeItem(text: markdownText, sourceApp: "文本编辑",
             sourceBundleID: nil, autoProtectSecrets: false, existingItem: nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(1.1))
         func detail(_ item: ClipboardItem) -> some View {
             ZStack(alignment: .top) {
                 Color.white

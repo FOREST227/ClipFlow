@@ -171,6 +171,47 @@ final class StoreTests: XCTestCase {
         XCTAssertTrue(persisted.isEmpty)
     }
 
+    func testPinKeepsCaptureTimeAndPinnedOrder() async throws {
+        let (directory, defaults) = try fixture()
+        let origin = Date().addingTimeInterval(-100)
+        var first = ClipboardClassifier.makeItem(text: "first", sourceApp: "Editor", sourceBundleID: nil,
+            autoProtectSecrets: true, existingItem: nil)
+        var second = first
+        var third = first
+        first.fullText = "first"
+        first.snippet = "first"
+        first.createdAt = origin
+        first.capturedAt = origin
+        second.id = UUID()
+        second.fullText = "second"
+        second.snippet = "second"
+        second.createdAt = origin.addingTimeInterval(10)
+        second.capturedAt = second.createdAt
+        third.id = UUID()
+        third.fullText = "third"
+        third.snippet = "third"
+        third.createdAt = origin.addingTimeInterval(20)
+        third.capturedAt = third.createdAt
+        try JSONEncoder().encode([first, second, third]).write(to: directory.appendingPathComponent("history.json"))
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        store.togglePin(third.id)
+        try await Task.sleep(nanoseconds: 20_000_000)
+        store.togglePin(first.id)
+        XCTAssertEqual(store.quickPasteItems.map(\.fullText), ["first", "third", "second"])
+        let pinned = try XCTUnwrap(store.item(withID: first.id))
+        XCTAssertEqual(pinned.createdAt.timeIntervalSince(first.createdAt), 0, accuracy: 0.001)
+        XCTAssertEqual(pinned.captureTimestamp.timeIntervalSince(first.capturedAt ?? first.createdAt), 0, accuracy: 0.001)
+        XCTAssertGreaterThan(pinned.pinnedAt ?? .distantPast, try XCTUnwrap(store.item(withID: third.id)?.pinnedAt))
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let reloaded = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        XCTAssertEqual(reloaded.quickPasteItems.map(\.fullText), ["first", "third", "second"])
+        XCTAssertEqual(try XCTUnwrap(reloaded.item(withID: first.id)).createdAt.timeIntervalSince(first.createdAt), 0, accuracy: 0.001)
+        reloaded.togglePin(first.id)
+        XCTAssertEqual(reloaded.quickPasteItems.map(\.fullText), ["third", "second", "first"])
+        XCTAssertEqual(try XCTUnwrap(reloaded.item(withID: first.id)).createdAt.timeIntervalSince(first.createdAt), 0, accuracy: 0.001)
+        try await Task.sleep(nanoseconds: 200_000_000)
+    }
+
     func testPinAndRestartDoNotExtendExpiry() async throws {
         let (directory, defaults) = try fixture()
         var item = ClipboardClassifier.makeItem(text: "private note", sourceApp: "Passwords",

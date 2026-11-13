@@ -52,4 +52,156 @@ final class CloudSyncTests: XCTestCase {
         _ = try coordinator.synchronize(localItems: [], tombstones: [:], maxItems: 80)
         XCTAssertEqual(try Data(contentsOf: incomingAsset), original)
     }
+
+    func testPinDoesNotResurrectTombstonedItem() throws {
+        let (coordinator, directory) = try temporaryCoordinator()
+        let captured = Date().addingTimeInterval(-3_600)
+        var deleted = sampleItem("deleted", at: captured)
+        deleted.pinned = true
+        deleted.pinnedAt = Date()
+        deleted.createdAt = Date()
+        var fresh = sampleItem("fresh", at: captured.addingTimeInterval(120))
+        fresh.pinned = true
+        fresh.pinnedAt = Date()
+        let tombstone = captured.addingTimeInterval(60)
+        let result = try coordinator.synchronize(
+            localItems: [deleted, fresh],
+            tombstones: [deleted.id: tombstone],
+            maxItems: 80
+        )
+
+        XCTAssertEqual(result.cloudItems.map(\.id), [fresh.id])
+        XCTAssertEqual(result.localItems.map(\.id), [fresh.id])
+        XCTAssertFalse(result.cloudItems.contains { $0.id == deleted.id })
+        let historyURL = directory.appendingPathComponent("ClipFlow/history.json")
+        let stored = try JSONDecoder().decode(ClipFlowCloudSyncState.self, from: Data(contentsOf: historyURL))
+        XCTAssertEqual(stored.items.map(\.id), [fresh.id])
+        XCTAssertEqual(stored.tombstones[deleted.id]?.timeIntervalSince(tombstone) ?? -1, 0, accuracy: 0.001)
+        XCTAssertEqual(stored.items.first?.createdAt.timeIntervalSince(fresh.createdAt) ?? -1, 0, accuracy: 0.001)
+    }
+
+    func testDivergentHistoriesMergeDeterministically() throws {
+        let origin = Date().addingTimeInterval(-1_000)
+        let alphaID = UUID()
+        let oldAlpha = sampleItem("alpha", at: origin.addingTimeInterval(30), id: alphaID)
+        var revised = sampleItem("alpha revised", at: origin.addingTimeInterval(50), id: alphaID)
+        revised.snippet = "alpha revised"
+        var gone = sampleItem("gone", at: origin.addingTimeInterval(5))
+        gone.pinned = true
+        gone.pinnedAt = Date()
+        gone.createdAt = Date()
+        var newPin = sampleItem("new pin", at: origin.addingTimeInterval(20))
+        newPin.pinned = true
+        newPin.pinnedAt = origin.addingTimeInterval(80)
+        var oldPin = sampleItem("old pin", at: origin.addingTimeInterval(10))
+        oldPin.pinned = true
+        oldPin.pinnedAt = origin.addingTimeInterval(40)
+        let beta = sampleItem("beta", at: origin.addingTimeInterval(35))
+        let historyA = [oldAlpha, gone, newPin]
+        let historyB = [revised, beta, oldPin]
+        let tombstone = origin.addingTimeInterval(15)
+        let tombsB = [gone.id: tombstone]
+
+        let direct = ClipFlowHistoryMerge.merge(
+            localItems: historyA,
+            remoteItems: historyB,
+            localTombstones: [:],
+            remoteTombstones: tombsB,
+            maxItems: 80
+        )
+        let swapped = ClipFlowHistoryMerge.merge(
+            localItems: historyB,
+            remoteItems: historyA,
+            localTombstones: tombsB,
+            remoteTombstones: [:],
+            maxItems: 80
+        )
+        let forward = try sequence(historyA, tombs: [:], then: historyB, tombs: tombsB)
+        let backward = try sequence(historyB, tombs: tombsB, then: historyA, tombs: [:])
+
+        XCTAssertEqual(direct, swapped)
+        XCTAssertEqual(direct.items.map(\.fullText), ["new pin", "old pin", "alpha revised", "beta"])
+        assertSameItems(forward.cloudItems, direct.items)
+        assertSameItems(backward.cloudItems, direct.items)
+        assertSameTombstones(forward.tombstones, direct.tombstones)
+        assertSameTombstones(backward.tombstones, direct.tombstones)
+        XCTAssertFalse(direct.items.contains { $0.id == gone.id })
+        XCTAssertEqual(direct.tombstones[gone.id]?.timeIntervalSince(tombstone) ?? -1, 0, accuracy: 0.001)
+        XCTAssertEqual(direct.items.first { $0.id == alphaID }?.fullText, "alpha revised")
+    }
+
+    func testPinnedItemOrderIsPreserved() throws {
+        let origin = Date().addingTimeInterval(-500)
+        var olderLegacy = sampleItem("legacy-older", at: origin.addingTimeInterval(10))
+        olderLegacy.pinned = true
+        olderLegacy.createdAt = origin.addingTimeInterval(30)
+        var newerLegacy = sampleItem("legacy-newer", at: origin.addingTimeInterval(5))
+        newerLegacy.pinned = true
+        newerLegacy.createdAt = origin.addingTimeInterval(40)
+        var recentPin = sampleItem("recent pin", at: origin.addingTimeInterval(1))
+        recentPin.pinned = true
+        recentPin.pinnedAt = origin.addingTimeInterval(90)
+        recentPin.createdAt = origin.addingTimeInterval(1)
+
+        let (coordinator, _) = try temporaryCoordinator()
+        let result = try coordinator.synchronize(
+            localItems: [olderLegacy, newerLegacy, recentPin],
+            tombstones: [:],
+            maxItems: 80
+        )
+        XCTAssertEqual(result.cloudItems.map(\.fullText), ["recent pin", "legacy-newer", "legacy-older"])
+        XCTAssertEqual(result.cloudItems.map(\.createdAt), [recentPin.createdAt, newerLegacy.createdAt, olderLegacy.createdAt])
+    }
+
+    private func temporaryCoordinator() throws -> (ClipFlowCloudSyncCoordinator, URL) {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = ClipFlowCloudSyncCoordinator(localImagesDirectoryURL: directory, documentsDirectoryURL: directory)
+        return (coordinator, directory)
+    }
+
+    private func sampleItem(_ text: String, at date: Date, id: UUID = UUID()) -> ClipboardItem {
+        var item = ClipboardClassifier.makeItem(
+            text: text,
+            sourceApp: "Editor",
+            sourceBundleID: nil,
+            autoProtectSecrets: true,
+            existingItem: nil
+        )
+        item.id = id
+        item.createdAt = date
+        item.capturedAt = date
+        item.fullText = text
+        return item
+    }
+
+    private func sequence(
+        _ first: [ClipboardItem],
+        tombs firstTombs: [UUID: Date],
+        then second: [ClipboardItem],
+        tombs secondTombs: [UUID: Date]
+    ) throws -> ClipFlowCloudSyncResult {
+        let (coordinator, _) = try temporaryCoordinator()
+        _ = try coordinator.synchronize(localItems: first, tombstones: firstTombs, maxItems: 80)
+        return try coordinator.synchronize(localItems: second, tombstones: secondTombs, maxItems: 80)
+    }
+
+    private func assertSameItems(_ lhs: [ClipboardItem], _ rhs: [ClipboardItem], file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(lhs.map(\.id), rhs.map(\.id), file: file, line: line)
+        for pair in zip(lhs, rhs) {
+            XCTAssertEqual(pair.0.fullText, pair.1.fullText, file: file, line: line)
+            XCTAssertEqual(pair.0.pinned, pair.1.pinned, file: file, line: line)
+            XCTAssertEqual(pair.0.captureTimestamp.timeIntervalSince1970, pair.1.captureTimestamp.timeIntervalSince1970, accuracy: 0.001, file: file, line: line)
+            XCTAssertEqual(pair.0.createdAt.timeIntervalSince1970, pair.1.createdAt.timeIntervalSince1970, accuracy: 0.001, file: file, line: line)
+            XCTAssertEqual((pair.0.pinnedAt ?? .distantPast).timeIntervalSince1970, (pair.1.pinnedAt ?? .distantPast).timeIntervalSince1970, accuracy: 0.001, file: file, line: line)
+        }
+    }
+
+    private func assertSameTombstones(_ lhs: [UUID: Date], _ rhs: [UUID: Date], file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(lhs.count, rhs.count, file: file, line: line)
+        for (id, date) in lhs {
+            XCTAssertEqual(rhs[id]?.timeIntervalSince1970 ?? -1, date.timeIntervalSince1970, accuracy: 0.001, file: file, line: line)
+        }
+    }
 }

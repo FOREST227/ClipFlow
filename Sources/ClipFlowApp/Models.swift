@@ -148,14 +148,20 @@ struct ClipboardItem: Identifiable, Hashable, Codable, Sendable {
     var imageWidth: Double?
     var imageHeight: Double?
     var imageSignature: String?
-    // Separate capture time from the ordering timestamp changed by pinning.
+    // Capture time. Pinning must not change this or `createdAt`; tombstones compare against it.
     var capturedAt: Date?
+    // Last pin or unpin. Pinned items sort by this so pin order survives without moving `createdAt`.
+    var pinnedAt: Date? = nil
+
+    var captureTimestamp: Date {
+        capturedAt ?? createdAt
+    }
 
     var timeLabel: String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         formatter.locale = Locale(identifier: "zh-Hans")
-        return formatter.localizedString(for: createdAt, relativeTo: Date())
+        return formatter.localizedString(for: captureTimestamp, relativeTo: Date())
     }
 
     var isSensitive: Bool {
@@ -204,6 +210,27 @@ struct ClipboardItem: Identifiable, Hashable, Codable, Sendable {
     }
 
     private static let linkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+}
+
+/// Pinned rows stay in pin order. Everything else stays in capture order.
+final class ClipboardItemOrder {
+    private init() {}
+
+    static func isBefore(_ lhs: ClipboardItem, _ rhs: ClipboardItem) -> Bool {
+        if lhs.pinned != rhs.pinned {
+            return lhs.pinned
+        }
+        let left = lhs.pinned ? pinTimestamp(of: lhs) : lhs.captureTimestamp
+        let right = rhs.pinned ? pinTimestamp(of: rhs) : rhs.captureTimestamp
+        if left != right {
+            return left > right
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    static func pinTimestamp(of item: ClipboardItem) -> Date {
+        item.pinnedAt ?? item.createdAt
+    }
 }
 
 struct FlowMetric: Identifiable {
@@ -416,7 +443,8 @@ enum ClipboardClassifier {
             imageWidth: nil,
             imageHeight: nil,
             imageSignature: nil,
-            capturedAt: capturedAt
+            capturedAt: capturedAt,
+            pinnedAt: existingItem?.pinnedAt
         )
     }
 
@@ -451,7 +479,8 @@ enum ClipboardClassifier {
             imageWidth: imageSize.width,
             imageHeight: imageSize.height,
             imageSignature: imageSignature,
-            capturedAt: capturedAt
+            capturedAt: capturedAt,
+            pinnedAt: existingItem?.pinnedAt
         )
     }
 
@@ -1082,7 +1111,7 @@ final class ClipFlowStore: ObservableObject {
     func togglePin(_ itemID: UUID) {
         guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
         items[index].pinned.toggle()
-        items[index].createdAt = Date()
+        items[index].pinnedAt = Date()
         lastCaptureStatus = items[index].pinned ? "已置顶到快速粘贴" : "已取消快速置顶"
     }
 
@@ -1686,12 +1715,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     private func sortItems(_ items: [ClipboardItem]) -> [ClipboardItem] {
-        items.sorted { lhs, rhs in
-            if lhs.pinned != rhs.pinned {
-                return lhs.pinned && !rhs.pinned
-            }
-            return lhs.createdAt > rhs.createdAt
-        }
+        items.sorted(by: ClipboardItemOrder.isBefore)
     }
 
     private func persistLocalSyncTombstones() {

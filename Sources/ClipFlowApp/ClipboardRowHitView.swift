@@ -22,6 +22,20 @@ class ClipboardRowHitView: NSView {
     }
     func rowInteractionWasDisabled() {}
 
+    /// Resolved when the menu opens so entries reflect the item's current state.
+    var menuProvider: () -> [ClipboardRowMenuEntry] = { [] }
+    /// A real context menu runs a modal tracking loop; tests replace this.
+    static var presentContextMenu: @MainActor (NSMenu, NSEvent, NSView) -> Void = { menu, event, view in
+        NSMenu.popUpContextMenu(menu, with: event, for: view)
+    }
+    /// Opens the detail drawer from this row (menu, middle click, keyboard).
+    func openDetails() {}
+    func contextMenu() -> NSMenu? {
+        guard interactionEnabled else { return nil }
+        let entries = menuProvider()
+        return entries.isEmpty ? nil : ClipboardRowMenu.make(entries)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil { hasBelongedToWindow = true }

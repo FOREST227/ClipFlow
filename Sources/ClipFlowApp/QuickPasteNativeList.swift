@@ -1,11 +1,19 @@
 import AppKit
+import Combine
 import SwiftUI
+
+/// Lets the panel's keyboard handling reach the native list without a view lookup.
+@MainActor
+final class QuickPasteListProxy {
+    weak var list: QuickPasteListView?
+}
 
 /// One native owner for viewport, row geometry, and UUID/action mapping.
 struct QuickPasteNativeList: NSViewRepresentable {
     let items: [ClipboardItem]
     let store: ClipFlowStore
     let selection: HistorySelection
+    var proxy: QuickPasteListProxy? = nil
     let isBlocked: () -> Bool
     let onSelect: (ClipboardItem) -> Void
     let onPaste: (ClipboardItem) -> Void
@@ -17,6 +25,7 @@ struct QuickPasteNativeList: NSViewRepresentable {
 
     func makeNSView(context: Context) -> QuickPasteListView { QuickPasteListView() }
     func updateNSView(_ view: QuickPasteListView, context: Context) {
+        proxy?.list = view
         view.update(items: items, store: store, selection: selection, enabled: enabled,
             scheme: scheme, locale: locale, isBlocked: isBlocked, onSelect: onSelect, onPaste: onPaste,
             onInspect: onInspect, onInspectFrom: onInspectFrom)
@@ -37,6 +46,7 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
     private var pasteItem: (ClipboardItem) -> Void = { _ in }
     private var inspectItem: (ClipboardItem) -> Void = { _ in }
     private var inspectFrom: (ClipboardItem, InspectorSourceAnchor) -> Void = { _, _ in }
+    private var revealObservation: AnyCancellable?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -95,6 +105,9 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
                 }
             }
         }
+        if self.selection !== selection {
+            revealObservation = selection.revealRequests.sink { [weak self] id in self?.reveal(id) }
+        }
         self.store = store; self.selection = selection
         self.inputEnabled = enabled; self.scheme = scheme; self.locale = locale
         self.blocksInput = isBlocked
@@ -135,17 +148,17 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
         let reuseID = NSUserInterfaceItemIdentifier("QuickPasteRow")
         let cell = table.makeView(withIdentifier: reuseID, owner: nil) as? QuickPasteTableCell ?? QuickPasteTableCell()
         cell.identifier = reuseID
-        configure(cell, item: item)
+        configure(cell, item: item, index: index)
         return cell
     }
-    private func configure(_ cell: QuickPasteTableCell, item: ClipboardItem) {
+    private func configure(_ cell: QuickPasteTableCell, item: ClipboardItem, index: Int) {
         guard let store, let selection else { return }
         let identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
         cell.cardHeight = QuickPasteCardLayout.height(for: item.kind)
         cell.row.identifier = identifier
         cell.row.interactionEnabled = inputEnabled
         cell.row.update(itemID: item.id,
-            rootView: AnyView(HUDRow(item: item, store: store)
+            rootView: AnyView(HUDRow(item: item, store: store, shortcutIndex: index)
                 .environment(\.colorScheme, scheme).environment(\.locale, locale)),
             selectionView: AnyView(HUDSelectionChrome(itemID: item.id, selection: selection, tint: item.kind.tint)
                 .environment(\.colorScheme, scheme).environment(\.locale, locale)),
@@ -156,8 +169,35 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
                 anchored: { [weak self] source in
                     guard let self, let current = self.currentItem(item.id) else { return }
                     self.inspectFrom(current, source)
-                }))
+                }),
+            menuProvider: { [weak self, weak row = cell.row] in
+                guard let self, let store = self.store, let current = self.currentItem(item.id) else { return [] }
+                return ClipboardRowMenu.entries(for: current, store: store, leading: [
+                    .action(title: "粘贴", symbol: "arrow.down.doc") { [weak self] in
+                        self?.perform(item.id, action: .paste)
+                    },
+                    .action(title: "查看详情", symbol: "arrow.up.left.and.arrow.down.right") { [weak row] in
+                        row?.openDetails()
+                    }
+                ])
+            })
         cell.layoutSubtreeIfNeeded()
+    }
+
+    /// Keyboard navigation only: pointer selection never moves the viewport.
+    private func reveal(_ id: UUID) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        table.scrollRowToVisible(index)
+    }
+
+    /// Keyboard entry point; the drawer grows from the row like a pointer-opened one.
+    func openDetails(for id: UUID) -> Bool {
+        guard currentItem(id) != nil, let index = items.firstIndex(where: { $0.id == id }) else { return false }
+        table.scrollRowToVisible(index)
+        guard let cell = table.view(atColumn: 0, row: index, makeIfNecessary: true) as? QuickPasteTableCell,
+              cell.row.representedItemID == id else { return false }
+        cell.row.openDetails()
+        return true
     }
     private enum Action { case select, paste, inspect }
     private var canInteract: Bool {

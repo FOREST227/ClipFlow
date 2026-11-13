@@ -64,10 +64,18 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         popover.behavior = .applicationDefined
         popover.animates = true
         popover.delegate = self
-        popover.contentSize = NSSize(width: ClipFlowLayout.menuWidth, height: ClipFlowLayout.menuHeight)
         popover.contentViewController = NSHostingController(
             rootView: MenuBarView(store: store)
         )
+        updatePopoverSize()
+    }
+
+    /// The panel has no fixed height; follow what its content needs.
+    private func updatePopoverSize() {
+        guard let view = popover.contentViewController?.view else { return }
+        let height = view.fittingSize.height
+        guard height > 0 else { return }
+        popover.contentSize = NSSize(width: ClipFlowLayout.menuWidth, height: ceil(height))
     }
 
     private func bindStore() {
@@ -155,6 +163,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     private func presentPopover(at button: NSStatusBarButton) {
         popover.appearance = NSApp.effectiveAppearance
         if !popover.isShown {
+            updatePopoverSize()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             startPopoverEventMonitors()
         }

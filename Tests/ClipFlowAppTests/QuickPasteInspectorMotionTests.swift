@@ -80,7 +80,7 @@ final class QuickPasteInspectorMotionTests: XCTestCase {
         let fixture = InspectorHUDHarness(context: context)
         defer { fixture.close() }
         let row = try XCTUnwrap(fixture.rows.first)
-        row.rightMouseDown(with: try fixture.event(on: row))
+        row.openDetails()
         fixture.pump()
         XCTAssertEqual(fixture.inspector.snapshot.itemID, row.representedItemID)
         fixture.driver.finishLatest(); fixture.pump()
@@ -187,7 +187,7 @@ final class QuickPasteInspectorMotionTests: XCTestCase {
         })
         let id = row.representedItemID
         let offset = scroll.contentView.bounds.minY
-        row.rightMouseDown(with: try fixture.event(on: row)); fixture.pump()
+        row.openDetails(); fixture.pump()
         let revision = row.contentRevision
         for p: CGFloat in [0.2, 0.5, 0.9] {
             fixture.driver.emit(p); fixture.pump()
@@ -230,7 +230,7 @@ final class QuickPasteInspectorMotionTests: XCTestCase {
         let fixture = InspectorHUDHarness(context: context, reduceMotion: true, reduceTransparency: true)
         defer { fixture.close() }
         let row = try XCTUnwrap(fixture.rows.first)
-        row.rightMouseDown(with: try fixture.event(on: row))
+        row.openDetails()
         XCTAssertEqual(fixture.driver.runs.last?.duration ?? -1, 0.11, accuracy: 0.0001)
         fixture.driver.finishLatest(); fixture.pump()
         let bridge = try XCTUnwrap(InspectorTestContext.descendants(fixture.host.view, InspectorEscapeView.self).first)

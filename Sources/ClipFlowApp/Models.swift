@@ -305,11 +305,21 @@ struct ClipFlowPermissionReport: Identifiable {
 }
 
 enum ClipboardClassifier {
-    static func kind(for text: String) -> ClipboardKind {
+    static func kind(
+        for text: String,
+        sourceBundleID: String? = nil,
+        recentSourceBundleIDs: [String] = []
+    ) -> ClipboardKind {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = normalized.lowercased()
         let codeLike = looksLikeCode(normalized)
-        let secretLike = looksLikeSecretPayload(normalized, lowered: lowered, codeLike: codeLike)
+        let secretLike = looksLikeSecretPayload(
+            normalized,
+            lowered: lowered,
+            codeLike: codeLike,
+            sourceBundleID: sourceBundleID,
+            recentSourceBundleIDs: recentSourceBundleIDs
+        )
 
         if secretLike {
             return .secret
@@ -326,12 +336,24 @@ enum ClipboardClassifier {
         return .text
     }
 
-    static func privacy(for text: String, kind: ClipboardKind, sourceBundleID: String?, autoProtectSecrets: Bool) -> PrivacyLevel {
+    static func privacy(
+        for text: String,
+        kind: ClipboardKind,
+        sourceBundleID: String?,
+        autoProtectSecrets: Bool,
+        recentSourceBundleIDs: [String] = []
+    ) -> PrivacyLevel {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = normalized.lowercased()
         let codeLike = kind == .code || looksLikeCode(normalized)
         let sensitiveSource = PasswordManagerApps.contains(sourceBundleID)
-        let secretLike = looksLikeSecretPayload(normalized, lowered: lowered, codeLike: codeLike)
+        let secretLike = looksLikeSecretPayload(
+            normalized,
+            lowered: lowered,
+            codeLike: codeLike,
+            sourceBundleID: sourceBundleID,
+            recentSourceBundleIDs: recentSourceBundleIDs
+        )
 
         if kind == .secret || (autoProtectSecrets && secretLike) || sensitiveSource {
             return .vault
@@ -418,10 +440,23 @@ enum ClipboardClassifier {
         }
     }
 
-    static func makeItem(text: String, sourceApp: String, sourceBundleID: String?, autoProtectSecrets: Bool, existingItem: ClipboardItem?) -> ClipboardItem {
+    static func makeItem(
+        text: String,
+        sourceApp: String,
+        sourceBundleID: String?,
+        autoProtectSecrets: Bool,
+        existingItem: ClipboardItem?,
+        recentSourceBundleIDs: [String] = []
+    ) -> ClipboardItem {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let kind = kind(for: normalized)
-        let privacy = privacy(for: normalized, kind: kind, sourceBundleID: sourceBundleID, autoProtectSecrets: autoProtectSecrets)
+        let kind = kind(for: normalized, sourceBundleID: sourceBundleID, recentSourceBundleIDs: recentSourceBundleIDs)
+        let privacy = privacy(
+            for: normalized,
+            kind: kind,
+            sourceBundleID: sourceBundleID,
+            autoProtectSecrets: autoProtectSecrets,
+            recentSourceBundleIDs: recentSourceBundleIDs
+        )
         let localOnly = privacy != .standard
         let autoExpire = privacy != .standard
         let capturedAt = Date()
@@ -582,8 +617,18 @@ enum ClipboardClassifier {
             || lowered.contains("secret")
     }
 
-    private static func looksLikeSecretPayload(_ text: String, lowered: String, codeLike: Bool) -> Bool {
-        if lowered.range(of: #"^\d{4,8}$"#, options: .regularExpression) != nil {
+    private static func looksLikeSecretPayload(
+        _ text: String,
+        lowered: String,
+        codeLike: Bool,
+        sourceBundleID: String? = nil,
+        recentSourceBundleIDs: [String] = []
+    ) -> Bool {
+        if OTPDetector.shouldTreatStandaloneCodeAsOTP(
+            lowered: lowered,
+            sourceBundleID: sourceBundleID,
+            recentSourceBundleIDs: recentSourceBundleIDs
+        ) {
             return true
         }
 
@@ -606,6 +651,10 @@ enum ClipboardClassifier {
 
         if codeLike {
             return false
+        }
+
+        if OTPDetector.hasContextualCode(lowered) {
+            return true
         }
 
         let softSecretMarkers = [
@@ -1046,13 +1095,7 @@ final class ClipFlowStore: ObservableObject {
             return base
         }
 
-        return base.filter { item in
-            item.title.lowercased().contains(query)
-                || item.snippet.lowercased().contains(query)
-                || item.fullText.lowercased().contains(query)
-                || item.sourceApp.lowercased().contains(query)
-                || item.labels.joined(separator: " ").lowercased().contains(query)
-        }
+        return base.filter { ClipboardSearch.matches($0, query: query) }
     }
 
     var selectedItem: ClipboardItem? {
@@ -1152,6 +1195,7 @@ final class ClipFlowStore: ObservableObject {
 
         purgeExpired()
 
+        let recentSourceBundleIDs = OTPDetector.recentSourceBundleIDs(in: items)
         let existingIndex = items.firstIndex { !$0.isImage && $0.fullText == text }
         let existing = existingIndex.map { items.remove(at: $0) }
         let item = ClipboardClassifier.makeItem(
@@ -1159,7 +1203,8 @@ final class ClipFlowStore: ObservableObject {
             sourceApp: sourceApp,
             sourceBundleID: sourceBundleID,
             autoProtectSecrets: autoProtectSecrets,
-            existingItem: existing
+            existingItem: existing,
+            recentSourceBundleIDs: recentSourceBundleIDs
         ).applyingExpirationPolicy(enabled: sensitiveAutoExpireEnabled)
 
         items.insert(item, at: 0)
@@ -1394,13 +1439,7 @@ final class ClipFlowStore: ObservableObject {
             return base
         }
 
-        return base.filter { item in
-            item.title.lowercased().contains(normalized)
-                || item.snippet.lowercased().contains(normalized)
-                || item.fullText.lowercased().contains(normalized)
-                || item.sourceApp.lowercased().contains(normalized)
-                || item.labels.joined(separator: " ").lowercased().contains(normalized)
-        }
+        return base.filter { ClipboardSearch.matches($0, query: normalized) }
     }
 
     var protectedCount: Int {

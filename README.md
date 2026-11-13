@@ -133,6 +133,10 @@
 - [开发、测试与打包](docs/development.md)
 - [离线渲染组件与许可证](Sources/ClipFlowApp/Renderer/NOTICE.txt)
 
+## 许可证
+
+ClipFlow 以 GNU General Public License v3.0 或更高版本发布（[GPL-3.0-or-later](LICENSE)）。版权所有 © 2026 FOREST227。
+
 ---
 
 <p align="center">

@@ -125,6 +125,15 @@ struct SettingsView: View {
                     Toggle("开机自动启动", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
                         .labelsHidden().toggleStyle(.switch).controlSize(.small)
                 }
+                if store.accessibilityTrusted == false {
+                    Divider().padding(.horizontal, 12)
+                    SettingsListRow(title: "辅助功能", detail: "自动粘贴需要这项权限。未授权时改为复制到剪贴板，可在目标应用手动粘贴。") {
+                        Button("打开系统设置") {
+                            _ = AccessibilityTrust.openSystemSettings()
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
             }
         }
     }

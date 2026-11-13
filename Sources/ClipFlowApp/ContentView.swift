@@ -104,6 +104,9 @@ struct ContentView: View {
                         },
                         onRequestAccessibility: {
                             store.requestAccessibilityPermissionPrompt()
+                        },
+                        onOpenAccessibilitySettings: {
+                            _ = AccessibilityTrust.openSystemSettings()
                         }
                     )
                     .frame(width: min(560, proxy.size.width - 48))
@@ -185,6 +188,7 @@ struct StartupPermissionOverlay: View {
     let onDismiss: () -> Void
     let onRefresh: () -> Void
     let onRequestAccessibility: () -> Void
+    let onOpenAccessibilitySettings: () -> Void
 
     var body: some View {
         FrostedPanel(palette: palette) {
@@ -259,16 +263,23 @@ struct StartupPermissionOverlay: View {
                     }
                 }
 
-                HStack(spacing: 10) {
-                    Button("继续使用", action: onDismiss)
-                        .buttonStyle(ClipButtonStyle(fill: palette.secondaryButtonFill))
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Button("继续使用", action: onDismiss)
+                            .buttonStyle(ClipButtonStyle(fill: palette.secondaryButtonFill))
 
-                    Button("重新检测", action: onRefresh)
-                        .buttonStyle(ClipButtonStyle(fill: palette.secondaryButtonFill))
+                        Button("重新检测", action: onRefresh)
+                            .buttonStyle(ClipButtonStyle(fill: palette.secondaryButtonFill))
+                    }
 
                     if report.items.contains(where: { $0.title == "辅助功能" && $0.status == .needsAttention }) {
-                        Button("请求辅助功能权限", action: onRequestAccessibility)
-                            .buttonStyle(ClipButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
+                        HStack(spacing: 10) {
+                            Button("打开系统设置", action: onOpenAccessibilitySettings)
+                                .buttonStyle(ClipButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
+                                .help("系统设置 → 隐私与安全性 → 辅助功能")
+                            Button("请求辅助功能权限", action: onRequestAccessibility)
+                                .buttonStyle(ClipButtonStyle(fill: palette.secondaryButtonFill))
+                        }
                     }
                 }
             }
@@ -1006,6 +1017,23 @@ struct MenuBarView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 4)
             .background(CleanGlassBackground(cornerRadius: 14))
+
+            if store.accessibilityTrusted == false {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("自动粘贴需要辅助功能权限。未授权时会改为复制到剪贴板，请在目标应用中手动粘贴。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("打开系统设置") {
+                        _ = AccessibilityTrust.openSystemSettings()
+                    }
+                    .buttonStyle(MenuFooterActionStyle(fill: ClipCategory.protected.tint.opacity(0.16)))
+                    .help("系统设置 → 隐私与安全性 → 辅助功能")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(CleanGlassBackground(cornerRadius: 14))
+            }
 
             HStack(spacing: 8) {
                 Button("快速粘贴") {

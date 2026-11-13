@@ -1,4 +1,3 @@
-import ApplicationServices
 import Combine
 import Foundation
 import ImageIO
@@ -908,6 +907,8 @@ final class ClipFlowStore: ObservableObject {
     @Published private(set) var iCloudSyncPhase: ClipFlowCloudSyncPhase = .disabled
     @Published private(set) var iCloudLastSyncedAt: Date?
     @Published var startupPermissionReport: ClipFlowPermissionReport?
+    /// Nil until the silent launch check. False means auto-paste must copy instead.
+    @Published private(set) var accessibilityTrusted: Bool?
     @Published private(set) var quickPasteShortcut: ClipFlowShortcut
     @Published var shortcutError: String?
     @Published private(set) var isRecordingShortcut = false
@@ -951,15 +952,18 @@ final class ClipFlowStore: ObservableObject {
     private var syncRequestedWhileRunning = false
     private var isApplyingCloudSnapshot = false
     private var itemsRevision = 0
+    private let accessibility: any AccessibilityTrustChecking
 
     init(
         storageDirectory: URL? = nil,
         defaults: UserDefaults = .standard,
         syncDirectory: URL? = nil,
-        payloadRepository: SensitivePayloadRepository = SensitivePayloadKeychain()
+        payloadRepository: SensitivePayloadRepository = SensitivePayloadKeychain(),
+        accessibility: any AccessibilityTrustChecking = AccessibilityTrust.system
     ) {
         self.defaults = defaults
         self.payloadRepository = payloadRepository
+        self.accessibility = accessibility
         appearanceMode = ClipFlowAppearance.load(from: defaults)
         quickPasteShortcut = ClipFlowShortcut.load(from: defaults)
         let appSupport = storageDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
@@ -1274,7 +1278,7 @@ final class ClipFlowStore: ObservableObject {
         if enabled {
             iCloudSyncEnabled = true
             defaults.set(true, forKey: Keys.iCloudSyncEnabled)
-            refreshPermissionReport(showEvenIfHealthy: false, promptForAccessibility: false)
+            refreshPermissionReport(showEvenIfHealthy: false)
             Task { [weak self] in
                 self?.enableICloudSyncIfPossible(announceResult: true)
             }
@@ -1293,13 +1297,38 @@ final class ClipFlowStore: ObservableObject {
     }
 
     func rerunPermissionCheck() {
-        refreshPermissionReport(showEvenIfHealthy: true, promptForAccessibility: false)
+        refreshPermissionReport(showEvenIfHealthy: true)
+    }
+
+    /// `prompt` is true only for an explicit request or an auto-paste attempt.
+    @discardableResult
+    func isAccessibilityTrusted(prompt: Bool) -> Bool {
+        let trusted = accessibility.isTrusted(prompt: prompt)
+        accessibilityTrusted = trusted
+        return trusted
     }
 
     func requestAccessibilityPermissionPrompt() {
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-        refreshPermissionReport(showEvenIfHealthy: true, promptForAccessibility: false)
+        _ = isAccessibilityTrusted(prompt: true)
+        refreshPermissionReport(showEvenIfHealthy: true)
+    }
+
+    /// Auto-paste could not run. The content is already back on the clipboard.
+    func notePasteBlockedByAccessibility() {
+        accessibilityTrusted = false
+        lastCaptureStatus = "已复制回剪贴板。请在“系统设置 → 隐私与安全性 → 辅助功能”中允许 ClipFlow，或在目标输入框手动粘贴。"
+        startupPermissionReport = ClipFlowPermissionReport(
+            title: "自动粘贴需要辅助功能",
+            message: "这次没有自动粘贴。内容已放回剪贴板，可在目标输入框按 ⌘V 手动粘贴。允许 ClipFlow 使用辅助功能后，再次选择条目即可自动粘贴。",
+            items: [
+                ClipFlowPermissionItem(
+                    title: "辅助功能",
+                    detail: "打开“系统设置 → 隐私与安全性 → 辅助功能”，打开 ClipFlow 的开关。启动时只做静默检查；系统授权提示会在你使用自动粘贴时出现。",
+                    icon: "figure.wave.circle",
+                    status: .needsAttention
+                )
+            ]
+        )
     }
 
     func toggleReveal(_ itemID: UUID) {
@@ -1835,11 +1864,12 @@ final class ClipFlowStore: ObservableObject {
     }
 
     private func runStartupPermissionCheck() {
-        refreshPermissionReport(showEvenIfHealthy: false, promptForAccessibility: true)
+        // Launch only reads trust. The system prompt waits until the first auto-paste.
+        refreshPermissionReport(showEvenIfHealthy: false)
     }
 
-    private func refreshPermissionReport(showEvenIfHealthy: Bool, promptForAccessibility: Bool) {
-        let report = buildPermissionReport(promptForAccessibility: promptForAccessibility)
+    private func refreshPermissionReport(showEvenIfHealthy: Bool) {
+        let report = buildPermissionReport()
 
         if report.needsAttention || showEvenIfHealthy {
             startupPermissionReport = report
@@ -1849,13 +1879,13 @@ final class ClipFlowStore: ObservableObject {
         }
     }
 
-    private func buildPermissionReport(promptForAccessibility: Bool) -> ClipFlowPermissionReport {
-        let accessibilityGranted = checkAccessibilityPermission(promptIfNeeded: promptForAccessibility)
+    private func buildPermissionReport() -> ClipFlowPermissionReport {
+        let accessibilityGranted = checkAccessibilityPermission()
         let accessibilityItem = ClipFlowPermissionItem(
             title: "辅助功能",
             detail: accessibilityGranted
                 ? "已授权。ClipFlow 可以在回填剪贴板后自动触发粘贴。"
-                : "未授权。没有这个权限时，ClipFlow 只能保存历史，无法自动把内容粘贴回输入框。",
+                : "未授权。请打开“系统设置 → 隐私与安全性 → 辅助功能”并允许 ClipFlow。没有这项权限时，自动粘贴会改为把内容复制回剪贴板。",
             icon: "figure.wave.circle",
             status: accessibilityGranted ? .granted : .needsAttention
         )
@@ -1878,19 +1908,14 @@ final class ClipFlowStore: ObservableObject {
         return ClipFlowPermissionReport(
             title: hasIssue ? "启动时发现权限未完整" : "权限检查完成",
             message: hasIssue
-                ? "ClipFlow 已在启动时完成权限检测。部分系统权限还未就绪，相关功能可能会受影响。"
+                ? "启动时只做了静默检查，没有弹出系统授权窗口。自动粘贴会在第一次使用时再请求辅助功能；未授权则改为复制到剪贴板。"
                 : "ClipFlow 已完成本次启动权限检测，当前核心权限状态正常。",
             items: items
         )
     }
 
-    private func checkAccessibilityPermission(promptIfNeeded: Bool) -> Bool {
-        if promptIfNeeded {
-            let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-            return AXIsProcessTrustedWithOptions(options)
-        }
-
-        return AXIsProcessTrusted()
+    private func checkAccessibilityPermission() -> Bool {
+        isAccessibilityTrusted(prompt: false)
     }
 
     private func checkDocumentsFolderAccessIfNeeded() -> Bool {

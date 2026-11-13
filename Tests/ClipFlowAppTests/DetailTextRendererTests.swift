@@ -52,6 +52,55 @@ final class DetailTextRendererTests: XCTestCase {
         let images = try await web.evaluateJavaScript("document.querySelectorAll('img,iframe').length") as? Int
         XCTAssertEqual(images, 0)
     }
+    func testMissingRendererResourceFallsBackAndLogs() throws {
+        var messages: [String] = []
+        XCTAssertEqual(
+            DetailTextDocument.load(name: "missing.js", installedRoot: nil, moduleRoot: nil, log: { messages.append($0) }),
+            ""
+        )
+        XCTAssertEqual(messages, ["Renderer resource missing.js is missing. Falling back to plain text."])
+
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        messages.removeAll()
+        XCTAssertEqual(
+            DetailTextDocument.load(name: "missing.js", installedRoot: root, moduleRoot: root, log: { messages.append($0) }),
+            ""
+        )
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertTrue(messages[0].contains("missing.js"))
+    }
+
+    func testInstalledRendererResourceIsPreferredWithoutLogging() throws {
+        let installed = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let moduleRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: installed.appendingPathComponent("Renderer"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: moduleRoot.appendingPathComponent("Renderer"), withIntermediateDirectories: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: installed)
+            try? FileManager.default.removeItem(at: moduleRoot)
+        }
+        try "installed-script".write(to: installed.appendingPathComponent("Renderer/sample.js"), atomically: true, encoding: .utf8)
+        try "module-script".write(to: moduleRoot.appendingPathComponent("Renderer/sample.js"), atomically: true, encoding: .utf8)
+
+        var messages: [String] = []
+        XCTAssertEqual(
+            DetailTextDocument.load(name: "sample.js", installedRoot: installed, moduleRoot: moduleRoot, log: { messages.append($0) }),
+            "installed-script"
+        )
+        XCTAssertEqual(
+            DetailTextDocument.load(name: "sample.js", installedRoot: nil, moduleRoot: moduleRoot, log: { messages.append($0) }),
+            "module-script"
+        )
+        XCTAssertTrue(messages.isEmpty)
+    }
+
+    func testBundledRendererResourceLoads() {
+        let source = DetailTextDocument.resource("highlight.min.js")
+        XCTAssertFalse(source.isEmpty)
+    }
+
     func testSourceEscapingAndMarkdownDetection() async throws {
         let source = "</script><script>window.pwned=1</script>\nconst x = '<tag>';"
         let web = try await rendered(source, markdown: false, language: "javascript")

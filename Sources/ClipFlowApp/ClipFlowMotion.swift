@@ -17,6 +17,8 @@ enum ClipFlowMotion {
 
     static let clipboardPollInterval: TimeInterval = 0.24
     static let clipboardPollTolerance: TimeInterval = 0.04
+    /// Idle history is swept on this cadence. A clipboard change purges immediately.
+    static let clipboardPurgeInterval: TimeInterval = 30
     static let pasteActivationDelay: TimeInterval = 0.16
     static let relaunchDelay: TimeInterval = 0.18
     static let doubleClickDelay: TimeInterval = 0.18

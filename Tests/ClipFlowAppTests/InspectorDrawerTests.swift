@@ -98,7 +98,7 @@ final class InspectorDrawerTests: XCTestCase {
         })
         let rect = row.convert(row.bounds, to: nil)
         let offset = scroll.contentView.bounds.origin
-        row.rightMouseDown(with: try fixture.event(on: row)); fixture.pump()
+        row.openDetails(); fixture.pump()
         XCTAssertEqual(fixture.inspector.snapshot.sourceRectInWindow, rect)
         XCTAssertEqual(scroll.contentView.bounds.origin, offset)
     }
@@ -111,14 +111,14 @@ final class InspectorDrawerTests: XCTestCase {
         XCTAssertEqual(calls, 0, "A retained callback must not open from an invisible or detached row")
     }
 
-    func testRightClickCapturesHistorySource() throws {
+    func testOpeningDetailsCapturesHistorySource() throws {
         let context = try InspectorTestContext()
         defer { context.cleanup() }
         _ = try context.text()
         let fixture = HistoryInspectorHarness(context: context)
         defer { fixture.close() }
         let row = try XCTUnwrap(fixture.rows.first)
-        row.rightMouseDown(with: try fixture.event(on: row)); fixture.pump()
+        row.openDetails(); fixture.pump()
         XCTAssertEqual(fixture.inspector.snapshot.sourceRectInWindow, row.convert(row.bounds, to: nil))
     }
 }

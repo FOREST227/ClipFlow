@@ -97,13 +97,15 @@ final class DocumentationScreenshotTests: XCTestCase {
             size: NSSize(width: 384, height: 612), name: "quick-paste")
         // NSPopover's compositor-owned edge is not included by cacheDisplay.
         // Supply its rounded presentation frame around the unmodified app content.
+        let menuHeight = ceil(NSHostingController(rootView: MenuBarView(store: store)
+            .environment(\.locale, Locale(identifier: "zh-Hans"))).view.fittingSize.height)
         try export(MenuBarView(store: store)
-            .frame(width: 360, height: 440)
+            .frame(width: 360, height: menuHeight)
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.black.opacity(0.16), lineWidth: 1))
             .shadow(color: Color.black.opacity(0.12), radius: 6, y: 3)
             .padding(12).background(backdrop),
-            size: NSSize(width: 384, height: 464), name: "menu")
+            size: NSSize(width: 384, height: menuHeight + 24), name: "menu")
 
         let codeText = """
         import Foundation

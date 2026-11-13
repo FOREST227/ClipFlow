@@ -559,6 +559,7 @@ struct QuickPastePanelView: View {
     @ViewState private var query = ""
     // Keep selection independent of the parent view's layout/scroll identity.
     @ViewState private var selection = HistorySelection()
+    @ViewState private var listProxy = QuickPasteListProxy()
     @StateObject private var inspector: InspectorPresentation
     private var motionPreferences = InspectorMotionPreferences()
     private var reduceMotion: Bool { motionPreferences.reduceMotion }
@@ -586,6 +587,12 @@ struct QuickPastePanelView: View {
                         ClipFlowBrandMark(icon: "cursorarrow.rays", size: 28)
                         Text("快速粘贴")
                             .font(.system(size: 13, weight: .bold, design: .rounded))
+                        if let preferredTargetName, !preferredTargetName.isEmpty {
+                            Text("→ \(preferredTargetName)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary).lineLimit(1)
+                                .help("粘贴到 \(preferredTargetName)")
+                        }
                     }
 
                     Spacer()
@@ -612,16 +619,18 @@ struct QuickPastePanelView: View {
 
                 if clips.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("还没有捕获到内容")
+                        Text(query.isEmpty ? "还没有捕获到内容" : "没有匹配的内容")
                             .font(.system(size: 15, weight: .bold, design: .rounded))
-                        Text("先去其他应用复制文字或图片，然后按下 \(store.quickPasteShortcut.displayName)，就能在指针附近把它调出来。")
+                        Text(query.isEmpty
+                            ? "先去其他应用复制文字或图片，然后按下 \(store.quickPasteShortcut.displayName)，就能在指针附近把它调出来。"
+                            : "试试其他关键词，或打开历史记录查看全部内容。")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Color.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .frame(height: QuickPasteCardLayout.viewportHeight, alignment: .top)
                 } else {
-                    QuickPasteNativeList(items: clips, store: store, selection: selection,
+                    QuickPasteNativeList(items: clips, store: store, selection: selection, proxy: listProxy,
                         isBlocked: { [weak inspector] in inspector?.blocksBackground != false },
                         onSelect: { item in selection.itemID = item.id },
                         onPaste: { item in
@@ -649,28 +658,22 @@ struct QuickPastePanelView: View {
                 }
 
                 HStack(spacing: 8) {
+                    QuickPasteKeyHint(keys: "↑↓", title: "选择")
+                    QuickPasteKeyHint(keys: "↩", title: "粘贴")
+                    QuickPasteKeyHint(keys: "⌘1–9", title: "直接粘贴")
+                    QuickPasteKeyHint(keys: "空格", title: "详情")
+                    Spacer(minLength: 0)
                     Button {
                         onClose()
                         onOpenLibrary()
                     } label: {
-                        Text("历史记录").frame(width: 60)
+                        Text("历史记录")
                     }
                     .buttonStyle(MenuFooterActionStyle(fill: ClipCategory.all.tint.opacity(0.13),
-                        height: ClipFlowLayout.controlHeight, fontSize: 12,
-                        cornerRadius: ClipFlowLayout.controlRadius))
-
-                    Button {
-                        if let selected = clips.first(where: { $0.id == selection.itemID }) ?? clips.first {
-                            selection.itemID = selected.id
-                            onClose()
-                            onPaste(selected)
-                        }
-                    } label: {
-                        Text("粘贴选中项").frame(width: 60)
-                    }
-                    .buttonStyle(ClipFlowActionButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
+                        height: 26, fontSize: 11, cornerRadius: 8))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: ClipFlowLayout.controlHeight)
             }
             .padding(ClipFlowLayout.pageInset)
             .modifier(InspectorBackdropMotion(motion: inspector.motion))
@@ -721,6 +724,10 @@ struct QuickPastePanelView: View {
         .onChangeBackward(of: query) {
             selection.itemID = clips.first?.id
         }
+        .background(
+            ListKeyCommandMonitor(queryIsEmpty: query.isEmpty, onCommand: { handleKeyCommand($0, clips: clips) })
+                .frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
+        )
         .background {
             GeometryReader { proxy in
                 FloatingPanelBackground(palette: palette)
@@ -740,6 +747,51 @@ struct QuickPastePanelView: View {
         guard let id = inspector.snapshot.itemID else { return nil }
         return store.item(withID: id)
     }
+
+    private func handleKeyCommand(_ command: ListKeyCommand, clips: [ClipboardItem]) -> Bool {
+        guard !inspector.blocksBackground, !clips.isEmpty else { return false }
+        let selected = clips.first(where: { $0.id == selection.itemID })
+        switch command {
+        case .moveUp, .moveDown:
+            return selection.move(by: command == .moveUp ? -1 : 1, in: clips.map(\.id)) != nil
+        case .activate:
+            paste(selected ?? clips[0])
+        case .pasteIndex(let index):
+            guard clips.indices.contains(index) else { return false }
+            paste(clips[index])
+        case .toggleDetails:
+            guard let selected else { return false }
+            if listProxy.list?.openDetails(for: selected.id) != true {
+                inspector.open(itemID: selected.id, reduceMotion: reduceMotion)
+            }
+        }
+        return true
+    }
+
+    private func paste(_ item: ClipboardItem) {
+        selection.itemID = item.id
+        onClose()
+        onPaste(item)
+    }
+}
+
+struct QuickPasteKeyHint: View {
+    let keys: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(keys)
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 4).frame(minWidth: 16, minHeight: 16)
+                .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 4))
+            Text(title).font(.system(size: 10))
+        }
+        .foregroundStyle(.secondary)
+        .lineLimit(1).fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(keys) \(title)")
+    }
 }
 
 /// Selection repaints a lightweight background, never the hosted row's content.
@@ -753,11 +805,11 @@ struct HUDSelectionChrome: View {
 
     var body: some View {
         let palette = ClipFlowPalette.resolve(for: colorScheme)
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
+        RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
             .fill(isSelected ? palette.selectedRowFill : palette.rowFill)
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
                 .fill(isSelected ? tint.opacity(0.16) : .clear))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
                 .strokeBorder(isSelected ? tint.opacity(0.65) : palette.rowBorder,
                     lineWidth: isSelected ? 1.5 : 1))
             .animation(reduceMotion ? nil : ClipFlowMotion.rowSelection, value: isSelected)
@@ -774,6 +826,8 @@ struct HUDRow: View {
     private var palette: ClipFlowPalette { .resolve(for: colorScheme) }
     let item: ClipboardItem
     @ObservedObject var store: ClipFlowStore
+    /// Position among the first nine rows, pasted directly with ⌘1…⌘9.
+    var shortcutIndex: Int? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: item.isImage || item.kind == .code ? 6 : 4) {
@@ -781,10 +835,17 @@ struct HUDRow: View {
                 Image(systemName: iconName).foregroundStyle(tint)
                 Text(item.kind.label).foregroundStyle(tint).fixedSize()
                 Text(item.sourceApp).lineLimit(1)
-                if item.pinned { Image(systemName: "pin.fill").foregroundStyle(ClipCategory.quickPaste.tint) }
+                if item.pinned { Image(systemName: "pin.fill").foregroundStyle(ClipCategory.pinned.tint) }
                 if item.isSensitive { Image(systemName: "lock.fill").foregroundStyle(item.privacy.color) }
                 Spacer(minLength: 4)
                 Text(item.timeLabel).lineLimit(1).fixedSize()
+                if let shortcutIndex, shortcutIndex < 9 {
+                    Text("⌘\(shortcutIndex + 1)")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded)).monospacedDigit()
+                        .padding(.horizontal, 4).frame(height: 14)
+                        .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 4))
+                        .fixedSize()
+                }
             }
             .font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
             .frame(height: 14)
@@ -954,7 +1015,8 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
         selectionView: AnyView? = nil,
         onSelect: @escaping () -> Void,
         onPaste: @escaping () -> Void,
-        onInspect: @escaping () -> Void
+        onInspect: @escaping () -> Void,
+        menuProvider: (() -> [ClipboardRowMenuEntry])? = nil
     ) {
         if self.itemID != itemID {
             resetClickSequence()
@@ -966,6 +1028,14 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
         self.onSelect = onSelect
         self.onPaste = onPaste
         self.onInspect = onInspect
+        self.menuProvider = menuProvider ?? { [] }
+    }
+
+    /// Opens the detail drawer from this row (middle click, menu, keyboard).
+    override func openDetails() {
+        guard interactionEnabled else { return }
+        resetClickSequence()
+        onInspect()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -1013,14 +1083,15 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
     override func rightMouseDown(with event: NSEvent) {
         guard interactionEnabled else { return }
         resetClickSequence()
-        onInspect()
+        guard let menu = contextMenu() else { return }
+        onSelect()
+        Self.presentContextMenu(menu, event, self)
     }
 
     override func otherMouseDown(with event: NSEvent) {
         guard interactionEnabled else { return }
         if event.buttonNumber == 2 {
-            resetClickSequence()
-            onInspect()
+            openDetails()
         } else {
             super.otherMouseDown(with: event)
         }
@@ -1029,8 +1100,7 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
     override func menu(for event: NSEvent) -> NSMenu? {
         guard interactionEnabled else { return nil }
         resetClickSequence()
-        onInspect()
-        return nil
+        return contextMenu()
     }
 }
 

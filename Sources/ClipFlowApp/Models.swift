@@ -1,4 +1,5 @@
 import ApplicationServices
+import Combine
 import CryptoKit
 import Foundation
 import ImageIO
@@ -7,10 +8,11 @@ import SwiftUI
 
 enum ClipCategory: String, CaseIterable, Identifiable {
     case all
-    case quickPaste
-    case smartStacks
+    case pinned
+    case text
     case code
     case links
+    case images
     case protected
 
     var id: Self { self }
@@ -18,21 +20,36 @@ enum ClipCategory: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .all: "全部内容"
-        case .quickPaste: "快速粘贴"
-        case .smartStacks: "智能分组"
+        case .pinned: "置顶内容"
+        case .text: "文本内容"
         case .code: "代码片段"
         case .links: "链接资源"
-        case .protected: "隐私保护"
+        case .images: "图片内容"
+        case .protected: "敏感内容"
+        }
+    }
+
+    /// Compact label for the single-row filter bar.
+    var shortTitle: String {
+        switch self {
+        case .all: "全部"
+        case .pinned: "置顶"
+        case .text: "文本"
+        case .code: "代码"
+        case .links: "链接"
+        case .images: "图片"
+        case .protected: "敏感"
         }
     }
 
     var subtitle: String {
         switch self {
         case .all: "按时间和来源整理的本地剪贴历史"
-        case .quickPaste: "置顶内容与高置信推荐"
-        case .smartStacks: "按语义、来源和复用行为自动归类"
+        case .pinned: "置顶后始终排在最前的常用内容"
+        case .text: "普通文字与段落"
         case .code: "命令、代码和终端可直接使用的文本"
         case .links: "网址、参考资料与可分享内容"
+        case .images: "截图与复制的图片"
         case .protected: "遮罩显示、本地保存或自动过期的条目"
         }
     }
@@ -40,10 +57,11 @@ enum ClipCategory: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .all: "square.stack.3d.up"
-        case .quickPaste: "cursorarrow.click"
-        case .smartStacks: "sparkles.rectangle.stack"
+        case .pinned: "pin"
+        case .text: "text.alignleft"
         case .code: "chevron.left.forwardslash.chevron.right"
         case .links: "link"
+        case .images: "photo"
         case .protected: "lock.shield"
         }
     }
@@ -51,10 +69,11 @@ enum ClipCategory: String, CaseIterable, Identifiable {
     var tint: Color {
         switch self {
         case .all: Color(red: 0.34, green: 0.58, blue: 0.95)
-        case .quickPaste: Color(red: 0.92, green: 0.58, blue: 0.23)
-        case .smartStacks: Color(red: 0.39, green: 0.72, blue: 0.68)
+        case .pinned: Color(red: 0.92, green: 0.58, blue: 0.23)
+        case .text: Color(red: 0.36, green: 0.52, blue: 0.72)
         case .code: Color(red: 0.58, green: 0.46, blue: 0.85)
         case .links: Color(red: 0.36, green: 0.40, blue: 0.84)
+        case .images: Color(red: 0.39, green: 0.72, blue: 0.68)
         case .protected: Color(red: 0.83, green: 0.35, blue: 0.31)
         }
     }
@@ -73,7 +92,7 @@ enum ClipboardKind: String, Codable, CaseIterable, Sendable {
         case .code: ClipCategory.code.tint
         case .link: ClipCategory.links.tint
         case .secret: ClipCategory.protected.tint
-        case .image: ClipCategory.smartStacks.tint
+        case .image: ClipCategory.images.tint
         }
     }
 
@@ -795,6 +814,27 @@ enum ClipboardClassifier {
 @MainActor
 final class HistorySelection: ObservableObject {
     @Published var itemID: ClipboardItem.ID?
+    /// Keyboard navigation asks the owning list to scroll; pointer selection never does.
+    let revealRequests = PassthroughSubject<ClipboardItem.ID, Never>()
+
+    func select(_ id: ClipboardItem.ID, reveal: Bool) {
+        if itemID != id { itemID = id }
+        if reveal { revealRequests.send(id) }
+    }
+
+    /// Moves within `ids`, clamping at both ends. Returns the newly selected id.
+    @discardableResult
+    func move(by offset: Int, in ids: [ClipboardItem.ID]) -> ClipboardItem.ID? {
+        guard !ids.isEmpty else { return nil }
+        let next: Int
+        if let itemID, let current = ids.firstIndex(of: itemID) {
+            next = min(max(current + offset, 0), ids.count - 1)
+        } else {
+            next = offset < 0 ? ids.count - 1 : 0
+        }
+        select(ids[next], reveal: true)
+        return ids[next]
+    }
 }
 
 @MainActor
@@ -998,14 +1038,14 @@ final class ClipFlowStore: ObservableObject {
                 title: "当前条目",
                 detail: "仅保存在这台 Mac 上的最近剪贴内容",
                 icon: "waveform.path.ecg.rectangle",
-                tint: ClipCategory.quickPaste.tint
+                tint: ClipCategory.pinned.tint
             ),
             FlowMetric(
                 value: "\(max(stackCount, 1))",
                 title: "智能信号",
                 detail: "结合内容类型、来源应用与复用行为生成",
                 icon: "square.3.layers.3d.top.filled",
-                tint: ClipCategory.smartStacks.tint
+                tint: ClipCategory.images.tint
             ),
             FlowMetric(
                 value: "\(max(protectedCount, codeCount))",
@@ -1330,9 +1370,9 @@ final class ClipFlowStore: ObservableObject {
         case .disabled, .pending:
             return .secondary
         case .syncing:
-            return ClipCategory.quickPaste.tint
+            return ClipCategory.pinned.tint
         case .active:
-            return ClipCategory.smartStacks.tint
+            return ClipCategory.images.tint
         case .unavailable, .failed:
             return ClipCategory.protected.tint
         }
@@ -1386,14 +1426,16 @@ final class ClipFlowStore: ObservableObject {
         switch category {
         case .all:
             return true
-        case .quickPaste:
-            return item.pinned || item.createdAt > Date().addingTimeInterval(-900)
-        case .smartStacks:
-            return item.labels.count >= 3
+        case .pinned:
+            return item.pinned
+        case .text:
+            return item.kind == .text
         case .code:
             return item.kind == .code
         case .links:
             return item.kind == .link
+        case .images:
+            return item.kind == .image
         case .protected:
             return item.isSensitive
         }
@@ -1789,7 +1831,7 @@ enum ClipFlowCatalog {
             title: "全局呼出",
             icon: "command.circle",
             detail: "用全局快捷键在指针附近呼出快速粘贴面板，可在设置中自定义组合。",
-            tint: ClipCategory.quickPaste.tint
+            tint: ClipCategory.pinned.tint
         ),
         IntegrationPill(
             title: "隐私优先",

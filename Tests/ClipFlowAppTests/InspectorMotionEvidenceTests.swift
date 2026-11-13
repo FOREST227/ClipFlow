@@ -70,11 +70,7 @@ final class InspectorMotionEvidenceTests: XCTestCase {
         try hold(45)
         let source = try XCTUnwrap(InspectorTestContext.descendants(view, ClipboardRowHitView.self)
             .first { $0.identifier?.rawValue == itemID.uuidString })
-        let event = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown,
-            location: source.convert(CGPoint(x: source.bounds.midX, y: source.bounds.midY), to: nil),
-            modifierFlags: [], timestamp: 10, windowNumber: try XCTUnwrap(source.window).windowNumber,
-            context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
-        source.rightMouseDown(with: event)
+        source.openDetails()
         XCTAssertEqual(state.snapshot.itemID, itemID)
         for step in 1...17 { driver.emit(CGFloat(step) / 17); try capture() }
         driver.finishLatest()

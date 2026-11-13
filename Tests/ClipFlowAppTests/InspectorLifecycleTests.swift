@@ -52,10 +52,7 @@ final class InspectorLifecycleTests: XCTestCase {
         let host = try XCTUnwrap(window.contentView)
         InspectorTestContext.settle(until: { !InspectorTestContext.descendants(host, LibraryInteractiveHostingView.self).isEmpty })
         let row = try XCTUnwrap(InspectorTestContext.descendants(host, LibraryInteractiveHostingView.self).first)
-        let event = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown,
-            location: row.convert(NSPoint(x: row.bounds.midX, y: row.bounds.midY), to: nil), modifierFlags: [],
-            timestamp: 1, windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
-        row.rightMouseDown(with: event)
+        row.openDetails()
         RunLoop.main.run(until: Date().addingTimeInterval(0.35))
         controller.navigation.select(.settings)
         host.layoutSubtreeIfNeeded()

@@ -33,8 +33,10 @@ struct ContentView: View {
                 }
 
                 VStack(spacing: ClipFlowLayout.sectionGap) {
-                    HeaderView(store: store, palette: palette)
-                    SidebarView(store: store, palette: palette)
+                    VStack(spacing: 10) {
+                        HeaderView(store: store, palette: palette)
+                        CategoryFilterBar(store: store)
+                    }
                     LibraryView(store: store, palette: palette,
                         onInspectFrom: { item, source in toggleLibraryInspector(for: item, source: source) }) { item in
                         toggleLibraryInspector(for: item)
@@ -121,6 +123,10 @@ struct ContentView: View {
                 return true
             }, onWindowInactive: { inspector.reset() }).frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
         )
+        .background(
+            ListKeyCommandMonitor(queryIsEmpty: store.searchText.isEmpty, onCommand: { handleKeyCommand($0) })
+                .frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
+        )
         .onChangeBackward(of: store.items) {
             inspector.invalidateIfMissing(availableIDs: Set(store.items.filter { !$0.isExpired() }.map(\.id)))
         }
@@ -144,6 +150,21 @@ struct ContentView: View {
 
     private var overlayActive: Bool {
         inspector.blocksBackground || permissionOverlayActive
+    }
+
+    private func handleKeyCommand(_ command: ListKeyCommand) -> Bool {
+        guard isPageEnabled, !overlayActive else { return false }
+        let items = store.filteredItems
+        switch command {
+        case .moveUp, .moveDown:
+            return store.historySelection.move(by: command == .moveUp ? -1 : 1, in: items.map(\.id)) != nil
+        case .activate, .toggleDetails:
+            guard let item = items.first(where: { $0.id == store.selectedItemID }) else { return false }
+            toggleLibraryInspector(for: item)
+            return true
+        case .pasteIndex:
+            return false
+        }
     }
 
     private func toggleLibraryInspector(for item: ClipboardItem, source: InspectorSourceAnchor? = nil) {
@@ -171,12 +192,12 @@ struct StartupPermissionOverlay: View {
                     HStack(spacing: 10) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .fill((report.needsAttention ? ClipCategory.protected.tint : ClipCategory.smartStacks.tint).opacity(0.16))
+                                .fill((report.needsAttention ? ClipCategory.protected.tint : ClipCategory.images.tint).opacity(0.16))
                                 .frame(width: 42, height: 42)
 
                             Image(systemName: report.needsAttention ? "exclamationmark.shield.fill" : "checkmark.shield.fill")
                                 .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(report.needsAttention ? ClipCategory.protected.tint : ClipCategory.smartStacks.tint)
+                                .foregroundStyle(report.needsAttention ? ClipCategory.protected.tint : ClipCategory.images.tint)
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
@@ -228,7 +249,7 @@ struct StartupPermissionOverlay: View {
                         .padding(12)
                         .background(
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(Color.white.opacity(0.54))
+                                .fill(palette.softFill)
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -269,28 +290,35 @@ struct HeaderView: View {
                 }
             }
             .font(.system(size: 13))
-            .padding(12)
-            .background(palette.inputFill, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(palette.border, lineWidth: 1))
+            .padding(.horizontal, 12)
+            .frame(height: 36)
+            .background(palette.inputFill, in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius))
+            .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius).strokeBorder(palette.border, lineWidth: 1))
         }
     }
 }
 
-struct SidebarView: View {
+/// One row of filters; the selected one carries its category tint.
+struct CategoryFilterBar: View {
     @ObservedObject var store: ClipFlowStore
-    let palette: ClipFlowPalette
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 136), spacing: 8)], spacing: 8) {
+        HStack(spacing: 6) {
             ForEach(ClipCategory.allCases) { category in
                 Button {
                     withAnimation(ClipFlowMotion.selection) { store.selectedCategory = category }
                 } label: {
-                    CategoryRow(category: category, count: store.count(for: category), isSelected: store.selectedCategory == category)
+                    CategoryPill(category: category, count: store.count(for: category),
+                        isSelected: store.selectedCategory == category)
                 }
                 .buttonStyle(.plain)
+                .help(category.subtitle)
             }
+            Spacer(minLength: 0)
         }
+        .frame(height: CategoryPill.height)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("内容筛选")
     }
 }
 
@@ -307,7 +335,8 @@ struct LibraryView: View {
                     Text(store.selectedCategory.title).font(.system(size: 15, weight: .semibold))
                     Text("\(store.filteredItems.count) 条").font(.system(size: 11)).foregroundStyle(.secondary)
                     Spacer()
-                    Text("右键查看详情").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("双击查看详情 · 右键更多操作").font(.system(size: 11)).foregroundStyle(.secondary)
+                        .lineLimit(1)
                     Button(role: .destructive) { store.clearHistory() } label: {
                         Label("清空未置顶历史", systemImage: "trash")
                     }
@@ -321,26 +350,30 @@ struct LibraryView: View {
                 if store.filteredItems.isEmpty {
                     EmptyLibraryView(store: store, palette: palette)
                         .frame(maxWidth: .infinity)
-                        .frame(height: LibraryCardLayout.viewportHeight)
+                        .frame(minHeight: LibraryCardLayout.viewportHeight, maxHeight: .infinity)
                 } else {
-                    SoftEdgeScrollView(showsEdgeEffects: false) {
-                        // Fixed card heights and an independent selection layer allow
-                        // offscreen content to stay unloaded without selection relayout.
-                        LazyVStack(spacing: LibraryCardLayout.spacing) {
-                            ForEach(store.filteredItems) { item in
-                                LibraryInteractiveCard(item: item, store: store,
-                                    displayedSnippet: store.displaySnippet(for: item), palette: palette,
-                                    onInspectFrom: { source in
-                                        if let onInspectFrom { onInspectFrom(item, source) }
-                                        else { onInspectItem(item) }
-                                    }, onSelect: { store.select(item) },
-                                    onInspect: { onInspectItem(item) })
-                                .frame(maxWidth: .infinity)
-                                .frame(height: LibraryCardLayout.height(for: item.kind))
+                    ScrollViewReader { scroll in
+                        SoftEdgeScrollView(showsEdgeEffects: false) {
+                            // Fixed card heights and an independent selection layer allow
+                            // offscreen content to stay unloaded without selection relayout.
+                            LazyVStack(spacing: LibraryCardLayout.spacing) {
+                                ForEach(store.filteredItems) { item in
+                                    LibraryInteractiveCard(item: item, store: store,
+                                        displayedSnippet: store.displaySnippet(for: item), palette: palette,
+                                        onInspectFrom: { source in
+                                            if let onInspectFrom { onInspectFrom(item, source) }
+                                            else { onInspectItem(item) }
+                                        }, onSelect: { store.select(item) },
+                                        onInspect: { onInspectItem(item) })
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: LibraryCardLayout.height(for: item.kind))
+                                }
                             }
                         }
+                        // Only keyboard navigation scrolls; pointer selection keeps the viewport.
+                        .onReceive(store.historySelection.revealRequests) { id in scroll.scrollTo(id) }
                     }
-                    .frame(height: LibraryCardLayout.viewportHeight)
+                    .frame(minHeight: LibraryCardLayout.viewportHeight, maxHeight: .infinity)
                 }
             }
         }
@@ -359,7 +392,7 @@ struct EmptyLibraryView: View {
                 .font(.system(size: 16, weight: .semibold))
             Text(store.items.isEmpty
                 ? "复制文字或图片后会出现在这里。\n按 \(store.quickPasteShortcut.displayName) 可随时快速回贴。"
-                : "试试其他关键词，或切换到全部内容。")
+                : "试试其他关键词，或切换到“全部”。")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             if !store.items.isEmpty {
@@ -383,51 +416,66 @@ struct LibraryInteractiveCard: NSViewRepresentable {
 
     func makeNSView(context: Context) -> LibraryInteractiveHostingView {
         let view = LibraryInteractiveHostingView()
+        configure(view)
+        return view
+    }
+
+    func updateNSView(_ nsView: LibraryInteractiveHostingView, context: Context) {
+        configure(nsView)
+    }
+
+    private func configure(_ view: LibraryInteractiveHostingView) {
+        let id = item.id
         view.interactionEnabled = isEnabled
-        view.identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
+        view.identifier = NSUserInterfaceItemIdentifier(id.uuidString)
+        let inspect = InspectorSourceAnchor.callback(for: view, fallback: onInspect, anchored: onInspectFrom)
         view.update(
             rootView: AnyView(
                 ClipboardCard(
                     item: item,
                     displayedSnippet: displayedSnippet,
                     palette: palette,
-                    store: store
+                    store: store,
+                    hover: view.hover
                 )
             ),
-            selectionView: AnyView(LibrarySelectionChrome(itemID: item.id,
+            selectionView: AnyView(LibrarySelectionChrome(itemID: id,
                 selection: store.historySelection, tint: item.kind.tint, palette: palette)),
             onSelect: onSelect,
-            onInspect: InspectorSourceAnchor.callback(for: view, fallback: onInspect, anchored: onInspectFrom)
-        )
-        return view
-    }
-
-    func updateNSView(_ nsView: LibraryInteractiveHostingView, context: Context) {
-        nsView.interactionEnabled = isEnabled
-        nsView.identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
-        nsView.update(
-            rootView: AnyView(
-                ClipboardCard(
-                    item: item,
-                    displayedSnippet: displayedSnippet,
-                    palette: palette,
-                    store: store
-                )
-            ),
-            selectionView: AnyView(LibrarySelectionChrome(itemID: item.id,
-                selection: store.historySelection, tint: item.kind.tint, palette: palette)),
-            onSelect: onSelect,
-            onInspect: InspectorSourceAnchor.callback(for: nsView, fallback: onInspect, anchored: onInspectFrom)
+            onInspect: inspect,
+            onAction: { [weak store] action in
+                guard let store, let current = store.item(withID: id) else { return }
+                switch action {
+                case .copy: ClipFlowRuntime.shared.copyToClipboard(current)
+                case .pin: store.togglePin(id)
+                case .delete: store.delete(id)
+                }
+            },
+            menuProvider: { [weak store] in
+                guard let store, let current = store.item(withID: id) else { return [] }
+                return ClipboardRowMenu.entries(for: current, store: store, leading: [
+                    .action(title: "查看详情", symbol: "arrow.up.left.and.arrow.down.right", handler: inspect),
+                    .action(title: "粘贴", symbol: "arrow.down.doc") { [weak store] in
+                        guard let latest = store?.item(withID: id) else { return }
+                        ClipFlowRuntime.shared.paste(latest)
+                    }
+                ])
+            }
         )
     }
 }
 
 final class LibraryInteractiveHostingView: ClipboardRowHitView {
     private(set) var contentRevision = 0
+    let hover = RowHoverState()
     private let selectionHostingView = NSHostingView(rootView: AnyView(EmptyView()))
     private let hostingView = NSHostingView(rootView: AnyView(EmptyView()))
     private var onSelect: () -> Void = {}
     private var onInspect: () -> Void = {}
+    private var onAction: ((LibraryCardAction) -> Void)?
+    private var hoverTrackingArea: NSTrackingArea?
+    private static weak var lastClickedRow: LibraryInteractiveHostingView?
+    private static var lastClickedIdentifier: NSUserInterfaceItemIdentifier?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -468,38 +516,102 @@ final class LibraryInteractiveHostingView: ClipboardRowHitView {
         rootView: AnyView,
         selectionView: AnyView? = nil,
         onSelect: @escaping () -> Void,
-        onInspect: @escaping () -> Void
+        onInspect: @escaping () -> Void,
+        onAction: ((LibraryCardAction) -> Void)? = nil,
+        menuProvider: (() -> [ClipboardRowMenuEntry])? = nil
     ) {
         contentRevision += 1
         hostingView.rootView = rootView
         if let selectionView { selectionHostingView.rootView = selectionView }
         self.onSelect = onSelect
         self.onInspect = onInspect
+        self.onAction = onAction
+        self.menuProvider = menuProvider ?? { [] }
+        if onAction == nil { setHovered(false) }
+    }
+
+    /// Opens the detail drawer from this row (double click, middle click, menu, keyboard).
+    override func openDetails() {
+        guard interactionEnabled else { return }
+        onInspect()
     }
 
     override func mouseDown(with event: NSEvent) {
         guard !redirectLeftClickIfNeeded(event) else { return }
+        if let action = hoverAction(for: event) {
+            Self.lastClickedRow = nil
+            if action == .copy { hover.confirm(action) }
+            // Pinning and deleting move rows under a resting pointer.
+            else { setHovered(false) }
+            onAction?(action)
+            return
+        }
+        // AppKit's click count belongs to the event sequence, not this item:
+        // both clicks must land on the same row showing the same item.
+        let isDoubleClick = event.clickCount == 2 && Self.lastClickedRow === self
+            && Self.lastClickedIdentifier == identifier
+        Self.lastClickedRow = isDoubleClick ? nil : self
+        Self.lastClickedIdentifier = identifier
         onSelect()
+        if isDoubleClick { openDetails() }
+    }
+
+    private func hoverAction(for event: NSEvent) -> LibraryCardAction? {
+        guard interactionEnabled, onAction != nil, hover.isHovered,
+              let window, event.windowNumber == window.windowNumber else { return nil }
+        let point = convert(event.locationInWindow, from: nil)
+        return LibraryCardActionLayout.action(
+            at: CGPoint(x: point.x, y: isFlipped ? point.y : bounds.height - point.y),
+            rowWidth: bounds.width)
     }
 
     override func rightMouseDown(with event: NSEvent) {
         guard interactionEnabled else { return }
-        onInspect()
+        Self.lastClickedRow = nil
+        guard let menu = contextMenu() else { return }
+        onSelect()
+        Self.presentContextMenu(menu, event, self)
     }
 
     override func otherMouseDown(with event: NSEvent) {
         guard interactionEnabled else { return }
         if event.buttonNumber == 2 {
-            onInspect()
+            openDetails()
         } else {
             super.otherMouseDown(with: event)
         }
     }
 
-    override func menu(for event: NSEvent) -> NSMenu? {
-        guard interactionEnabled else { return nil }
-        onInspect()
-        return nil
+    override func menu(for event: NSEvent) -> NSMenu? { contextMenu() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
+        let area = NSTrackingArea(rect: .zero,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { setHovered(true) }
+    override func mouseMoved(with event: NSEvent) { setHovered(true) }
+    override func mouseExited(with event: NSEvent) { setHovered(false) }
+    override func rowInteractionWasDisabled() { setHovered(false) }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { setHovered(false) }
+    }
+
+    // Tracking areas do not follow content scrolled under a resting pointer.
+    override func scrollWheel(with event: NSEvent) {
+        setHovered(false)
+        super.scrollWheel(with: event)
+    }
+
+    private func setHovered(_ hovered: Bool) {
+        let next = hovered && interactionEnabled && onAction != nil
+        if hover.isHovered != next { hover.isHovered = next }
     }
 }
 
@@ -879,7 +991,7 @@ struct MenuBarView: View {
                     isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
                 Divider()
                 HStack(spacing: 8) {
-                    Image(systemName: "folder").foregroundStyle(ClipCategory.smartStacks.tint).frame(width: 16)
+                    Image(systemName: "folder").foregroundStyle(ClipCategory.images.tint).frame(width: 16)
                     Text("文稿同步")
                     Spacer()
                     Text(store.iCloudSyncStatusValue).foregroundStyle(store.iCloudSyncTint)
@@ -916,12 +1028,13 @@ struct MenuBarView: View {
                 .accessibilityLabel("电源操作")
                 .help("重启或退出 ClipFlow")
             }
-            Spacer(minLength: 0)
             Text(store.statusSummary).font(.system(size: 10)).foregroundStyle(.secondary)
                 .lineLimit(1).help(store.statusSummary)
         }
         .padding(16)
-        .frame(width: ClipFlowLayout.menuWidth, height: ClipFlowLayout.menuHeight)
+        // The popover takes its height from this content.
+        .frame(width: ClipFlowLayout.menuWidth)
+        .fixedSize(horizontal: false, vertical: true)
         .background {
             GeometryReader { proxy in
                 FloatingPanelBackground(palette: palette)
@@ -945,28 +1058,25 @@ struct MenuBarView: View {
 struct MenuPanelHeader: View {
     @ObservedObject var store: ClipFlowStore
     var body: some View {
-        ClipFlowBrandSurface {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(nsImage: NSApp.applicationIconImage)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: 36, height: 36)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("ClipFlow 剪流").font(.system(size: 16, weight: .bold, design: .rounded))
-                        Label(store.capturePaused ? "监听已暂停" : "正在监听", systemImage: store.capturePaused ? "pause.circle.fill" : "record.circle.fill")
-                            .font(.system(size: 10)).foregroundStyle(store.capturePaused ? Color.orange : Color.green)
-                    }
-                    Spacer(minLength: 4)
-                }
-                HStack(spacing: 6) {
-                    CompactStatusPill(title: "历史", value: "\(store.items.count)", icon: "square.stack.3d.up", tint: ClipCategory.all.tint)
-                    CompactStatusPill(title: "隐私", value: "\(store.protectedCount)", icon: "lock.shield", tint: ClipCategory.protected.tint)
-                    CompactStatusPill(title: "呼出", value: store.quickPasteShortcut.displayName, icon: "cursorarrow.rays", tint: ClipCategory.quickPaste.tint)
-                }
+        HStack(spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 32, height: 32)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("ClipFlow 剪流").font(.system(size: 14, weight: .bold, design: .rounded))
+                Label(store.capturePaused ? "监听已暂停" : "正在监听", systemImage: store.capturePaused ? "pause.circle.fill" : "record.circle.fill")
+                    .font(.system(size: 10)).foregroundStyle(store.capturePaused ? Color.orange : Color.green)
             }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(store.items.count) 条历史").font(.system(size: 11, weight: .medium)).monospacedDigit()
+                Text("\(store.quickPasteShortcut.displayName) 呼出").font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            .lineLimit(1)
         }
+        .padding(.horizontal, 4)
     }
 }
 
@@ -1056,7 +1166,7 @@ struct MenuEmptyStateCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(ClipCategory.smartStacks.tint)
+                .foregroundStyle(ClipCategory.images.tint)
 
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
@@ -1422,30 +1532,27 @@ struct HeaderOverviewCard: View {
     }
 }
 
-struct CategoryRow: View {
+struct CategoryPill: View {
+    static let height: CGFloat = 28
     let category: ClipCategory
     let count: Int
     let isSelected: Bool
+
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: category.icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(category.tint)
-                .frame(width: 26, height: 26)
-                .background(LinearGradient(colors: [category.tint.opacity(0.22), category.tint.opacity(0.08)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 8))
-            Text(category.title).lineLimit(1)
-            Spacer(minLength: 0)
-            Text("\(count)").monospacedDigit().font(.system(size: 10, weight: .semibold))
-                .padding(.horizontal, 5).padding(.vertical, 3)
-                .background(category.tint.opacity(isSelected ? 0.16 : 0.06), in: Capsule())
+        HStack(spacing: 4) {
+            Text(category.shortTitle).font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+            Text("\(count)").monospacedDigit().font(.system(size: 10, weight: .medium))
+                .opacity(isSelected ? 0.85 : 0.55)
         }
-        .font(.system(size: 11, weight: .medium))
-        .foregroundStyle(isSelected ? category.tint : Color.primary)
-        .padding(.horizontal, 8).padding(.vertical, 8)
-        .background(isSelected ? category.tint.opacity(0.12) : Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(isSelected ? category.tint.opacity(0.3) : .clear, lineWidth: 1))
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .lineLimit(1).fixedSize()
+        .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.8))
+        .padding(.horizontal, 10)
+        .frame(height: Self.height)
+        .background(isSelected ? category.tint : Color.primary.opacity(0.05), in: Capsule())
+        .contentShape(Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(category.title)，\(count) 条")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : [.isButton])
     }
 }
 
@@ -1571,12 +1678,12 @@ struct EmptyStateBadge: View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(ClipCategory.quickPaste.tint)
+                .foregroundStyle(ClipCategory.pinned.tint)
                 .frame(width: 16, height: 16)
                 .padding(7)
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(ClipCategory.quickPaste.tint.opacity(0.14))
+                        .fill(ClipCategory.pinned.tint.opacity(0.14))
                 )
 
             VStack(alignment: .leading, spacing: 2) {
@@ -1608,7 +1715,7 @@ struct StepRow: View {
                 .frame(width: 22, height: 22)
                 .background(
                     Circle()
-                        .fill(ClipCategory.quickPaste.tint)
+                        .fill(ClipCategory.pinned.tint)
                 )
 
             Text(text)
@@ -1731,11 +1838,11 @@ struct LibrarySelectionChrome: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 14)
+        RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
             .fill(isSelected ? palette.softFill : palette.rowFill)
-            .overlay(RoundedRectangle(cornerRadius: 14)
+            .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
                 .fill(isSelected ? tint.opacity(colorScheme == .dark ? 0.22 : 0.14) : .clear))
-            .overlay(RoundedRectangle(cornerRadius: 14)
+            .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
                 .strokeBorder(isSelected ? tint.opacity(0.65) : palette.rowBorder,
                     lineWidth: isSelected ? 1.5 : 1))
             .overlay(alignment: .leading) {
@@ -1757,6 +1864,7 @@ struct ClipboardCard: View {
     let displayedSnippet: String
     let palette: ClipFlowPalette
     @ObservedObject var store: ClipFlowStore
+    var hover: RowHoverState? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: item.kind == .image || item.kind == .code ? 6 : 3) {
@@ -1785,7 +1893,9 @@ struct ClipboardCard: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
         .frame(height: LibraryCardLayout.height(for: item.kind), alignment: .top)
-
+        .overlay(alignment: .topTrailing) {
+            if let hover { LibraryCardActionBar(hover: hover, pinned: item.pinned) }
+        }
     }
 
     private var metadata: some View {
@@ -1796,7 +1906,7 @@ struct ClipboardCard: View {
                 .foregroundStyle(itemTint)
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(itemTint.opacity(0.1), in: Capsule())
-            if item.pinned { Image(systemName: "pin.fill").foregroundStyle(ClipCategory.quickPaste.tint) }
+            if item.pinned { Image(systemName: "pin.fill").foregroundStyle(ClipCategory.pinned.tint) }
             Spacer(minLength: 4)
             Text(item.timeLabel).lineLimit(1)
         }

@@ -62,7 +62,7 @@ final class MainWindowTests: XCTestCase {
         }
     }
 
-    func testBothLiveListViewportsHaveSixUnits() throws {
+    func testListViewportsShowAtLeastSixUnitsAndHistoryGrowsWithTheWindow() throws {
         _ = NSApplication.shared
         let store = try makeStore()
         for index in 0..<12 {
@@ -77,12 +77,24 @@ final class MainWindowTests: XCTestCase {
         main.orderFront(nil)
         defer { main.close() }
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-        let historyScroll = try XCTUnwrap(scrolls(try XCTUnwrap(main.contentView)).first {
-            abs($0.contentView.bounds.height - LibraryCardLayout.viewportHeight) < 1
-        })
-        XCTAssertEqual(historyScroll.contentView.bounds.height, 472, accuracy: 0.5)
-        let historyRect = historyScroll.convert(historyScroll.bounds, to: main.contentView)
+        func historyScroll() throws -> NSScrollView {
+            try XCTUnwrap(scrolls(try XCTUnwrap(main.contentView)).first {
+                $0.contentView.bounds.height >= LibraryCardLayout.viewportHeight - 0.5
+            })
+        }
+        XCTAssertEqual(LibraryCardLayout.viewportHeight, 472)
+        let defaultHeight = try historyScroll().contentView.bounds.height
+        var historyRect = try historyScroll().convert(try historyScroll().bounds, to: main.contentView)
         XCTAssertTrue(try XCTUnwrap(main.contentView).bounds.contains(historyRect))
+        main.setContentSize(NSSize(width: 620, height: ClipFlowLayout.libraryMinHeight))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertGreaterThanOrEqual(try historyScroll().contentView.bounds.height,
+            LibraryCardLayout.viewportHeight - 0.5, "Six rows must fit at the minimum window height")
+        historyRect = try historyScroll().convert(try historyScroll().bounds, to: main.contentView)
+        XCTAssertTrue(try XCTUnwrap(main.contentView).bounds.contains(historyRect))
+        XCTAssertEqual(try historyScroll().contentView.bounds.height,
+            defaultHeight - (780 - ClipFlowLayout.libraryMinHeight), accuracy: 1,
+            "Window height changes belong to the list, not to blank space")
 
         let host = NSHostingController(rootView: QuickPastePanelView(store: store,
             preferredTargetName: nil, onPaste: { _ in }, onOpenLibrary: {}, onClose: {}))
@@ -190,20 +202,31 @@ final class MainWindowTests: XCTestCase {
         XCTAssertEqual(active, .default)
     }
 
-    func testSidebarOrderAndMotionFollowSettingsThenHistory() throws {
+    func testSidebarOrderAndMotionFollowHistoryThenSettings() throws {
         let navigation = MainWindowNavigation(store: try makeStore())
-        XCTAssertEqual(navigation.selectedIndex, 3)
-        navigation.selectSettings(.general)
         XCTAssertEqual(navigation.selectedIndex, 0)
-        XCTAssertFalse(navigation.settingsDraft.movesForward)
+        navigation.selectSettings(.general)
+        XCTAssertEqual(navigation.selectedIndex, 1)
+        XCTAssertTrue(navigation.settingsDraft.movesForward)
         navigation.selectSettings(.sync)
-        XCTAssertEqual(navigation.selectedIndex, 2)
+        XCTAssertEqual(navigation.selectedIndex, 3)
         XCTAssertTrue(navigation.settingsDraft.movesForward)
         navigation.selectSettings(.privacy)
-        XCTAssertEqual(navigation.selectedIndex, 1)
+        XCTAssertEqual(navigation.selectedIndex, 2)
         XCTAssertFalse(navigation.settingsDraft.movesForward)
         navigation.select(.history)
-        XCTAssertEqual(navigation.selectedIndex, 3)
+        XCTAssertEqual(navigation.selectedIndex, 0)
+    }
+
+    func testMainWindowWidthIsBoundedButResizable() throws {
+        _ = NSApplication.shared
+        let controller = MainWindowController(store: try makeStore(), locale: Locale(identifier: "zh-Hans"))
+        let window = try XCTUnwrap(controller.window)
+        defer { window.close() }
+        XCTAssertEqual(window.contentMinSize.width, ClipFlowLayout.libraryWidth)
+        XCTAssertEqual(window.contentMaxSize.width, ClipFlowLayout.libraryMaxWidth)
+        XCTAssertEqual(window.contentMinSize.height, ClipFlowLayout.libraryMinHeight)
+        XCTAssertGreaterThan(ClipFlowLayout.libraryMaxWidth, ClipFlowLayout.libraryWidth)
     }
 
     func testSharedDetailFitsQuickPasteWidth() throws {

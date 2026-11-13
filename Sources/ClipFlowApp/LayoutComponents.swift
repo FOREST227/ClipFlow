@@ -5,12 +5,15 @@ enum ClipFlowLayout {
     static let sectionGap: CGFloat = 16
     static let rowGap: CGFloat = 8
     static let surfaceRadius: CGFloat = 16
+    static let rowRadius: CGFloat = 14
     static let controlRadius: CGFloat = 10
     static let controlHeight: CGFloat = 32
     static let libraryWidth: CGFloat = 620
+    static let libraryMaxWidth: CGFloat = 880
+    static let libraryHeight: CGFloat = 780
+    static let libraryMinHeight: CGFloat = 720
     static let settingsWidth: CGFloat = libraryWidth
     static let menuWidth: CGFloat = 360
-    static let menuHeight: CGFloat = 440
 }
 
 struct CleanGlassBackground: View {
@@ -104,34 +107,6 @@ struct ClipFlowBrandMark: View {
             )
             .overlay(RoundedRectangle(cornerRadius: size * 0.3).strokeBorder(.white.opacity(0.25), lineWidth: 1))
             .accessibilityHidden(true)
-    }
-}
-
-struct ClipFlowBrandSurface<Content: View>: View {
-    @ViewBuilder var content: Content
-    var body: some View {
-        content.padding(12)
-            .background(CleanGlassBackground(cornerRadius: 20))
-    }
-}
-
-struct CompactStatusPill: View {
-    let title: String
-    let value: String
-    let icon: String
-    let tint: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label(title, systemImage: icon)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.secondary).lineLimit(1)
-            Text(value).font(.system(size: 12, weight: .semibold, design: .rounded))
-                .monospacedDigit().foregroundStyle(tint).lineLimit(1).minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8).padding(.vertical, 8)
-        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius))
     }
 }
 

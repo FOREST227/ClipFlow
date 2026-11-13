@@ -42,13 +42,14 @@ final class MainWindowNavigation: ObservableObject {
         if !loadedPages.contains(page) { loadedPages.insert(page) }
         self.page = page
     }
+    /// Sidebar order: history first, then the settings sections.
     var selectedIndex: Int {
-        page == .history ? SettingsCategory.allCases.count
-            : (SettingsCategory.allCases.firstIndex(of: settingsDraft.section) ?? 0)
+        page == .history ? 0
+            : 1 + (SettingsCategory.allCases.firstIndex(of: settingsDraft.section) ?? 0)
     }
 
     func selectSettings(_ category: SettingsCategory) {
-        let target = SettingsCategory.allCases.firstIndex(of: category) ?? 0
+        let target = 1 + (SettingsCategory.allCases.firstIndex(of: category) ?? 0)
         guard page != .settings || settingsDraft.section != category else { return }
         settingsDraft.movesForward = target > selectedIndex
         store.endShortcutRecording()
@@ -75,15 +76,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
         window.identifier = NSUserInterfaceItemIdentifier("ClipFlowMainWindow")
-        window.setContentSize(NSSize(width: ClipFlowLayout.libraryWidth, height: 780))
-        window.contentMinSize = NSSize(width: ClipFlowLayout.libraryWidth, height: 780)
-        window.contentMaxSize = NSSize(width: ClipFlowLayout.libraryWidth, height: .greatestFiniteMagnitude)
+        window.setContentSize(NSSize(width: ClipFlowLayout.libraryWidth, height: ClipFlowLayout.libraryHeight))
+        window.contentMinSize = NSSize(width: ClipFlowLayout.libraryWidth, height: ClipFlowLayout.libraryMinHeight)
+        window.contentMaxSize = NSSize(width: ClipFlowLayout.libraryMaxWidth, height: .greatestFiniteMagnitude)
         window.center()
         window.isReleasedWhenClosed = false
         window.isRestorable = false
         // Reuse the history window position; do not restore a second settings window.
         window.setFrameAutosaveName("ClipFlowLibraryWindow")
-        window.setContentSize(NSSize(width: ClipFlowLayout.libraryWidth, height: max(780, window.contentLayoutRect.height)))
+        let restored = window.contentRect(forFrameRect: window.frame).size
+        window.setContentSize(NSSize(
+            width: min(max(restored.width, ClipFlowLayout.libraryWidth), ClipFlowLayout.libraryMaxWidth),
+            height: max(ClipFlowLayout.libraryMinHeight, restored.height)))
         super.init(window: window)
         window.delegate = self
     }
@@ -123,12 +127,12 @@ private struct MainWindowView: View {
                 if navigation.loadedPages.contains(.settings) {
                     SettingsView(showsBackground: false, store: store, draft: navigation.settingsDraft)
                         .modifier(PageMotion(isSelected: navigation.page == .settings,
-                            hiddenOffset: -12, reduceMotion: reduceMotion))
+                            hiddenOffset: 12, reduceMotion: reduceMotion))
                 }
                 if navigation.loadedPages.contains(.history) {
                     ContentView(showsBackground: false, showsPermissionOverlay: false, store: store)
                         .modifier(PageMotion(isSelected: navigation.page == .history,
-                            hiddenOffset: 12, reduceMotion: reduceMotion))
+                            hiddenOffset: -12, reduceMotion: reduceMotion))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -146,8 +150,8 @@ private struct MainWindowView: View {
             .ignoresSafeArea(.container, edges: .top)
             .allowsHitTesting(false)
         }
-        .frame(width: ClipFlowLayout.libraryWidth)
-        .frame(minHeight: 780)
+        .frame(minWidth: ClipFlowLayout.libraryWidth, idealWidth: ClipFlowLayout.libraryWidth,
+            maxWidth: ClipFlowLayout.libraryMaxWidth, minHeight: ClipFlowLayout.libraryMinHeight)
         .overlay {
             if let report = store.startupPermissionReport {
                 ZStack {
@@ -187,20 +191,21 @@ private struct MainSidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            navigationButton("剪贴历史", icon: "rectangle.stack", selected: navigation.page == .history) {
+                navigation.select(.history)
+            }
+            .padding(.top, 16)
+            Spacer(minLength: 12)
             Text("设置")
                 .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
-                .padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 4)
+                .padding(.horizontal, 10).padding(.bottom, 4)
+                .accessibilityAddTraits(.isHeader)
             ForEach(SettingsCategory.allCases) { category in
                 navigationButton(category.rawValue, icon: category.icon,
                     selected: navigation.page == .settings && draft.section == category) {
                     navigation.selectSettings(category)
                 }
             }
-            Divider().padding(.horizontal, 10).padding(.vertical, 10)
-            navigationButton("剪贴历史", icon: "rectangle.stack", selected: navigation.page == .history) {
-                navigation.select(.history)
-            }
-            Spacer(minLength: 12)
         }
         .padding(8)
         // Keep navigation aligned while the shell has equal top/bottom insets.

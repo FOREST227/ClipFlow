@@ -56,7 +56,7 @@ final class HistoryInspectorMotionTests: XCTestCase {
         let fixture = HistoryInspectorHarness(context: context)
         defer { fixture.close() }
         let row = try XCTUnwrap(fixture.rows.first)
-        row.rightMouseDown(with: try fixture.event(on: row))
+        row.openDetails()
         fixture.pump()
         XCTAssertNotNil(fixture.inspector.snapshot.itemID)
         fixture.driver.finishLatest()
@@ -101,7 +101,7 @@ final class HistoryInspectorMotionTests: XCTestCase {
             }.map(ObjectIdentifier.init))
         }
         let identities = visibleIdentities()
-        row.rightMouseDown(with: try fixture.event(on: row))
+        row.openDetails()
         fixture.pump()
         let revisions = Dictionary(uniqueKeysWithValues: fixture.rows.map { (ObjectIdentifier($0), $0.contentRevision) })
         for p: CGFloat in [0.2, 0.5, 0.8] {

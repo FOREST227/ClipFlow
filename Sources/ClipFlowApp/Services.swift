@@ -211,6 +211,11 @@ final class ClipboardMonitor {
             return
         }
 
+        if SensitivePasteboard.containsMarker(pasteboard) {
+            lastChangeCount = changeCount
+            return
+        }
+
         guard let choice = ClipboardCapture.choose(from: pasteboard) else {
             guard pasteboard.changeCount == changeCount else { return }
             lastChangeCount = changeCount

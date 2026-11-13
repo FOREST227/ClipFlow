@@ -1,34 +1,55 @@
+import CryptoKit
 import Foundation
+import os
 import Security
 
-/// Keeps sensitive clipboard text out of `history.json` and the synced document.
-/// The history file stores metadata plus `secretPayloadRef`. The text itself is a
-/// Keychain item. Under tests, that item goes into a private keychain file so the
-/// login keychain is never touched.
-final class SensitivePayloadStore {
-    struct Payload: Codable, Equatable, Sendable {
-        var fullText: String
-        var snippet: String
+struct SensitivePayload: Codable, Equatable, Sendable {
+    var fullText: String
+    var snippet: String
+}
+
+protocol SensitivePayloadRepository: AnyObject {
+    func save(_ payload: SensitivePayload, account: String) throws
+    func load(account: String) throws -> SensitivePayload?
+    func delete(account: String)
+}
+
+/// Remembers the fingerprint of each secret already stored, so a later history save can skip the Keychain.
+final class SensitivePayloadDigest {
+    private var fingerprints: [String: String] = [:]
+
+    func matches(_ payload: SensitivePayload, account: String) -> Bool {
+        fingerprints[account] == Self.fingerprint(payload)
     }
 
+    func remember(_ payload: SensitivePayload, account: String) {
+        fingerprints[account] = Self.fingerprint(payload)
+    }
+
+    func forget(account: String) {
+        fingerprints.removeValue(forKey: account)
+    }
+
+    static func fingerprint(_ payload: SensitivePayload) -> String {
+        var data = Data(payload.fullText.utf8)
+        data.append(0x1f)
+        data.append(contentsOf: payload.snippet.utf8)
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// Keeps sensitive clipboard text out of `history.json` and the synced document.
+final class SensitivePayloadStore {
     struct MaterializedItem {
         var item: ClipboardItem
         var rewrotePlaintext: Bool
     }
 
-    struct StoreError: Error {
-        var status: OSStatus
-    }
+    static let unreadableStatus = "敏感内容无法从钥匙串读取"
+    static let keychainWriteFailure = "敏感内容未能写入钥匙串"
+    static let encodingFailure = "历史记录编码失败"
 
-    static let service = "app.clipflow.sensitive-payload"
-
-    private final class KeychainState: @unchecked Sendable {
-        let lock = NSLock()
-        var ephemeralKeychain: SecKeychain?
-        var didPrepareEphemeralKeychain = false
-    }
-
-    private static let state = KeychainState()
+    private static let log = Logger(subsystem: "ClipFlow", category: "SensitivePayload")
 
     private init() {}
 
@@ -46,182 +67,143 @@ final class SensitivePayloadStore {
         items.filter { !$0.isSensitive && $0.secretPayloadRef == nil }
     }
 
-    static func materialize(_ item: ClipboardItem) throws -> MaterializedItem {
+    static func materialize(
+        _ item: ClipboardItem,
+        repository: SensitivePayloadRepository,
+        digests: SensitivePayloadDigest
+    ) throws -> MaterializedItem {
         guard protectsPayload(item) else {
             return MaterializedItem(item: item, rewrotePlaintext: false)
         }
 
         let account = item.secretPayloadRef ?? item.id.uuidString
         if !item.fullText.isEmpty || !item.snippet.isEmpty {
-            try save(Payload(fullText: item.fullText, snippet: item.snippet), account: account)
+            let payload = SensitivePayload(fullText: item.fullText, snippet: item.snippet)
+            try storeIfChanged(payload, account: account, repository: repository, digests: digests)
             var memory = item
             memory.secretPayloadRef = account
+            memory.secretPayloadUnavailable = nil
             return MaterializedItem(item: memory, rewrotePlaintext: true)
         }
 
         var memory = item
         memory.secretPayloadRef = account
-        if let payload = load(account: account) {
-            memory.fullText = payload.fullText
-            memory.snippet = payload.snippet
+        do {
+            if let payload = try repository.load(account: account) {
+                memory.fullText = payload.fullText
+                memory.snippet = payload.snippet
+                memory.secretPayloadUnavailable = nil
+                digests.remember(payload, account: account)
+            } else {
+                markUnreadable(&memory, account: account, reason: "missing")
+            }
+        } catch {
+            markUnreadable(&memory, account: account, reason: String(describing: error))
         }
         return MaterializedItem(item: memory, rewrotePlaintext: false)
     }
 
-    static func redactedForDisk(_ item: ClipboardItem) throws -> ClipboardItem {
+    static func redactedForDisk(
+        _ item: ClipboardItem,
+        repository: SensitivePayloadRepository,
+        digests: SensitivePayloadDigest
+    ) throws -> ClipboardItem {
         guard protectsPayload(item) else { return item }
 
         let account = item.secretPayloadRef ?? item.id.uuidString
-        // An empty in-memory payload must not overwrite a Keychain item we failed to read.
-        if !item.fullText.isEmpty || !item.snippet.isEmpty {
-            try save(Payload(fullText: item.fullText, snippet: item.snippet), account: account)
+        // A failed read must not replace the Keychain item with empty text or the status string.
+        if item.secretPayloadUnavailable != true {
+            let payload = SensitivePayload(fullText: item.fullText, snippet: item.snippet)
+            if !payload.fullText.isEmpty || !payload.snippet.isEmpty {
+                try storeIfChanged(payload, account: account, repository: repository, digests: digests)
+            }
         }
 
         var redacted = item
         redacted.fullText = ""
         redacted.snippet = ""
         redacted.secretPayloadRef = account
+        redacted.secretPayloadUnavailable = nil
         return redacted
     }
 
-    static func deleteStoredPayload(for item: ClipboardItem) {
+    static func deleteStoredPayload(
+        for item: ClipboardItem,
+        repository: SensitivePayloadRepository,
+        digests: SensitivePayloadDigest
+    ) {
         guard item.secretPayloadRef != nil || protectsPayload(item) else { return }
-        delete(account: item.secretPayloadRef ?? item.id.uuidString)
+        let account = item.secretPayloadRef ?? item.id.uuidString
+        repository.delete(account: account)
+        digests.forget(account: account)
     }
 
-    static func save(_ payload: Payload, account: String) throws {
+    private static func storeIfChanged(
+        _ payload: SensitivePayload,
+        account: String,
+        repository: SensitivePayloadRepository,
+        digests: SensitivePayloadDigest
+    ) throws {
+        guard !digests.matches(payload, account: account) else { return }
+        try repository.save(payload, account: account)
+        digests.remember(payload, account: account)
+    }
+
+    private static func markUnreadable(_ item: inout ClipboardItem, account: String, reason: String) {
+        item.fullText = ""
+        item.snippet = ""
+        item.secretPayloadUnavailable = true
+        log.error("Unable to read sensitive payload \(account, privacy: .public): \(reason, privacy: .public)")
+    }
+}
+
+final class SensitivePayloadKeychain: SensitivePayloadRepository {
+    struct KeychainError: Error {
+        var status: OSStatus
+    }
+
+    static let service = "app.clipflow.sensitive-payload"
+
+    func save(_ payload: SensitivePayload, account: String) throws {
         let data = try JSONEncoder().encode(payload)
-        try perform { keychain in
-            let query = try scopedQuery(account: account, keychain: keychain)
-            let updateStatus = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-            if updateStatus == errSecSuccess { return }
-            if updateStatus != errSecItemNotFound {
-                throw StoreError(status: updateStatus)
-            }
+        let query = Self.query(account: account)
+        let updateStatus = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if updateStatus == errSecSuccess { return }
+        if updateStatus != errSecItemNotFound {
+            throw KeychainError(status: updateStatus)
+        }
 
-            var insert = query
-            insert[kSecValueData as String] = data
-            let addStatus = SecItemAdd(insert as CFDictionary, nil)
-            guard addStatus == errSecSuccess else {
-                throw StoreError(status: addStatus)
-            }
+        var insert = query
+        insert[kSecValueData as String] = data
+        let addStatus = SecItemAdd(insert as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw KeychainError(status: addStatus)
         }
     }
 
-    static func load(account: String) -> Payload? {
-        try? perform { keychain in
-            var query = try scopedQuery(account: account, keychain: keychain)
-            query[kSecReturnData as String] = true
-            query[kSecMatchLimit as String] = kSecMatchLimitOne
-            var result: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
-            guard status == errSecSuccess, let data = result as? Data else { return nil }
-            return try JSONDecoder().decode(Payload.self, from: data)
+    func load(account: String) throws -> SensitivePayload? {
+        var query = Self.query(account: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw KeychainError(status: status)
         }
+        return try JSONDecoder().decode(SensitivePayload.self, from: data)
     }
 
-    static func delete(account: String) {
-        try? perform { keychain in
-            let query = try scopedQuery(account: account, keychain: keychain)
-            SecItemDelete(query as CFDictionary)
-        }
+    func delete(account: String) {
+        SecItemDelete(Self.query(account: account) as CFDictionary)
     }
 
-    private static func perform<T>(_ body: (SecKeychain?) throws -> T) throws -> T {
-        state.lock.lock()
-        defer { state.lock.unlock() }
-        return try body(keychainAssumingLocked())
-    }
-
-    private static func keychainAssumingLocked() -> SecKeychain? {
-        guard isRunningTests else { return nil }
-        if !state.didPrepareEphemeralKeychain {
-            state.didPrepareEphemeralKeychain = true
-            _ = KeychainFile.setUserInteractionAllowed(false)
-            state.ephemeralKeychain = makeEphemeralKeychain()
-        }
-        return state.ephemeralKeychain
-    }
-
-    private static var isRunningTests: Bool {
-        NSClassFromString("XCTestCase") != nil
-    }
-
-    private static func scopedQuery(account: String, keychain: SecKeychain?) throws -> [String: Any] {
-        var query: [String: Any] = [
+    private static func query(account: String) -> [String: Any] {
+        [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
+            kSecAttrService as String: Self.service,
             kSecAttrAccount as String: account
         ]
-
-        if isRunningTests {
-            guard let keychain else { throw StoreError(status: errSecNotAvailable) }
-            query[kSecUseKeychain as String] = keychain
-            query[kSecMatchSearchList as String] = [keychain]
-            return query
-        }
-
-        // The synchronizable attribute is left unset, so the item stays in the login keychain.
-        return query
-    }
-
-    private static func makeEphemeralKeychain() -> SecKeychain? {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ClipFlowSensitivePayload-\(ProcessInfo.processInfo.processIdentifier).keychain")
-        try? FileManager.default.removeItem(at: url)
-
-        let password = "clipflow-tests"
-        var keychain: SecKeychain?
-        let status = url.path.withCString { path in
-            password.withCString { passwordPointer in
-                KeychainFile.create(
-                    path,
-                    UInt32(password.lengthOfBytes(using: .utf8)),
-                    passwordPointer,
-                    false,
-                    nil,
-                    &keychain
-                )
-            }
-        }
-        guard status == errSecSuccess, let keychain else { return nil }
-
-        _ = password.withCString { passwordPointer in
-            KeychainFile.unlock(
-                keychain,
-                UInt32(password.lengthOfBytes(using: .utf8)),
-                passwordPointer,
-                true
-            )
-        }
-        return keychain
-    }
-
-    /// File-keychain calls used so tests can store secrets without the login keychain.
-    /// The Swift overlays are deprecated; these declarations bind the C symbols directly.
-    private final class KeychainFile {
-        @_silgen_name("SecKeychainSetUserInteractionAllowed")
-        static func setUserInteractionAllowed(_ state: Bool) -> OSStatus
-
-        @_silgen_name("SecKeychainCreate")
-        static func create(
-            _ pathName: UnsafePointer<CChar>?,
-            _ passwordLength: UInt32,
-            _ password: UnsafeRawPointer?,
-            _ promptUser: Bool,
-            _ initialAccess: SecAccess?,
-            _ keychain: UnsafeMutablePointer<SecKeychain?>?
-        ) -> OSStatus
-
-        @_silgen_name("SecKeychainUnlock")
-        static func unlock(
-            _ keychain: SecKeychain?,
-            _ passwordLength: UInt32,
-            _ password: UnsafeRawPointer?,
-            _ usePassword: Bool
-        ) -> OSStatus
-
-        private init() {}
     }
 }
 

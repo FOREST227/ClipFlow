@@ -154,6 +154,8 @@ struct ClipboardItem: Identifiable, Hashable, Codable, Sendable {
     var pinnedAt: Date? = nil
     /// Keychain account for text that must not appear in history.json.
     var secretPayloadRef: String?
+    /// Set when the Keychain entry could not be read. The secret text stays empty.
+    var secretPayloadUnavailable: Bool? = nil
 
     var captureTimestamp: Date {
         capturedAt ?? createdAt
@@ -933,6 +935,8 @@ final class ClipFlowStore: ObservableObject {
     private let imagePreviewCache = NSCache<NSString, NSImage>()
     private let historyURL: URL
     private let historyWriter: HistoryFileWriter
+    private let payloadRepository: SensitivePayloadRepository
+    private let payloadDigests = SensitivePayloadDigest()
     private let imagesDirectoryURL: URL
     private let cloudSyncCoordinator: ClipFlowCloudSyncCoordinator
     private var pendingPersistWorkItem: DispatchWorkItem?
@@ -948,8 +952,14 @@ final class ClipFlowStore: ObservableObject {
     private var isApplyingCloudSnapshot = false
     private var itemsRevision = 0
 
-    init(storageDirectory: URL? = nil, defaults: UserDefaults = .standard, syncDirectory: URL? = nil) {
+    init(
+        storageDirectory: URL? = nil,
+        defaults: UserDefaults = .standard,
+        syncDirectory: URL? = nil,
+        payloadRepository: SensitivePayloadRepository = SensitivePayloadKeychain()
+    ) {
         self.defaults = defaults
+        self.payloadRepository = payloadRepository
         appearanceMode = ClipFlowAppearance.load(from: defaults)
         quickPasteShortcut = ClipFlowShortcut.load(from: defaults)
         let appSupport = storageDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
@@ -1308,6 +1318,9 @@ final class ClipFlowStore: ObservableObject {
 
     func displaySnippet(for item: ClipboardItem) -> String {
         guard !item.isExpired() else { return "内容已过期" }
+        if item.secretPayloadUnavailable == true {
+            return SensitivePayloadStore.unreadableStatus
+        }
         if item.isImage && !isRevealed(item) {
             return "图片预览已隐藏"
         }
@@ -1316,6 +1329,9 @@ final class ClipFlowStore: ObservableObject {
 
     func displayFullText(for item: ClipboardItem) -> String {
         guard !item.isExpired() else { return "内容已过期" }
+        if item.secretPayloadUnavailable == true {
+            return SensitivePayloadStore.unreadableStatus
+        }
         if item.isImage && !isRevealed(item) {
             return "图片预览已隐藏"
         }
@@ -1496,7 +1512,7 @@ final class ClipFlowStore: ObservableObject {
             let keptIDs = Set(kept.map(\.id))
             let dropped = normalized.filter { !keptIDs.contains($0.id) }
             for item in dropped where item.secretPayloadRef != nil {
-                SensitivePayloadStore.deleteStoredPayload(for: item)
+                SensitivePayloadStore.deleteStoredPayload(for: item, repository: payloadRepository, digests: payloadDigests)
             }
 
             var needsRewrite = dropped.contains {
@@ -1507,7 +1523,9 @@ final class ClipFlowStore: ObservableObject {
             prepared.reserveCapacity(kept.count)
             for item in kept {
                 do {
-                    let materialized = try SensitivePayloadStore.materialize(item)
+                    let materialized = try SensitivePayloadStore.materialize(
+                        item, repository: payloadRepository, digests: payloadDigests
+                    )
                     prepared.append(materialized.item)
                     if materialized.rewrotePlaintext {
                         needsRewrite = true
@@ -1515,7 +1533,7 @@ final class ClipFlowStore: ObservableObject {
                 } catch {
                     prepared.append(item)
                     blockedRewrite = true
-                    lastCaptureStatus = "敏感内容未能写入钥匙串"
+                    lastCaptureStatus = SensitivePayloadStore.keychainWriteFailure
                 }
             }
 
@@ -1523,7 +1541,7 @@ final class ClipFlowStore: ObservableObject {
                 do {
                     try writePersistedHistory(prepared)
                 } catch {
-                    lastCaptureStatus = "敏感内容未能写入钥匙串"
+                    report(error)
                 }
             }
             return prepared
@@ -1541,7 +1559,7 @@ final class ClipFlowStore: ObservableObject {
         do {
             data = try persistedHistoryData(for: items)
         } catch {
-            lastCaptureStatus = "敏感内容未能写入钥匙串"
+            report(error)
             return
         }
 
@@ -1576,8 +1594,41 @@ final class ClipFlowStore: ObservableObject {
     }
 
     private func persistedHistoryData(for items: [ClipboardItem]) throws -> Data {
-        let redacted = try items.map { try SensitivePayloadStore.redactedForDisk($0) }
-        return try JSONEncoder().encode(redacted)
+        let redacted: [ClipboardItem]
+        do {
+            redacted = try items.map {
+                try SensitivePayloadStore.redactedForDisk($0, repository: payloadRepository, digests: payloadDigests)
+            }
+        } catch {
+            throw HistoryPersistError.keychain(error)
+        }
+        do {
+            return try JSONEncoder().encode(redacted)
+        } catch {
+            throw HistoryPersistError.encoding(error)
+        }
+    }
+
+    private func report(_ error: Error) {
+        if let failure = error as? HistoryPersistError {
+            lastCaptureStatus = failure.statusMessage
+        } else {
+            lastCaptureStatus = "保存历史记录失败"
+        }
+    }
+
+    private enum HistoryPersistError: Error {
+        case keychain(Error)
+        case encoding(Error)
+
+        var statusMessage: String {
+            switch self {
+            case .keychain:
+                SensitivePayloadStore.keychainWriteFailure
+            case .encoding:
+                SensitivePayloadStore.encodingFailure
+            }
+        }
     }
 
     private func writePersistedHistory(_ items: [ClipboardItem]) throws {
@@ -1597,7 +1648,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     private func removeStoredAssetIfNeeded(for item: ClipboardItem) {
-        SensitivePayloadStore.deleteStoredPayload(for: item)
+        SensitivePayloadStore.deleteStoredPayload(for: item, repository: payloadRepository, digests: payloadDigests)
         if let imageFilename = item.imageFilename {
             imagePreviewCache.removeObject(forKey: imageFilename as NSString)
         }

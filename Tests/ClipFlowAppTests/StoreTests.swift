@@ -4,7 +4,7 @@ import AppKit
 
 @MainActor
 final class StoreTests: XCTestCase {
-    private func fixture() throws -> (URL, UserDefaults) {
+    private func fixture() throws -> (URL, UserDefaults, MemorySensitivePayloadRepository) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let suite = "ClipFlowTests.\(UUID().uuidString)"
@@ -13,12 +13,12 @@ final class StoreTests: XCTestCase {
             defaults.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: directory)
         }
-        return (directory, defaults)
+        return (directory, defaults, MemorySensitivePayloadRepository())
     }
 
     func testStorePreservesWhitespaceAndDistinctCopies() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         store.ingestCopiedText("  hello\n", sourceApp: "Editor", sourceBundleID: nil)
         store.ingestCopiedText("hello", sourceApp: "Editor", sourceBundleID: nil)
         XCTAssertEqual(Set(store.items.map(\.fullText)), ["  hello\n", "hello"])
@@ -26,8 +26,8 @@ final class StoreTests: XCTestCase {
     }
 
     func testOverflowRetainsPinnedItem() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         store.ingestCopiedText("keep me", sourceApp: "Editor", sourceBundleID: nil)
         let pinnedID = try XCTUnwrap(store.items.first?.id)
         store.togglePin(pinnedID)
@@ -40,7 +40,7 @@ final class StoreTests: XCTestCase {
     }
 
     func testCorruptHistoryPreservesImagesAndOriginalFile() async throws {
-        let (directory, defaults) = try fixture()
+        let (directory, defaults, payloads) = try fixture()
         let images = directory.appendingPathComponent("images")
         try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
         let imageURL = images.appendingPathComponent("recoverable.png")
@@ -48,7 +48,7 @@ final class StoreTests: XCTestCase {
         let historyURL = directory.appendingPathComponent("history.json")
         let original = Data("{broken".utf8)
         try original.write(to: historyURL)
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         store.ingestCopiedText("new copy", sourceApp: "Editor", sourceBundleID: nil)
         try await Task.sleep(nanoseconds: 200000000)
         XCTAssertTrue(FileManager.default.fileExists(atPath: imageURL.path))
@@ -56,8 +56,8 @@ final class StoreTests: XCTestCase {
     }
 
     func testResumeDoesNotDiscardNextExternalCopy() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         let pasteboard = NSPasteboard.withUniqueName()
         defer { pasteboard.releaseGlobally() }
         let monitor = ClipboardMonitor(store: store, pasteboard: pasteboard)
@@ -74,8 +74,8 @@ final class StoreTests: XCTestCase {
     }
 
     func testExpirySettingSurvivesRestartAndKeepsSensitiveContentLocal() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         XCTAssertTrue(store.sensitiveAutoExpireEnabled)
         store.sensitiveAutoExpireEnabled = false
         store.ingestCopiedText("private note", sourceApp: "Passwords", sourceBundleID: "com.apple.Passwords")
@@ -87,7 +87,7 @@ final class StoreTests: XCTestCase {
         store.purgeExpired(at: Date().addingTimeInterval(600))
         XCTAssertEqual(store.items.count, 1)
         try await Task.sleep(nanoseconds: 200000000)
-        let reloaded = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let reloaded = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         XCTAssertFalse(reloaded.sensitiveAutoExpireEnabled)
         XCTAssertEqual(reloaded.items.count, 1)
         reloaded.sensitiveAutoExpireEnabled = true
@@ -96,8 +96,8 @@ final class StoreTests: XCTestCase {
     }
 
     func testExpiryRemovesPinnedItemsWithoutNewCopy() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         store.ingestCopiedText("private note", sourceApp: "Passwords", sourceBundleID: "com.apple.Passwords")
         let item = try XCTUnwrap(store.items.first)
         store.togglePin(item.id)
@@ -111,7 +111,7 @@ final class StoreTests: XCTestCase {
     }
 
     func testEnablingExpiryDeletesOldSensitiveHistory() async throws {
-        let (directory, defaults) = try fixture()
+        let (directory, defaults, payloads) = try fixture()
         defaults.set(false, forKey: "sensitiveAutoExpireEnabled")
         var item = ClipboardClassifier.makeItem(text: "private note", sourceApp: "Passwords",
             sourceBundleID: "com.apple.Passwords", autoProtectSecrets: true, existingItem: nil)
@@ -119,7 +119,7 @@ final class StoreTests: XCTestCase {
         item.capturedAt = nil // Old history has no separate capture timestamp.
         item.pinned = true
         try JSONEncoder().encode([item]).write(to: directory.appendingPathComponent("history.json"))
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         XCTAssertEqual(store.items.count, 1)
         store.sensitiveAutoExpireEnabled = true
         XCTAssertTrue(store.items.isEmpty)
@@ -127,8 +127,8 @@ final class StoreTests: XCTestCase {
     }
 
     func testRapidCopiesAreDebouncedBeforeSync() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, syncDirectory: directory)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, syncDirectory: directory, payloadRepository: payloads)
         store.iCloudSyncEnabled = true
         store.ingestCopiedText("first", sourceApp: "Editor", sourceBundleID: nil)
         store.ingestCopiedText("second", sourceApp: "Editor", sourceBundleID: nil)
@@ -141,8 +141,8 @@ final class StoreTests: XCTestCase {
     }
 
     func testDisabledSyncCancelsPendingWrite() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, syncDirectory: directory)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, syncDirectory: directory, payloadRepository: payloads)
         store.iCloudSyncEnabled = true
         store.ingestCopiedText("hello", sourceApp: "Editor", sourceBundleID: nil)
         store.setICloudSyncEnabled(false)
@@ -151,13 +151,13 @@ final class StoreTests: XCTestCase {
     }
 
     func testIdlePausedPollPurgesExpiredContent() async throws {
-        let (directory, defaults) = try fixture()
+        let (directory, defaults, payloads) = try fixture()
         var item = ClipboardClassifier.makeItem(text: "private note", sourceApp: "Passwords",
             sourceBundleID: "com.apple.Passwords", autoProtectSecrets: true, existingItem: nil)
         item.createdAt = Date().addingTimeInterval(-299)
         item.capturedAt = item.createdAt
         try JSONEncoder().encode([item]).write(to: directory.appendingPathComponent("history.json"))
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         XCTAssertEqual(store.items.count, 1)
         store.capturePaused = true
         let pasteboard = NSPasteboard.withUniqueName()
@@ -213,22 +213,22 @@ final class StoreTests: XCTestCase {
     }
 
     func testPinAndRestartDoNotExtendExpiry() async throws {
-        let (directory, defaults) = try fixture()
+        let (directory, defaults, payloads) = try fixture()
         var item = ClipboardClassifier.makeItem(text: "private note", sourceApp: "Passwords",
             sourceBundleID: "com.apple.Passwords", autoProtectSecrets: true, existingItem: nil)
         item.createdAt = Date().addingTimeInterval(-250)
         item.capturedAt = item.createdAt
         try JSONEncoder().encode([item]).write(to: directory.appendingPathComponent("history.json"))
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         store.togglePin(item.id)
         try await Task.sleep(nanoseconds: 200000000)
-        let reloaded = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let reloaded = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         XCTAssertEqual(try XCTUnwrap(reloaded.items.first?.expiresAt).timeIntervalSince(item.createdAt), 300, accuracy: 0.01)
     }
 
     func testImagePreviewIsDownsampledButOriginalIsPreserved() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
             pixelsWide: 1600, pixelsHigh: 1200, bitsPerSample: 8, samplesPerPixel: 4,
             hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))

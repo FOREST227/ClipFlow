@@ -296,7 +296,7 @@ enum ClipboardClassifier {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = normalized.lowercased()
         let codeLike = kind == .code || looksLikeCode(normalized)
-        let sensitiveSource = (sourceBundleID.map(sensitiveSourceBundleIDs.contains) ?? false)
+        let sensitiveSource = PasswordManagerApps.contains(sourceBundleID)
         let secretLike = looksLikeSecretPayload(normalized, lowered: lowered, codeLike: codeLike)
 
         if kind == .secret || (autoProtectSecrets && secretLike) || sensitiveSource {
@@ -455,15 +455,6 @@ enum ClipboardClassifier {
         )
     }
 
-    static let sensitiveSourceBundleIDs: Set<String> = [
-        "com.apple.keychainaccess",
-        "com.apple.Passwords",
-        "com.agilebits.onepassword7",
-        "com.1password.1password",
-        "com.lastpass.LastPass",
-        "com.bitwarden.desktop"
-    ]
-
     private static func looksLikeURL(_ text: String) -> Bool {
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
             return false
@@ -597,8 +588,7 @@ enum ClipboardClassifier {
     }
 
     private static func imagePrivacy(sourceBundleID: String?) -> PrivacyLevel {
-        let sensitiveSource = sourceBundleID.map(sensitiveSourceBundleIDs.contains) ?? false
-        return sensitiveSource ? .vault : .standard
+        PasswordManagerApps.contains(sourceBundleID) ? .vault : .standard
     }
 
     private static func makeImageTitle(for size: CGSize) -> String {
@@ -941,7 +931,7 @@ final class ClipFlowStore: ObservableObject {
         sensitiveAutoExpireEnabled = defaults.object(forKey: Keys.sensitiveAutoExpireEnabled) as? Bool ?? true
         launchAtLogin = Self.currentLaunchAtLoginState()
         iCloudSyncEnabled = defaults.object(forKey: Keys.iCloudSyncEnabled) as? Bool ?? false
-        excludedBundleIDs = defaults.stringArray(forKey: Keys.excludedBundleIDs) ?? Self.defaultExcludedBundleIDs
+        excludedBundleIDs = defaults.stringArray(forKey: Keys.excludedBundleIDs) ?? PasswordManagerApps.bundleIDs
         iCloudLastSyncedAt = defaults.object(forKey: Keys.iCloudLastSyncedAt) as? Date
         localSyncTombstones = Self.decodeTombstones(from: defaults.data(forKey: Keys.iCloudSyncTombstones))
         items = loadItems()
@@ -1196,11 +1186,11 @@ final class ClipFlowStore: ObservableObject {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        excludedBundleIDs = cleaned.isEmpty ? Self.defaultExcludedBundleIDs : cleaned
+        excludedBundleIDs = cleaned.isEmpty ? PasswordManagerApps.bundleIDs : cleaned
     }
 
     func resetExcludedAppsToDefaults() {
-        excludedBundleIDs = Self.defaultExcludedBundleIDs
+        excludedBundleIDs = PasswordManagerApps.bundleIDs
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -1789,14 +1779,6 @@ final class ClipFlowStore: ObservableObject {
         static let iCloudSyncTombstones = "iCloudSyncTombstones"
         static let excludedBundleIDs = "excludedBundleIDs"
     }
-
-    private static let defaultExcludedBundleIDs: [String] = [
-        "com.apple.keychainaccess",
-        "com.apple.Passwords",
-        "com.agilebits.onepassword7",
-        "com.1password.1password",
-        "com.bitwarden.desktop"
-    ]
 
     private static func currentLaunchAtLoginState() -> Bool {
         guard #available(macOS 13, *) else { return false }

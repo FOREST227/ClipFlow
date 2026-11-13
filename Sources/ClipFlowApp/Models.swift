@@ -171,10 +171,13 @@ struct ClipboardItem: Identifiable, Hashable, Codable, Sendable {
     func applyingExpirationPolicy(enabled: Bool) -> ClipboardItem {
         var item = self
         let sensitive = isSensitive
-        item.capturedAt = capturedAt ?? createdAt
+        // Expiry can fall back to createdAt, but that value must not be stored as
+        // capturedAt. Pinning used to rewrite createdAt, and copying it here made
+        // a legacy pin look like a capture newer than a deletion.
+        let captured = capturedAt ?? createdAt
         item.localOnly = localOnly || sensitive
         item.autoExpire = sensitive && enabled
-        item.expiresAt = item.autoExpire ? item.capturedAt?.addingTimeInterval(300) : nil
+        item.expiresAt = item.autoExpire ? captured.addingTimeInterval(300) : nil
         return item
     }
 

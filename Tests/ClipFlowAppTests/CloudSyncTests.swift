@@ -80,6 +80,25 @@ final class CloudSyncTests: XCTestCase {
         XCTAssertEqual(stored.items.first?.createdAt.timeIntervalSince(fresh.createdAt) ?? -1, 0, accuracy: 0.001)
     }
 
+    func testLegacyPinWithoutCaptureTimeDoesNotResurrect() throws {
+        let (coordinator, _) = try temporaryCoordinator()
+        var legacy = sampleItem("legacy pin", at: Date().addingTimeInterval(-3_600))
+        legacy.capturedAt = nil
+        legacy.pinned = true
+        legacy.createdAt = Date()
+        let applied = legacy.applyingExpirationPolicy(enabled: false)
+        XCTAssertNil(applied.capturedAt)
+        let tombstone = Date().addingTimeInterval(-60)
+        let result = try coordinator.synchronize(
+            localItems: [legacy],
+            tombstones: [legacy.id: tombstone],
+            maxItems: 80
+        )
+        XCTAssertTrue(result.cloudItems.isEmpty)
+        XCTAssertTrue(result.localItems.isEmpty)
+        XCTAssertNotNil(result.tombstones[legacy.id])
+    }
+
     func testDivergentHistoriesMergeDeterministically() throws {
         let origin = Date().addingTimeInterval(-1_000)
         let alphaID = UUID()

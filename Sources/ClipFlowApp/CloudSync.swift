@@ -250,7 +250,9 @@ final class ClipFlowHistoryMerge {
 
     private static func shouldKeep(_ item: ClipboardItem, tombstones: [UUID: Date]) -> Bool {
         guard let tombstone = tombstones[item.id] else { return true }
-        return item.captureTimestamp > tombstone
+        // No capture time means createdAt may be a legacy pin bump. A deletion wins.
+        guard let capturedAt = item.capturedAt else { return false }
+        return capturedAt > tombstone
     }
 
     private static func mergeTombstones(_ lhs: [UUID: Date], _ rhs: [UUID: Date]) -> [UUID: Date] {

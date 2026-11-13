@@ -6,7 +6,7 @@ import XCTest
 
 @MainActor
 final class CapturePriorityTests: XCTestCase {
-    private func fixture() throws -> (URL, UserDefaults) {
+    private func fixture() throws -> (URL, UserDefaults, MemorySensitivePayloadRepository) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let suite = "ClipFlowTests.\(UUID().uuidString)"
@@ -15,7 +15,7 @@ final class CapturePriorityTests: XCTestCase {
             defaults.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: directory)
         }
-        return (directory, defaults)
+        return (directory, defaults, MemorySensitivePayloadRepository())
     }
 
     private func pasteboard() -> NSPasteboard {
@@ -203,8 +203,8 @@ final class CapturePriorityTests: XCTestCase {
     }
 
     func testMonitorStoresTextInsteadOfThePreviewImage() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         let pasteboard = pasteboard()
         let monitor = ClipboardMonitor(store: store, pasteboard: pasteboard)
         let png = try pngData(width: 10, height: 10)
@@ -222,8 +222,8 @@ final class CapturePriorityTests: XCTestCase {
     }
 
     func testMonitorPublishesScreenshotAfterBackgroundEncode() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         let pasteboard = pasteboard()
         let monitor = ClipboardMonitor(store: store, pasteboard: pasteboard)
         let png = try pngData(width: 8, height: 6)
@@ -243,8 +243,8 @@ final class CapturePriorityTests: XCTestCase {
     }
 
     func testStaleImageIsDroppedWhenThePasteboardChanges() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         let pasteboard = pasteboard()
         let monitor = ClipboardMonitor(store: store, pasteboard: pasteboard)
         let gate = CaptureGate()
@@ -278,8 +278,8 @@ final class CapturePriorityTests: XCTestCase {
     }
 
     func testUnchangedPollDoesNotPurgeUntilTheInterval() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         store.ingestCopiedText("private note", sourceApp: "Passwords", sourceBundleID: "com.apple.Passwords")
         let item = try XCTUnwrap(store.items.first)
         let capturedAt = try XCTUnwrap(item.capturedAt)
@@ -304,8 +304,8 @@ final class CapturePriorityTests: XCTestCase {
     }
 
     func testPasteboardChangePurgesWithoutWaitingForTheInterval() async throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, payloads) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         store.ingestCopiedText("private note", sourceApp: "Passwords", sourceBundleID: "com.apple.Passwords")
         let capturedAt = try XCTUnwrap(store.items.first?.capturedAt)
 

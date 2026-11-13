@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class SensitiveCaptureTests: XCTestCase {
-    private func fixture() throws -> (URL, UserDefaults) {
+    private func fixture() throws -> (URL, UserDefaults, MemorySensitivePayloadRepository) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let suite = "ClipFlowTests.\(UUID().uuidString)"
@@ -13,7 +13,7 @@ final class SensitiveCaptureTests: XCTestCase {
             defaults.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: directory)
         }
-        return (directory, defaults)
+        return (directory, defaults, MemorySensitivePayloadRepository())
     }
 
     private func declare(_ text: String, marker: NSPasteboard.PasteboardType?, on pasteboard: NSPasteboard) {
@@ -46,8 +46,8 @@ final class SensitiveCaptureTests: XCTestCase {
     }
 
     func testSensitiveMarkersSkipCaptureWithoutBlockingTheNextCopy() throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, _) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: MemorySensitivePayloadRepository())
         defer { store.flushPendingPersistenceForTests() }
         let pasteboard = NSPasteboard.withUniqueName()
         defer { pasteboard.releaseGlobally() }
@@ -70,8 +70,8 @@ final class SensitiveCaptureTests: XCTestCase {
     }
 
     func testConcealedMarkerConsumesChangeCount() throws {
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, _) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: MemorySensitivePayloadRepository())
         defer { store.flushPendingPersistenceForTests() }
         store.ingestCopiedText("private note", sourceApp: "Passwords", sourceBundleID: "com.apple.Passwords")
         let capturedAt = try XCTUnwrap(store.items.first?.capturedAt)
@@ -124,8 +124,8 @@ final class SensitiveCaptureTests: XCTestCase {
         XCTAssertEqual(PasswordManagerApps.bundleIDs, expected)
         XCTAssertEqual(Set(PasswordManagerApps.bundleIDs).count, PasswordManagerApps.bundleIDs.count)
 
-        let (directory, defaults) = try fixture()
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let (directory, defaults, _) = try fixture()
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: MemorySensitivePayloadRepository())
         defer { store.flushPendingPersistenceForTests() }
         XCTAssertEqual(store.excludedBundleIDs, PasswordManagerApps.bundleIDs)
 
@@ -175,9 +175,9 @@ final class SensitiveCaptureTests: XCTestCase {
     }
 
     func testSavedExclusionListStillSkipsPasswordManagers() throws {
-        let (directory, defaults) = try fixture()
+        let (directory, defaults, payloads) = try fixture()
         defaults.set(["com.apple.keychainaccess"], forKey: "excludedBundleIDs")
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         defer { store.flushPendingPersistenceForTests() }
 
         XCTAssertEqual(store.excludedBundleIDs, ["com.apple.keychainaccess"])

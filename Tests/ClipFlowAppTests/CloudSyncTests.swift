@@ -40,6 +40,37 @@ final class CloudSyncTests: XCTestCase {
         XCTAssertTrue(result.cloudItems.isEmpty)
     }
 
+    func testSensitiveItemAndPayloadReferenceNeverReachSyncedFile() throws {
+        let (coordinator, directory) = try temporaryCoordinator()
+        let visible = sampleItem("shopping list", at: Date().addingTimeInterval(-30))
+        let sensitive = ClipboardClassifier.makeItem(
+            text: "clip-secret-sync-9f3a",
+            sourceApp: "Passwords",
+            sourceBundleID: "com.apple.Passwords",
+            autoProtectSecrets: true,
+            existingItem: nil
+        ).applyingExpirationPolicy(enabled: false)
+        var referenced = sampleItem("visible label", at: Date().addingTimeInterval(-10))
+        referenced.secretPayloadRef = referenced.id.uuidString
+        referenced.fullText = "clip-secret-ref-18c4"
+        referenced.snippet = "clip-secret-ref-18c4"
+        XCTAssertTrue(sensitive.isSensitive)
+        XCTAssertFalse(referenced.isSensitive)
+
+        let result = try coordinator.synchronize(
+            localItems: [visible, sensitive, referenced],
+            tombstones: [:],
+            maxItems: 80
+        )
+        XCTAssertFalse(result.cloudItems.contains { $0.id == sensitive.id })
+        let historyURL = directory.appendingPathComponent("ClipFlow/history.json")
+        let raw = try String(contentsOf: historyURL, encoding: .utf8)
+        XCTAssertTrue(raw.contains("shopping list"))
+        XCTAssertFalse(raw.contains("clip-secret-sync-9f3a"), raw)
+        XCTAssertFalse(raw.contains("clip-secret-ref-18c4"), raw)
+        XCTAssertFalse(raw.contains(referenced.id.uuidString), raw)
+    }
+
     func testSyncPreservesRemoteImageThatArrivesBeforeItsHistory() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

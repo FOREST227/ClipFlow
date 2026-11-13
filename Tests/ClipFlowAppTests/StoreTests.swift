@@ -172,7 +172,7 @@ final class StoreTests: XCTestCase {
     }
 
     func testPinKeepsCaptureTimeAndPinnedOrder() async throws {
-        let (directory, defaults) = try fixture()
+        let (directory, defaults, payloads) = try fixture()
         let origin = Date().addingTimeInterval(-100)
         var first = ClipboardClassifier.makeItem(text: "first", sourceApp: "Editor", sourceBundleID: nil,
             autoProtectSecrets: true, existingItem: nil)
@@ -193,7 +193,7 @@ final class StoreTests: XCTestCase {
         third.createdAt = origin.addingTimeInterval(20)
         third.capturedAt = third.createdAt
         try JSONEncoder().encode([first, second, third]).write(to: directory.appendingPathComponent("history.json"))
-        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         store.togglePin(third.id)
         try await Task.sleep(nanoseconds: 20_000_000)
         store.togglePin(first.id)
@@ -203,7 +203,7 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(pinned.captureTimestamp.timeIntervalSince(first.capturedAt ?? first.createdAt), 0, accuracy: 0.001)
         XCTAssertGreaterThan(pinned.pinnedAt ?? .distantPast, try XCTUnwrap(store.item(withID: third.id)?.pinnedAt))
         try await Task.sleep(nanoseconds: 200_000_000)
-        let reloaded = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let reloaded = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         XCTAssertEqual(reloaded.quickPasteItems.map(\.fullText), ["first", "third", "second"])
         XCTAssertEqual(try XCTUnwrap(reloaded.item(withID: first.id)).createdAt.timeIntervalSince(first.createdAt), 0, accuracy: 0.001)
         reloaded.togglePin(first.id)

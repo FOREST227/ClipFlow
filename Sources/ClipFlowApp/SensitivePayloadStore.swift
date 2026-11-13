@@ -6,6 +6,10 @@ import Security
 struct SensitivePayload: Codable, Equatable, Sendable {
     var fullText: String
     var snippet: String
+    /// Rich representations that belong with the secret. Absent from older Keychain items.
+    var rtfData: Data? = nil
+    var htmlData: Data? = nil
+    var fileURLs: [String]? = nil
 }
 
 protocol SensitivePayloadRepository: AnyObject {
@@ -34,11 +38,20 @@ final class SensitivePayloadDigest {
         var data = Data(payload.fullText.utf8)
         data.append(0x1f)
         data.append(contentsOf: payload.snippet.utf8)
+        data.append(0x1e)
+        if let rtfData = payload.rtfData { data.append(rtfData) }
+        data.append(0x1e)
+        if let htmlData = payload.htmlData { data.append(htmlData) }
+        data.append(0x1e)
+        for url in payload.fileURLs ?? [] {
+            data.append(contentsOf: url.utf8)
+            data.append(0x1d)
+        }
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
 
-/// Keeps sensitive clipboard text out of `history.json` and the synced document.
+/// Keeps sensitive clipboard text, and any RTF, HTML, or file URLs captured with it, out of `history.json` and the synced document.
 final class SensitivePayloadStore {
     struct MaterializedItem {
         var item: ClipboardItem
@@ -78,7 +91,7 @@ final class SensitivePayloadStore {
 
         let account = item.secretPayloadRef ?? item.id.uuidString
         if !item.fullText.isEmpty || !item.snippet.isEmpty {
-            let payload = SensitivePayload(fullText: item.fullText, snippet: item.snippet)
+            let payload = payload(from: item)
             try storeIfChanged(payload, account: account, repository: repository, digests: digests)
             var memory = item
             memory.secretPayloadRef = account
@@ -90,8 +103,7 @@ final class SensitivePayloadStore {
         memory.secretPayloadRef = account
         do {
             if let payload = try repository.load(account: account) {
-                memory.fullText = payload.fullText
-                memory.snippet = payload.snippet
+                apply(payload, to: &memory)
                 memory.secretPayloadUnavailable = nil
                 digests.remember(payload, account: account)
             } else {
@@ -113,7 +125,7 @@ final class SensitivePayloadStore {
         let account = item.secretPayloadRef ?? item.id.uuidString
         // A failed read must not replace the Keychain item with empty text or the status string.
         if item.secretPayloadUnavailable != true {
-            let payload = SensitivePayload(fullText: item.fullText, snippet: item.snippet)
+            let payload = payload(from: item)
             if !payload.fullText.isEmpty || !payload.snippet.isEmpty {
                 try storeIfChanged(payload, account: account, repository: repository, digests: digests)
             }
@@ -122,6 +134,7 @@ final class SensitivePayloadStore {
         var redacted = item
         redacted.fullText = ""
         redacted.snippet = ""
+        clearRepresentations(&redacted)
         redacted.secretPayloadRef = account
         redacted.secretPayloadUnavailable = nil
         return redacted
@@ -149,9 +162,39 @@ final class SensitivePayloadStore {
         digests.remember(payload, account: account)
     }
 
+    private static func payload(from item: ClipboardItem) -> SensitivePayload {
+        SensitivePayload(
+            fullText: item.fullText,
+            snippet: item.snippet,
+            rtfData: nonempty(item.rtfData),
+            htmlData: nonempty(item.htmlData),
+            fileURLs: item.fileURLs.flatMap { $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    private static func apply(_ payload: SensitivePayload, to item: inout ClipboardItem) {
+        item.fullText = payload.fullText
+        item.snippet = payload.snippet
+        item.rtfData = payload.rtfData
+        item.htmlData = payload.htmlData
+        item.fileURLs = payload.fileURLs
+    }
+
+    private static func clearRepresentations(_ item: inout ClipboardItem) {
+        item.rtfData = nil
+        item.htmlData = nil
+        item.fileURLs = nil
+    }
+
+    private static func nonempty(_ data: Data?) -> Data? {
+        guard let data, !data.isEmpty else { return nil }
+        return data
+    }
+
     private static func markUnreadable(_ item: inout ClipboardItem, account: String, reason: String) {
         item.fullText = ""
         item.snippet = ""
+        clearRepresentations(&item)
         item.secretPayloadUnavailable = true
         log.error("Unable to read sensitive payload \(account, privacy: .public): \(reason, privacy: .public)")
     }

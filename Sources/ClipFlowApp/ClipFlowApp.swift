@@ -18,10 +18,17 @@ struct ClipFlowApp {
 
 @MainActor
 final class ClipFlowAppDelegate: NSObject, NSApplicationDelegate {
+    private let store: ClipFlowStore
     private var statusBarController: StatusBarController?
     private var appearanceSubscription: AnyCancellable?
     private let appearanceTransition = AppearanceTransition()
     private var mainWindowController: MainWindowController?
+
+    init(store: ClipFlowStore = .shared) {
+        self.store = store
+        super.init()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Native windows, popovers and every NSHostingView inherit this override.
         // nil removes it so future macOS appearance changes propagate normally.
@@ -47,6 +54,10 @@ final class ClipFlowAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldSaveApplicationState(_ app: NSApplication, coder: NSCoder) -> Bool { false }
     func applicationShouldRestoreApplicationState(_ app: NSApplication, coder: NSCoder) -> Bool { false }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        store.flushPendingPersistence()
+    }
 
     @objc private func openLibraryFromMenu(_ sender: Any?) {
         AppNavigationCenter.shared.openLibrary()

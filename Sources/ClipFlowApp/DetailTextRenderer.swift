@@ -1,4 +1,5 @@
 import AppKit
+import os
 import SwiftUI
 import WebKit
 
@@ -27,11 +28,38 @@ enum DetailTextFormat {
 }
 
 enum DetailTextDocument {
+    private static let logger = Logger(subsystem: "com.clipflow.app", category: "renderer")
+
     static func resource(_ name: String) -> String {
-        let installed = Bundle.main.resourceURL?.appendingPathComponent("Renderer").appendingPathComponent(name)
-        if let installed, let value = try? String(contentsOf: installed, encoding: .utf8) { return value }
-        let url = Bundle.module.resourceURL!.appendingPathComponent("Renderer").appendingPathComponent(name)
-        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        load(name: name, installedRoot: Bundle.main.resourceURL, moduleRoot: Bundle.module.resourceURL)
+    }
+
+    /// Reads a packaged renderer script. A missing bundle or file is logged and replaced
+    /// with an empty script so the preview still shows plain text instead of crashing.
+    static func load(
+        name: String,
+        installedRoot: URL?,
+        moduleRoot: URL?,
+        log: ((String) -> Void)? = nil
+    ) -> String {
+        if let installedRoot, let value = read(name, from: installedRoot) {
+            return value
+        }
+        if let moduleRoot, let value = read(name, from: moduleRoot) {
+            return value
+        }
+        let message = "Renderer resource \(name) is missing. Falling back to plain text."
+        if let log {
+            log(message)
+        } else {
+            logger.error("\(message, privacy: .public)")
+        }
+        return ""
+    }
+
+    private static func read(_ name: String, from root: URL) -> String? {
+        let url = root.appendingPathComponent("Renderer").appendingPathComponent(name)
+        return try? String(contentsOf: url, encoding: .utf8)
     }
     static let scripts: String = {
         let names = ["highlight.min.js", "markdown-it.min.js"] +

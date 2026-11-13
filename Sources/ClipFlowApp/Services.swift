@@ -290,10 +290,18 @@ final class ClipboardMonitor {
 @MainActor
 final class PasteService {
     private let store: ClipFlowStore
+    private let pasteboard: NSPasteboard
+    private let commitPaste: @MainActor (NSRunningApplication?) -> Void
     weak var monitor: ClipboardMonitor?
 
-    init(store: ClipFlowStore) {
+    init(
+        store: ClipFlowStore,
+        pasteboard: NSPasteboard = .general,
+        commitPaste: @escaping @MainActor (NSRunningApplication?) -> Void = PasteShortcutSender.commit
+    ) {
         self.store = store
+        self.pasteboard = pasteboard
+        self.commitPaste = commitPaste
     }
 
     func paste(_ item: ClipboardItem, preferredTarget: NSRunningApplication?) {
@@ -308,25 +316,20 @@ final class PasteService {
         }
         defer { monitor?.ignoreCurrentPasteboardUpdate() }
 
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         guard restore(item, to: pasteboard) else {
             store.lastCaptureStatus = item.isImage ? "图片资源不可用，请重新复制一次" : "恢复剪贴内容失败"
             return
         }
 
-        let targetApp = preferredTarget ?? NSWorkspace.shared.frontmostApplication
-        targetApp?.activate(options: [.activateAllWindows])
-
-        guard requestAccessibilityIfNeeded() else {
-            store.lastCaptureStatus = "已复制回剪贴板。请在系统设置中允许 ClipFlow 使用辅助功能后再试。"
+        // Ask only once the user actually pastes. Without trust, the clipboard copy stands.
+        guard store.isAccessibilityTrusted(prompt: true) else {
+            store.notePasteBlockedByAccessibility()
             return
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + ClipFlowMotion.pasteActivationDelay) {
-            self.sendPasteShortcut()
-        }
-
+        let targetApp = preferredTarget ?? NSWorkspace.shared.frontmostApplication
+        commitPaste(targetApp)
         store.lastCaptureStatus = "已粘贴到 \(targetApp?.localizedName ?? "前台应用")"
     }
 
@@ -343,7 +346,6 @@ final class PasteService {
         }
         defer { monitor?.ignoreCurrentPasteboardUpdate() }
 
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         guard restore(item, to: pasteboard) else {
             store.lastCaptureStatus = item.isImage ? "图片资源不可用，请重新复制一次" : "复制到剪贴板失败"
@@ -369,25 +371,6 @@ final class PasteService {
         }
 
         return pasteboard.setString(item.fullText, forType: .string)
-    }
-
-    private func requestAccessibilityIfNeeded() -> Bool {
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        return AXIsProcessTrustedWithOptions(options)
-    }
-
-    private func sendPasteShortcut() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        let keyCodeV: CGKeyCode = 9
-
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCodeV, keyDown: true)
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCodeV, keyDown: false)
-
-        keyDown?.flags = .maskCommand
-        keyUp?.flags = .maskCommand
-
-        keyDown?.post(tap: .cghidEventTap)
-        keyUp?.post(tap: .cghidEventTap)
     }
 }
 

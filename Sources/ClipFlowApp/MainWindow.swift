@@ -163,7 +163,8 @@ private struct MainWindowView: View {
                     StartupPermissionOverlay(report: report, palette: .resolve(for: colorScheme),
                         onDismiss: { store.dismissStartupPermissionReport() },
                         onRefresh: { store.rerunPermissionCheck() },
-                        onRequestAccessibility: { store.requestAccessibilityPermissionPrompt() })
+                        onRequestAccessibility: { store.requestAccessibilityPermissionPrompt() },
+                        onOpenAccessibilitySettings: { _ = AccessibilityTrust.openSystemSettings() })
                         .padding(.horizontal, 24)
                 }
             }

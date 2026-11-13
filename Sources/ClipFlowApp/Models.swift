@@ -1,6 +1,5 @@
 import ApplicationServices
 import Combine
-import CryptoKit
 import Foundation
 import ImageIO
 import ServiceManagement
@@ -1132,7 +1131,13 @@ final class ClipFlowStore: ObservableObject {
         lastCaptureStatus = "已从 \(sourceApp) 捕获新内容"
     }
 
-    func ingestCopiedImage(_ imageData: Data, size: CGSize, sourceApp: String, sourceBundleID: String?) {
+    func ingestCopiedImage(
+        _ imageData: Data,
+        size: CGSize,
+        sourceApp: String,
+        sourceBundleID: String?,
+        signature precomputedSignature: String? = nil
+    ) {
         guard !imageData.isEmpty else { return }
         guard imageData.count <= 25_000_000 else {
             lastCaptureStatus = "已跳过过大的图片"
@@ -1141,9 +1146,7 @@ final class ClipFlowStore: ObservableObject {
 
         purgeExpired()
 
-        let signature = SHA256.hash(data: imageData)
-            .map { String(format: "%02x", $0) }
-            .joined()
+        let signature = precomputedSignature ?? ClipboardImageEncoder.signature(for: imageData)
         let existingIndex = items.firstIndex { $0.imageSignature == signature }
         let existing = existingIndex.map { items.remove(at: $0) }
         let itemID = existing?.id ?? UUID()

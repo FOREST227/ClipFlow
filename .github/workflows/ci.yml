@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    defaults:
+      run:
+        shell: /bin/zsh {0}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build and test
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          SWIFT_VERSION="$(xcrun swift --version)"
+          echo "$SWIFT_VERSION"
+          SWIFT_MAJOR="$(echo "$SWIFT_VERSION" | sed -nE 's/.*Swift version ([0-9]+).*/\1/p' | head -n 1)"
+          if [[ -z "$SWIFT_MAJOR" ]] || (( SWIFT_MAJOR < 6 )); then
+            echo "ClipFlow requires Xcode with Swift 6 or newer." >&2
+            exit 1
+          fi
+          xcrun swift build
+          xcrun swift test

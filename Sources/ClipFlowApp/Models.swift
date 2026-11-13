@@ -1175,9 +1175,14 @@ final class ClipFlowStore: ObservableObject {
         lastCaptureStatus = "已从 \(sourceApp) 捕获图片"
     }
 
+    /// Saved exclusions plus every password-manager id, so an older saved list still skips those apps.
+    var effectiveExcludedBundleIDs: Set<String> {
+        Set(excludedBundleIDs).union(PasswordManagerApps.bundleIDs)
+    }
+
     func isExcluded(bundleID: String?) -> Bool {
         guard let bundleID else { return false }
-        return excludedBundleIDs.contains(bundleID)
+        return effectiveExcludedBundleIDs.contains(bundleID)
     }
 
     func updateExcludedApps(from rawValue: String) {
@@ -1349,7 +1354,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     var excludedAppCount: Int {
-        excludedBundleIDs.count
+        effectiveExcludedBundleIDs.count
     }
 
     var statusSummary: String {
@@ -1484,6 +1489,18 @@ final class ClipFlowStore: ObservableObject {
 
         pendingPersistWorkItem = workItem
         persistenceQueue.asyncAfter(deadline: .now() + 0.12, execute: workItem)
+    }
+
+    /// Writes the latest history snapshot now and drops the delayed copy.
+    /// Tests call this before deleting the storage directory.
+    func flushPendingPersistenceForTests() {
+        let workItem = pendingPersistWorkItem
+        pendingPersistWorkItem = nil
+        workItem?.cancel()
+        persistenceQueue.sync {}
+        guard historyLoadError == nil else { return }
+        guard let data = try? JSONEncoder().encode(items) else { return }
+        try? data.write(to: historyURL, options: [.atomic])
     }
 
     private func trimItemsToLimit() {

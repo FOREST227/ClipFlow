@@ -63,6 +63,7 @@ final class MainWindowNavigation: ObservableObject {
 final class MainWindowController: NSWindowController, NSWindowDelegate {
     let navigation: MainWindowNavigation
     private let store: ClipFlowStore
+    static let titlebarHeight = NSWindow.frameRect(forContentRect: .zero, styleMask: .titled).height
 
     init(store: ClipFlowStore, locale: Locale, initialPage: MainWindowPage = .history) {
         self.store = store
@@ -151,7 +152,10 @@ private struct MainWindowView: View {
             .allowsHitTesting(false)
         }
         .frame(minWidth: ClipFlowLayout.libraryWidth, idealWidth: ClipFlowLayout.libraryWidth,
-            maxWidth: ClipFlowLayout.libraryMaxWidth, minHeight: ClipFlowLayout.libraryMinHeight)
+            maxWidth: ClipFlowLayout.libraryMaxWidth,
+            // This frame is laid out below the transparent titlebar, whose inset the
+            // hosting view adds on top when it derives the window's minimum size.
+            minHeight: ClipFlowLayout.libraryMinHeight - MainWindowController.titlebarHeight)
         .overlay {
             if let report = store.startupPermissionReport {
                 ZStack {

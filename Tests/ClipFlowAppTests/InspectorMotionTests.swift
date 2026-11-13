@@ -12,7 +12,7 @@ final class InspectorTestContext {
     let store: ClipFlowStore
     init() throws {
         defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        store = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: MemorySensitivePayloadRepository())
     }
     func cleanup() {
         defaults.removePersistentDomain(forName: suite)

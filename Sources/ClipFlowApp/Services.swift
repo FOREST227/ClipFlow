@@ -302,6 +302,10 @@ final class PasteService {
             store.lastCaptureStatus = "内容已过期或已删除"
             return
         }
+        if item.secretPayloadUnavailable == true {
+            store.lastCaptureStatus = SensitivePayloadStore.unreadableStatus
+            return
+        }
         defer { monitor?.ignoreCurrentPasteboardUpdate() }
 
         let pasteboard = NSPasteboard.general
@@ -331,6 +335,10 @@ final class PasteService {
         store.purgeExpired()
         guard let item = store.item(withID: item.id) else {
             store.lastCaptureStatus = "内容已过期或已删除"
+            return false
+        }
+        if item.secretPayloadUnavailable == true {
+            store.lastCaptureStatus = SensitivePayloadStore.unreadableStatus
             return false
         }
         defer { monitor?.ignoreCurrentPasteboardUpdate() }

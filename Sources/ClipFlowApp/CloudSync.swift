@@ -344,13 +344,14 @@ final class ClipFlowCloudSyncFile {
         replacing remote: ClipFlowCloudSyncState,
         at url: URL
     ) throws {
-        guard remote.items != merged.items || remote.tombstones != merged.tombstones else {
+        let items = SensitivePayloadStore.itemsForSyncedDocument(merged.items)
+        guard remote.items != items || remote.tombstones != merged.tombstones else {
             return
         }
         let state = ClipFlowCloudSyncState(
             schemaVersion: remote.schemaVersion,
             updatedAt: Date(),
-            items: merged.items,
+            items: items,
             tombstones: merged.tombstones
         )
         let encoder = JSONEncoder()

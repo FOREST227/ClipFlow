@@ -152,6 +152,10 @@ struct ClipboardItem: Identifiable, Hashable, Codable, Sendable {
     var capturedAt: Date?
     // Last pin or unpin. Pinned items sort by this so pin order survives without moving `createdAt`.
     var pinnedAt: Date? = nil
+    /// Keychain account for text that must not appear in history.json.
+    var secretPayloadRef: String?
+    /// Set when the Keychain entry could not be read. The secret text stays empty.
+    var secretPayloadUnavailable: Bool? = nil
 
     var captureTimestamp: Date {
         capturedAt ?? createdAt
@@ -447,7 +451,8 @@ enum ClipboardClassifier {
             imageHeight: nil,
             imageSignature: nil,
             capturedAt: capturedAt,
-            pinnedAt: existingItem?.pinnedAt
+            pinnedAt: existingItem?.pinnedAt,
+            secretPayloadRef: nil
         )
     }
 
@@ -483,7 +488,8 @@ enum ClipboardClassifier {
             imageHeight: imageSize.height,
             imageSignature: imageSignature,
             capturedAt: capturedAt,
-            pinnedAt: existingItem?.pinnedAt
+            pinnedAt: existingItem?.pinnedAt,
+            secretPayloadRef: nil
         )
     }
 
@@ -928,6 +934,9 @@ final class ClipFlowStore: ObservableObject {
     private let persistenceQueue = DispatchQueue(label: "ClipFlow.persistence", qos: .utility)
     private let imagePreviewCache = NSCache<NSString, NSImage>()
     private let historyURL: URL
+    private let historyWriter: HistoryFileWriter
+    private let payloadRepository: SensitivePayloadRepository
+    private let payloadDigests = SensitivePayloadDigest()
     private let imagesDirectoryURL: URL
     private let cloudSyncCoordinator: ClipFlowCloudSyncCoordinator
     private var pendingPersistWorkItem: DispatchWorkItem?
@@ -943,8 +952,14 @@ final class ClipFlowStore: ObservableObject {
     private var isApplyingCloudSnapshot = false
     private var itemsRevision = 0
 
-    init(storageDirectory: URL? = nil, defaults: UserDefaults = .standard, syncDirectory: URL? = nil) {
+    init(
+        storageDirectory: URL? = nil,
+        defaults: UserDefaults = .standard,
+        syncDirectory: URL? = nil,
+        payloadRepository: SensitivePayloadRepository = SensitivePayloadKeychain()
+    ) {
         self.defaults = defaults
+        self.payloadRepository = payloadRepository
         appearanceMode = ClipFlowAppearance.load(from: defaults)
         quickPasteShortcut = ClipFlowShortcut.load(from: defaults)
         let appSupport = storageDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
@@ -952,6 +967,7 @@ final class ClipFlowStore: ObservableObject {
 
         try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
         historyURL = appSupport.appendingPathComponent("history.json")
+        historyWriter = HistoryFileWriter(url: historyURL)
         imagesDirectoryURL = appSupport.appendingPathComponent("images", isDirectory: true)
         try? FileManager.default.createDirectory(at: imagesDirectoryURL, withIntermediateDirectories: true)
         imagePreviewCache.countLimit = maxItems + 20
@@ -1302,6 +1318,9 @@ final class ClipFlowStore: ObservableObject {
 
     func displaySnippet(for item: ClipboardItem) -> String {
         guard !item.isExpired() else { return "内容已过期" }
+        if item.secretPayloadUnavailable == true {
+            return SensitivePayloadStore.unreadableStatus
+        }
         if item.isImage && !isRevealed(item) {
             return "图片预览已隐藏"
         }
@@ -1310,6 +1329,9 @@ final class ClipFlowStore: ObservableObject {
 
     func displayFullText(for item: ClipboardItem) -> String {
         guard !item.isExpired() else { return "内容已过期" }
+        if item.secretPayloadUnavailable == true {
+            return SensitivePayloadStore.unreadableStatus
+        }
         if item.isImage && !isRevealed(item) {
             return "图片预览已隐藏"
         }
@@ -1480,12 +1502,49 @@ final class ClipFlowStore: ObservableObject {
                 return []
             }
             let decoded = try JSONDecoder().decode([ClipboardItem].self, from: data)
-            return decoded.map { $0.applyingExpirationPolicy(enabled: sensitiveAutoExpireEnabled) }.filter {
-                if $0.isImage, let imageURL = imageURL(for: $0), !fileManager.fileExists(atPath: imageURL.path) {
+            let normalized = decoded.map { $0.applyingExpirationPolicy(enabled: sensitiveAutoExpireEnabled) }
+            let kept = normalized.filter { item in
+                if item.isImage, let imageURL = imageURL(for: item), !fileManager.fileExists(atPath: imageURL.path) {
                     return false
                 }
-                return !$0.isExpired()
+                return !item.isExpired()
             }
+            let keptIDs = Set(kept.map(\.id))
+            let dropped = normalized.filter { !keptIDs.contains($0.id) }
+            for item in dropped where item.secretPayloadRef != nil {
+                SensitivePayloadStore.deleteStoredPayload(for: item, repository: payloadRepository, digests: payloadDigests)
+            }
+
+            var needsRewrite = dropped.contains {
+                $0.secretPayloadRef != nil || SensitivePayloadStore.containsProtectedPlaintext($0)
+            }
+            var blockedRewrite = false
+            var prepared: [ClipboardItem] = []
+            prepared.reserveCapacity(kept.count)
+            for item in kept {
+                do {
+                    let materialized = try SensitivePayloadStore.materialize(
+                        item, repository: payloadRepository, digests: payloadDigests
+                    )
+                    prepared.append(materialized.item)
+                    if materialized.rewrotePlaintext {
+                        needsRewrite = true
+                    }
+                } catch {
+                    prepared.append(item)
+                    blockedRewrite = true
+                    lastCaptureStatus = SensitivePayloadStore.keychainWriteFailure
+                }
+            }
+
+            if needsRewrite && !blockedRewrite {
+                do {
+                    try writePersistedHistory(prepared)
+                } catch {
+                    report(error)
+                }
+            }
+            return prepared
         } catch {
             historyLoadError = "历史文件读取失败，已保留原文件和图片。新记录暂存于内存，请恢复历史文件后重启应用。"
             lastCaptureStatus = historyLoadError ?? "历史文件读取失败"
@@ -1495,44 +1554,85 @@ final class ClipFlowStore: ObservableObject {
 
     private func schedulePersistItems() {
         guard historyLoadError == nil else { return }
-        let destinationURL = historyURL
-
-        pendingPersistWorkItem?.cancel()
 
         let data: Data
         do {
-            data = try JSONEncoder().encode(items)
+            data = try persistedHistoryData(for: items)
         } catch {
-            lastCaptureStatus = "保存历史记录失败"
+            report(error)
             return
         }
 
-        let writer: @Sendable () -> Void = {
-            do {
-                try data.write(to: destinationURL, options: [.atomic])
-            } catch {
+        pendingPersistWorkItem?.cancel()
+        let generation = historyWriter.stage(data)
+        let writer = historyWriter
+        let writerBlock: @Sendable () -> Void = {
+            if writer.writeIfCurrent(generation) == .failed {
                 Task { @MainActor in
                     ClipFlowStore.shared.lastCaptureStatus = "保存历史记录失败"
                 }
             }
         }
-
-        let workItem = DispatchWorkItem(qos: .utility, flags: .assignCurrentContext, block: writer)
-
+        let workItem = DispatchWorkItem(qos: .utility, flags: .assignCurrentContext, block: writerBlock)
         pendingPersistWorkItem = workItem
         persistenceQueue.asyncAfter(deadline: .now() + 0.12, execute: workItem)
+    }
+
+    /// Writes any debounced history snapshot immediately. Safe when nothing is waiting.
+    func flushPendingPersistence() {
+        pendingPersistWorkItem?.cancel()
+        pendingPersistWorkItem = nil
+        if historyWriter.flush() == .failed {
+            lastCaptureStatus = "保存历史记录失败"
+        }
     }
 
     /// Writes the latest history snapshot now and drops the delayed copy.
     /// Tests call this before deleting the storage directory.
     func flushPendingPersistenceForTests() {
-        let workItem = pendingPersistWorkItem
-        pendingPersistWorkItem = nil
-        workItem?.cancel()
-        persistenceQueue.sync {}
-        guard historyLoadError == nil else { return }
-        guard let data = try? JSONEncoder().encode(items) else { return }
-        try? data.write(to: historyURL, options: [.atomic])
+        flushPendingPersistence()
+    }
+
+    private func persistedHistoryData(for items: [ClipboardItem]) throws -> Data {
+        let redacted: [ClipboardItem]
+        do {
+            redacted = try items.map {
+                try SensitivePayloadStore.redactedForDisk($0, repository: payloadRepository, digests: payloadDigests)
+            }
+        } catch {
+            throw HistoryPersistError.keychain(error)
+        }
+        do {
+            return try JSONEncoder().encode(redacted)
+        } catch {
+            throw HistoryPersistError.encoding(error)
+        }
+    }
+
+    private func report(_ error: Error) {
+        if let failure = error as? HistoryPersistError {
+            lastCaptureStatus = failure.statusMessage
+        } else {
+            lastCaptureStatus = "保存历史记录失败"
+        }
+    }
+
+    private enum HistoryPersistError: Error {
+        case keychain(Error)
+        case encoding(Error)
+
+        var statusMessage: String {
+            switch self {
+            case .keychain:
+                SensitivePayloadStore.keychainWriteFailure
+            case .encoding:
+                SensitivePayloadStore.encodingFailure
+            }
+        }
+    }
+
+    private func writePersistedHistory(_ items: [ClipboardItem]) throws {
+        try historyWriter.writeNow(try persistedHistoryData(for: items))
     }
 
     private func trimItemsToLimit() {
@@ -1548,6 +1648,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     private func removeStoredAssetIfNeeded(for item: ClipboardItem) {
+        SensitivePayloadStore.deleteStoredPayload(for: item, repository: payloadRepository, digests: payloadDigests)
         if let imageFilename = item.imageFilename {
             imagePreviewCache.removeObject(forKey: imageFilename as NSString)
         }

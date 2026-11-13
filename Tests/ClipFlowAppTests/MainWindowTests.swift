@@ -76,23 +76,70 @@ final class MainWindowTests: XCTestCase {
         main.setContentSize(NSSize(width: 620, height: 780))
         main.orderFront(nil)
         defer { main.close() }
-        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         func historyScroll() throws -> NSScrollView {
             try XCTUnwrap(scrolls(try XCTUnwrap(main.contentView)).first {
                 $0.contentView.bounds.height >= LibraryCardLayout.viewportHeight - 0.5
             })
         }
+        // CI runners can run the window's layout passes far later than a fixed
+        // short sleep, so wait for the viewport to settle instead of sleeping.
+        func viewportHeight() -> CGFloat {
+            guard let contentView = main.contentView else { return 0 }
+            return scrolls(contentView).first {
+                $0.contentView.bounds.height >= LibraryCardLayout.viewportHeight - 0.5
+            }?.contentView.bounds.height ?? 0
+        }
+        func waitFor(_ timeout: TimeInterval = 5, _ condition: () -> Bool) {
+            let deadline = Date().addingTimeInterval(timeout)
+            while !condition(), Date() < deadline {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            }
+        }
+        func settledViewportHeight(timeout: TimeInterval = 5) -> CGFloat {
+            let deadline = Date().addingTimeInterval(timeout)
+            var previous = -CGFloat.greatestFiniteMagnitude
+            var stableReads = 0
+            while Date() < deadline {
+                let height = viewportHeight()
+                // A missing scroll view reports 0 and must not count as settled.
+                if height > 0, height == previous {
+                    stableReads += 1
+                    if stableReads >= 3 { return height }
+                } else {
+                    stableReads = 0
+                }
+                previous = height
+                RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+            }
+            return viewportHeight()
+        }
+        func describeWindow(_ label: String) {
+            print("WINDOW_DEBUG \(label) contentHeight=\(main.contentView?.bounds.height ?? -1) frame=\(main.frame) titlebarHeight=\(MainWindowController.titlebarHeight)")
+            if let contentView = main.contentView {
+                for scroll in scrolls(contentView) {
+                    print("WINDOW_DEBUG \(label) scroll clipHeight=\(scroll.contentView.bounds.height) bounds=\(scroll.bounds)")
+                }
+            }
+        }
+        _ = settledViewportHeight()
+        describeWindow("initial")
         XCTAssertEqual(LibraryCardLayout.viewportHeight, 472)
-        let defaultHeight = try historyScroll().contentView.bounds.height
+        let defaultHeight = viewportHeight()
         var historyRect = try historyScroll().convert(try historyScroll().bounds, to: main.contentView)
         XCTAssertTrue(try XCTUnwrap(main.contentView).bounds.contains(historyRect))
         main.setContentSize(NSSize(width: 620, height: ClipFlowLayout.libraryMinHeight))
-        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-        XCTAssertGreaterThanOrEqual(try historyScroll().contentView.bounds.height,
+        waitFor {
+            let height = viewportHeight()
+            return height > 0 && abs(height - defaultHeight) > 0.5
+        }
+        describeWindow("resized")
+        let shrunkHeight = settledViewportHeight()
+        describeWindow("settled")
+        XCTAssertGreaterThanOrEqual(shrunkHeight,
             LibraryCardLayout.viewportHeight - 0.5, "Six rows must fit at the minimum window height")
         historyRect = try historyScroll().convert(try historyScroll().bounds, to: main.contentView)
         XCTAssertTrue(try XCTUnwrap(main.contentView).bounds.contains(historyRect))
-        XCTAssertEqual(try historyScroll().contentView.bounds.height,
+        XCTAssertEqual(shrunkHeight,
             defaultHeight - (780 - ClipFlowLayout.libraryMinHeight), accuracy: 1,
             "Window height changes belong to the list, not to blank space")
 

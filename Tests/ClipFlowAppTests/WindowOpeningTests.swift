@@ -50,7 +50,11 @@ final class WindowOpeningTests: XCTestCase {
         XCTAssertEqual(rows(root).count, 0, "Settings must not construct hidden history cards")
         let historyStart = Date()
         controller.show(page: .history)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        // Slow CI runners build the lazy history rows later than a fixed sleep.
+        let historyDeadline = Date().addingTimeInterval(5)
+        while rows(root).count == 0, Date() < historyDeadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
         print("History open: \(Date().timeIntervalSince(historyStart))s, hosts: \(rows(root).count)")
         XCTAssertGreaterThan(rows(root).count, 0)
         XCTAssertLessThan(rows(root).count, 30, "Opening must not construct all 80 hosted cards")

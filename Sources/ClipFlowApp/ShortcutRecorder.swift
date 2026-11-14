@@ -17,13 +17,19 @@ struct ShortcutRecorder: View {
                     .fill(store.isRecordingShortcut ? accent.opacity(0.10) : Color.primary.opacity(0.035))
             }
             .overlay {
-                Text(store.isRecordingShortcut ? "按下组合键…" : store.quickPasteShortcut.displayName)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(store.isRecordingShortcut ? accent : Color.primary)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .padding(.horizontal, 10)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+                Group {
+                    if store.isRecordingShortcut {
+                        Text("按下组合键…")
+                    } else {
+                        ShortcutGlyphLayout.text(for: store.quickPasteShortcut, pointSize: 14, weight: .medium)
+                    }
+                }
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(store.isRecordingShortcut ? accent : Color.primary)
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .padding(.horizontal, 10)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 10)

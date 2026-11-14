@@ -51,15 +51,41 @@ struct ContentView: View {
 
                 if permissionOverlayActive {
                     Color.black.opacity(0.18).ignoresSafeArea().zIndex(9)
+                } else if inspector.blocksBackground {
+                    InspectorScrim(motion: inspector.motion, opacity: 1) {
+                        inspector.dismiss(reduceMotion: reduceMotion)
+                    }
+                    .ignoresSafeArea().zIndex(9)
                 }
 
-                // Motion ticks update a nested hosting view. Keeping that graph out of
-                // this one stops a progress change from inserting history row views.
-                InspectorOverlayHost(store: store, inspector: inspector, palette: palette,
-                    viewport: proxy.size)
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .allowsHitTesting(inspector.blocksBackground)
+                if let inspectingItem {
+                    let cardWidth = min(620, proxy.size.width - 24)
+                    let tallImage = inspectingItem.isImage && LibraryImageShape.resolve(
+                        width: inspectingItem.imageWidth, height: inspectingItem.imageHeight) == .portrait
+                    LibraryInspectorOverlay(
+                        item: inspectingItem,
+                        store: store,
+                        palette: palette,
+                        maxHeight: tallImage ? max(200, proxy.size.height - 32)
+                            : min(max(proxy.size.height - 32, 420), 760),
+                        contentWidth: cardWidth,
+                        onPasteAction: {
+                            inspector.dismiss(reduceMotion: reduceMotion) {
+                                guard let current = store.item(withID: inspectingItem.id) else { return }
+                                ClipFlowRuntime.shared.paste(current)
+                            }
+                        },
+                        sourceRectInWindow: inspector.snapshot.sourceRectInWindow,
+                        motion: inspector.motion
+                    ) {
+                        inspector.dismiss(reduceMotion: reduceMotion)
+                    }
+                    .frame(width: cardWidth)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 16)
                     .zIndex(10)
+                }
 
                 if showsPermissionOverlay, let permissionReport = store.startupPermissionReport {
                     StartupPermissionOverlay(
@@ -114,6 +140,11 @@ struct ContentView: View {
         .onDisappear { inspector.reset() }
     }
 
+    private var inspectingItem: ClipboardItem? {
+        guard let id = inspector.snapshot.itemID else { return nil }
+        return store.item(withID: id)
+    }
+
     private var permissionOverlayActive: Bool {
         showsPermissionOverlay && store.startupPermissionReport != nil
     }
@@ -152,116 +183,3 @@ struct ContentView: View {
 
 }
 
-/// Hosts the inspector outside the history list's SwiftUI graph.
-/// Progress ticks update only this nested hosting view.
-private struct InspectorOverlayHost: NSViewRepresentable {
-    @ObservedObject var store: ClipFlowStore
-    @ObservedObject var inspector: InspectorPresentation
-    let palette: ClipFlowPalette
-    let viewport: CGSize
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
-
-    func makeNSView(context: Context) -> InspectorOverlayHostView {
-        let view = InspectorOverlayHostView()
-        updateNSView(view, context: context)
-        return view
-    }
-
-    func updateNSView(_ view: InspectorOverlayHostView, context: Context) {
-        let token = InspectorOverlayToken(itemID: inspector.snapshot.itemID,
-            blocking: inspector.blocksBackground,
-            width: Int(viewport.width.rounded()), height: Int(viewport.height.rounded()),
-            reduceMotion: reduceMotion, dark: colorScheme == .dark)
-        view.render(token: token) {
-            InspectorOverlayLayer(store: store, inspector: inspector, palette: palette,
-                viewport: viewport, reduceMotion: reduceMotion)
-        }
-    }
-}
-
-private struct InspectorOverlayToken: Equatable {
-    var itemID: UUID?
-    var blocking: Bool
-    var width: Int
-    var height: Int
-    var reduceMotion: Bool
-    var dark: Bool
-}
-
-private struct InspectorOverlayLayer: View {
-    @ObservedObject var store: ClipFlowStore
-    @ObservedObject var inspector: InspectorPresentation
-    let palette: ClipFlowPalette
-    let viewport: CGSize
-    let reduceMotion: Bool
-
-    private var inspectingItem: ClipboardItem? {
-        guard let id = inspector.snapshot.itemID else { return nil }
-        return store.item(withID: id)
-    }
-
-    var body: some View {
-        ZStack {
-            if inspector.blocksBackground {
-                InspectorScrim(motion: inspector.motion, opacity: 1) {
-                    inspector.dismiss(reduceMotion: reduceMotion)
-                }
-                .ignoresSafeArea()
-            }
-            if let inspectingItem {
-                let cardWidth = min(620, viewport.width - 24)
-                let tallImage = inspectingItem.isImage && LibraryImageShape.resolve(
-                    width: inspectingItem.imageWidth, height: inspectingItem.imageHeight) == .portrait
-                LibraryInspectorOverlay(
-                    item: inspectingItem,
-                    store: store,
-                    palette: palette,
-                    maxHeight: tallImage ? max(200, viewport.height - 32)
-                        : min(max(viewport.height - 32, 420), 760),
-                    contentWidth: cardWidth,
-                    onPasteAction: {
-                        inspector.dismiss(reduceMotion: reduceMotion) {
-                            guard let current = store.item(withID: inspectingItem.id) else { return }
-                            ClipFlowRuntime.shared.paste(current)
-                        }
-                    },
-                    sourceRectInWindow: inspector.snapshot.sourceRectInWindow,
-                    motion: inspector.motion
-                ) {
-                    inspector.dismiss(reduceMotion: reduceMotion)
-                }
-                .frame(width: cardWidth)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 16)
-            }
-        }
-        .frame(width: viewport.width, height: viewport.height)
-    }
-}
-
-private final class InspectorOverlayHostView: NSView {
-    private let host = NSHostingView(rootView: AnyView(EmptyView()))
-    private var rendered: InspectorOverlayToken?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        host.autoresizingMask = [.width, .height]
-        host.frame = bounds
-        addSubview(host)
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func layout() {
-        super.layout()
-        host.frame = bounds
-    }
-
-    func render<Content: View>(token: InspectorOverlayToken, @ViewBuilder content: () -> Content) {
-        guard token != rendered else { return }
-        rendered = token
-        host.rootView = AnyView(content())
-    }
-}

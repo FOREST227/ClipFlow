@@ -157,7 +157,7 @@ struct ClipboardCard: View {
                 Text(summaryLine)
                     .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 18, maxHeight: 18, alignment: .leading)
                 tags
             }
         }

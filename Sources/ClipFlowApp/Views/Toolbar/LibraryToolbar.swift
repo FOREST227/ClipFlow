@@ -52,36 +52,16 @@ struct CategoryFilterBar: View {
     }
 }
 
-/// Horizontal scroller with 12pt edge fades. Indicators stay off; this row is not the history list.
+/// Horizontal scroller with 12pt edge fades. The fade is an AppKit mask, so measuring
+/// overflow does not publish SwiftUI state or rebuild the history list.
 private struct CategoryFilterScroll<Content: View>: View {
     @ViewBuilder var content: Content
-    @StateObject private var metrics = FilterScrollMetrics()
 
     var body: some View {
-        GeometryReader { viewport in
-            let fade = ScrollEdgeFade.horizontal(offset: metrics.offset,
-                contentWidth: metrics.contentWidth, viewportWidth: viewport.size.width,
-                depth: ClipFlowLayout.space12)
-            ScrollView(.horizontal, showsIndicators: false) {
-                content
-                    .fixedSize(horizontal: true, vertical: false)
-                    .background(FilterScrollProbe(metrics: metrics))
-            }
-            .mask {
-                if viewport.size.width <= 0 {
-                    Rectangle()
-                } else {
-                    HStack(spacing: 0) {
-                        LinearGradient(colors: [.black.opacity(1 - fade.leading), .black],
-                            startPoint: .leading, endPoint: .trailing)
-                            .frame(width: ClipFlowLayout.space12)
-                        Rectangle()
-                        LinearGradient(colors: [.black, .black.opacity(1 - fade.trailing)],
-                            startPoint: .leading, endPoint: .trailing)
-                            .frame(width: ClipFlowLayout.space12)
-                    }
-                }
-            }
+        ScrollView(.horizontal, showsIndicators: false) {
+            content
+                .fixedSize(horizontal: true, vertical: false)
+                .background(FilterScrollProbe())
         }
     }
 }
@@ -96,64 +76,63 @@ enum FilterEdgeFade: Equatable {
     }
 }
 
-private extension ScrollEdgeFade {
-    static func horizontal(offset: CGFloat, contentWidth: CGFloat, viewportWidth: CGFloat, depth: CGFloat) -> (leading: Double, trailing: Double) {
-        FilterEdgeFade.resolve(offset: offset, contentWidth: contentWidth, viewportWidth: viewportWidth, depth: depth)
-    }
-}
-
-@MainActor
-private final class FilterScrollMetrics: ObservableObject {
-    @Published var offset: CGFloat = 0
-    @Published var contentWidth: CGFloat = 0
-    weak var scrollView: NSScrollView?
-    func refresh() {
-        guard let scrollView, let document = scrollView.documentView else { return }
-        let nextOffset = scrollView.contentView.bounds.minX
-        let nextWidth = document.bounds.width
-        if nextOffset != offset { offset = nextOffset }
-        if nextWidth != contentWidth { contentWidth = nextWidth }
-    }
-}
-
 private struct FilterScrollProbe: NSViewRepresentable {
-    let metrics: FilterScrollMetrics
-    func makeNSView(context: Context) -> Probe { Probe(metrics: metrics) }
-    func updateNSView(_ view: Probe, context: Context) { view.schedule() }
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) { view.attachIfNeeded() }
     static func dismantleNSView(_ view: Probe, coordinator: ()) { view.disconnect() }
 
     final class Probe: NSView {
-        let metrics: FilterScrollMetrics
         private weak var observed: NSScrollView?
         private var observers: [NSObjectProtocol] = []
-        init(metrics: FilterScrollMetrics) { self.metrics = metrics; super.init(frame: .zero) }
-        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
-        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); schedule() }
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); attachIfNeeded() }
+        override func layout() { super.layout(); updateMask() }
         func disconnect() {
             observers.forEach { NotificationCenter.default.removeObserver($0) }
             observers.removeAll()
+            observed?.layer?.mask = nil
             observed = nil
-            metrics.scrollView = nil
         }
-        func schedule() {
-            DispatchQueue.main.async { [weak self] in
-                guard let self, let scroll = self.enclosingScrollView else { return }
-                if self.observed !== scroll {
-                    self.disconnect()
-                    self.observed = scroll
-                    self.metrics.scrollView = scroll
-                    scroll.contentView.postsBoundsChangedNotifications = true
-                    scroll.documentView?.postsFrameChangedNotifications = true
-                    for (name, object) in [(NSView.boundsDidChangeNotification, scroll.contentView),
-                                          (NSView.frameDidChangeNotification, scroll.documentView ?? scroll.contentView)] {
-                        self.observers.append(NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
-                            Task { @MainActor [weak self] in self?.metrics.refresh() }
-                        })
-                    }
-                }
-                self.metrics.refresh()
+        func attachIfNeeded() {
+            guard let scroll = enclosingScrollView else { return }
+            guard observed !== scroll else { updateMask(); return }
+            disconnect()
+            observed = scroll
+            scroll.contentView.postsBoundsChangedNotifications = true
+            scroll.documentView?.postsFrameChangedNotifications = true
+            for (name, object) in [(NSView.boundsDidChangeNotification, scroll.contentView),
+                                  (NSView.frameDidChangeNotification, scroll.documentView ?? scroll.contentView)] {
+                observers.append(NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.updateMask() }
+                })
             }
+            updateMask()
+        }
+        private func updateMask() {
+            guard let scroll = observed else { return }
+            let fade = FilterEdgeFade.resolve(
+                offset: max(0, scroll.contentView.bounds.minX),
+                contentWidth: scroll.documentView?.bounds.width ?? 0,
+                viewportWidth: scroll.contentView.bounds.width,
+                depth: ClipFlowLayout.space12)
+            scroll.wantsLayer = true
+            guard scroll.bounds.width > 1, fade.leading > 0.01 || fade.trailing > 0.01 else {
+                scroll.layer?.mask = nil
+                return
+            }
+            let mask = CAGradientLayer()
+            mask.frame = scroll.bounds
+            mask.startPoint = CGPoint(x: 0, y: 0.5)
+            mask.endPoint = CGPoint(x: 1, y: 0.5)
+            let edge = min(0.33, ClipFlowLayout.space12 / scroll.bounds.width)
+            mask.colors = [
+                NSColor.black.withAlphaComponent(1 - fade.leading).cgColor,
+                NSColor.black.cgColor,
+                NSColor.black.cgColor,
+                NSColor.black.withAlphaComponent(1 - fade.trailing).cgColor
+            ]
+            mask.locations = [0, NSNumber(value: edge), NSNumber(value: 1 - edge), 1]
+            scroll.layer?.mask = mask
         }
     }
 }

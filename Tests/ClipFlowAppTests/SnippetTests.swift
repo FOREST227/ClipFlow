@@ -56,7 +56,8 @@ final class SnippetStoreTests: XCTestCase {
         for index in 0..<90 {
             store.ingestCopiedText("note \(index)", sourceApp: "Editor", sourceBundleID: nil)
         }
-        XCTAssertEqual(store.items.count, store.maxItems)
+        XCTAssertEqual(store.items.filter { !$0.pinned }.count, store.maxItems)
+        XCTAssertNotNil(store.item(withID: pinnedID))
         XCTAssertEqual(store.snippets.map(\.id), [signature.id])
         XCTAssertEqual(store.snippet(withID: signature.id)?.body, "淇铖\nClipFlow")
 

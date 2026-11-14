@@ -61,8 +61,15 @@ extension ClipFlowStore {
 
     func rememberCloudDeletion(for removedItems: [ClipboardItem]) {
         let now = Date()
+        var updated = localSyncTombstones
+        var changed = false
         for item in removedItems where isEligibleForICloudSync(item) {
-            localSyncTombstones[item.id] = now
+            updated[item.id] = now
+            changed = true
+        }
+        // One write, even when a lower limit drops hundreds of rows.
+        if changed {
+            localSyncTombstones = updated
         }
     }
 
@@ -169,6 +176,10 @@ extension ClipFlowStore {
                 if !itemsChanged {
                     self.applyCloudItems(result.localItems)
                     self.localSyncTombstones = result.tombstones
+                    // Local-only rows are not in the merged snapshot. Apply the
+                    // same quota after tombstones are in place so a follow-up
+                    // sync cannot resurrect what this limit just removed.
+                    self.trimItemsToLimit()
                 }
                 var snippetsFailed = false
                 if !snippetsChanged, let snippetResult {

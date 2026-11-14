@@ -364,12 +364,10 @@ final class ClipFlowHistoryMerge {
             }
         }
 
-        var items = byID.values.sorted(by: ClipboardItemOrder.isBefore)
-        if items.count > maxItems {
-            let pinned = items.filter(\.pinned)
-            let rest = items.filter { !$0.pinned }
-            items = pinned + rest.prefix(max(0, maxItems - pinned.count))
-        }
+        let items = HistoryRetention.partition(
+            byID.values.sorted(by: ClipboardItemOrder.isBefore),
+            limit: maxItems
+        ).kept
         return ClipFlowMergedHistory(items: items, tombstones: tombstones)
     }
 

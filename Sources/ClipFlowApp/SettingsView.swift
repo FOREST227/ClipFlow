@@ -14,7 +14,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     }
     var subtitle: String {
         switch self {
-        case .general: "外观、快捷键与运行方式"
+        case .general: "外观、历史条数、快捷键与运行方式"
         case .privacy: "敏感内容保护与应用排除规则"
         case .sync: "在设备之间同步普通历史和常用片段"
         }
@@ -79,7 +79,7 @@ struct SettingsView: View {
                             ? ClipFlowPalette.pausedStatus(for: colorScheme)
                             : ClipFlowPalette.listeningStatus(for: colorScheme))
                     Spacer()
-                    Text(draft.section == .privacy ? "敏感内容即时生效，排除规则需保存" : "更改即时生效")
+                    Text(settingsFooter)
                         .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                 }
                 .font(.system(size: 10))
@@ -89,6 +89,21 @@ struct SettingsView: View {
         }
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onDisappear { store.endShortcutRecording() }
+        .onChangeBackward(of: historyLimitPromptKey) { draft.refreshHistoryLimitPrompt(in: store) }
+    }
+
+    private var settingsFooter: String {
+        if draft.section == .general, draft.pendingHistoryLimit != nil {
+            return "降低保留条数需确认后才会删除记录"
+        }
+        if draft.section == .privacy {
+            return "敏感内容即时生效，排除规则需保存"
+        }
+        return "更改即时生效"
+    }
+
+    private var historyLimitPromptKey: String {
+        "\(store.historyItemLimit)-\(store.items.count)-\(draft.pendingHistoryLimit ?? -1)"
     }
 
     private var generalSettings: some View {
@@ -121,6 +136,45 @@ struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 12).padding(.bottom, 10)
                         .accessibilityLabel("快捷键错误：\(error)")
+                }
+            }
+            SettingsListGroup(title: "历史") {
+                SettingsListRow(title: "历史保留条数", detail: "未置顶记录的保留上限。置顶内容不计入，也不会被清理。") {
+                    HistoryLimitControl(
+                        selection: draft.pendingHistoryLimit ?? store.historyItemLimit,
+                        onSelect: { draft.requestHistoryLimit($0, in: store) }
+                    )
+                }
+                if let pendingHistoryLimit = draft.pendingHistoryLimit {
+                    let removalCount = HistoryRetention.removalCount(in: store.items, limit: pendingHistoryLimit)
+                    Divider().padding(.horizontal, 12)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(HistoryRetention.confirmationMessage(removalCount: removalCount))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(ClipCategory.protected.labelColor(for: colorScheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("history-limit-warning")
+                        HStack(spacing: 16) {
+                            Spacer(minLength: 0)
+                            Button(HistoryRetention.cancelButtonTitle) {
+                                draft.cancelHistoryLimitChange()
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityIdentifier("history-limit-cancel")
+                            .accessibilityLabel("取消调整历史保留条数")
+                            Button(HistoryRetention.confirmButtonTitle, role: .destructive) {
+                                draft.confirmHistoryLimitChange(in: store)
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(ClipCategory.protected.labelColor(for: colorScheme))
+                            .accessibilityIdentifier("history-limit-confirm")
+                            .accessibilityLabel("确认删除超出的历史记录")
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                    .accessibilityElement(children: .contain)
                 }
             }
             SettingsListGroup(title: "启动与运行") {
@@ -257,6 +311,53 @@ private struct SettingsListRow<Control: View>: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .frame(minHeight: 42)
+    }
+}
+
+private struct HistoryLimitControl: View {
+    let selection: Int
+    let onSelect: (Int) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+    @Namespace private var highlight
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(HistoryRetention.choices, id: \.self) { limit in
+                Button {
+                    guard selection != limit else { return }
+                    onSelect(limit)
+                } label: {
+                    Text("\(limit)")
+                        .font(.system(size: 11, weight: selection == limit ? .semibold : .medium))
+                        .lineLimit(1)
+                        .foregroundStyle(selection == limit
+                            ? ClipCategory.all.labelColor(for: colorScheme)
+                            : ClipFlowPalette.secondaryText(for: colorScheme))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background {
+                            if selection == limit {
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(ClipCategory.all.tint.opacity(0.13))
+                                    .matchedGeometryEffect(id: "history-limit", in: highlight)
+                            }
+                        }
+                        .contentShape(RoundedRectangle(cornerRadius: 7))
+                }
+                .buttonStyle(.plain)
+                .help("保留 \(limit) 条")
+                .accessibilityLabel("\(limit) 条")
+                .accessibilityIdentifier("history-limit-\(limit)")
+                .accessibilityAddTraits(selection == limit ? [.isSelected] : [])
+            }
+        }
+        .padding(3)
+        .frame(width: 232, height: 32)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.09), lineWidth: 1))
+        .animation(reduceMotion ? nil : ClipFlowMotion.fade, value: selection)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("历史保留条数")
     }
 }
 

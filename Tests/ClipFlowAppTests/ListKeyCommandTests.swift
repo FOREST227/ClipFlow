@@ -21,6 +21,11 @@ final class ListKeyCommandTests: XCTestCase {
         XCTAssertNil(resolve(0))
         XCTAssertNil(resolve(125, .shift), "Modified arrows stay with the text field")
         XCTAssertNil(resolve(36, .command))
+        XCTAssertEqual(resolve(36, .shift), .pastePlain)
+        XCTAssertEqual(resolve(76, .shift), .pastePlain)
+        XCTAssertEqual(resolve(36, [.shift, .numericPad]), .pastePlain)
+        XCTAssertNil(resolve(36, [.shift, .command]))
+        XCTAssertNil(resolve(36, [.shift, .option]))
     }
 
     func testCommandDigitsPasteByPosition() {
@@ -44,6 +49,7 @@ final class ListKeyCommandTests: XCTestCase {
             XCTAssertNil(resolve(keyCode, editing: true, composing: true))
         }
         XCTAssertNil(resolve(18, .command, editing: true, composing: true))
+        XCTAssertNil(resolve(36, .shift, editing: true, composing: true))
     }
 
     func testSelectionMovesClampsAndRequestsReveal() {
@@ -119,6 +125,11 @@ final class ListKeyboardFlowTests: XCTestCase {
         XCTAssertFalse(keys.handle(try key(25, .command, in: fixture.window)), "There is no ninth row")
         XCTAssertEqual(fixture.probe.pasted.count, 2)
 
+        XCTAssertTrue(keys.handle(try key(36, .shift, in: fixture.window)))
+        XCTAssertEqual(fixture.probe.plainPastes.last, items[2].id, "⇧↩ pastes the selection as plain text")
+        XCTAssertEqual(fixture.probe.pasted.count, 2)
+        XCTAssertEqual(fixture.probe.closes, 3)
+
         XCTAssertTrue(keys.handle(try key(49, in: fixture.window)))
         fixture.pump()
         XCTAssertEqual(fixture.inspector.snapshot.itemID, items[2].id)
@@ -144,6 +155,8 @@ final class ListKeyboardFlowTests: XCTestCase {
         XCTAssertEqual(context.store.selectedItemID, items[0].id, "The first row does not wrap")
         XCTAssertTrue(keys.handle(try key(18, .command, in: fixture.window)), "⌘1 pastes the first visible history row")
         XCTAssertEqual(context.store.selectedItemID, items[0].id)
+        XCTAssertFalse(keys.handle(try key(36, .shift, in: fixture.window)), "⇧↩ stays with the quick-paste panel")
+        XCTAssertNil(fixture.inspector.snapshot.itemID)
 
         // The harness hosts the page the way the main window does: the report is drawn outside it.
         context.store.startupPermissionReport = ClipFlowPermissionReport(title: "权限", message: "", items: [])

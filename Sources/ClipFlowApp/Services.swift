@@ -3,9 +3,11 @@ import Combine
 import Carbon
 import SwiftUI
 
-private enum QuickPastePanelLayout {
+enum QuickPastePanelLayout {
     static let panelWidth: CGFloat = ClipFlowLayout.menuWidth
-    static let panelHeight: CGFloat = QuickPasteCardLayout.viewportHeight + 164
+    static let plainHintSpacing: CGFloat = 6
+    static let plainHintHeight: CGFloat = 18
+    static let panelHeight: CGFloat = QuickPasteCardLayout.viewportHeight + 164 + plainHintSpacing + plainHintHeight
     static let cornerRadius: CGFloat = ClipFlowLayout.overlayRadius
     static let anchorOffset: CGFloat = 18
     static let screenInset: CGFloat = 12
@@ -19,11 +21,12 @@ final class ClipFlowRuntime: NSObject {
 
     private let clipboardMonitor: ClipboardMonitor
     private let pasteService: PasteService
-    private lazy var hudController = QuickPastePanelController(store: store) { [weak self] item in
-        self?.paste(item)
-    } onOpenLibrary: { [weak self] in
-        self?.openLibrary()
-    }
+    private lazy var hudController = QuickPastePanelController(
+        store: store,
+        onPaste: { [weak self] item in self?.paste(item) },
+        onPastePlain: { [weak self] item in self?.pastePlainText(item) },
+        onOpenLibrary: { [weak self] in self?.openLibrary() }
+    )
     private lazy var hotKeyController = HotKeyController { [weak self] in
         guard self?.store.isRecordingShortcut == false else { return }
         self?.toggleHUD()
@@ -74,9 +77,19 @@ final class ClipFlowRuntime: NSObject {
         pasteService.paste(item, preferredTarget: lastExternalApp)
     }
 
+    func pastePlainText(_ item: ClipboardItem) {
+        hudController.hide()
+        pasteService.paste(item, preferredTarget: lastExternalApp, plainText: true)
+    }
+
     @discardableResult
     func copyToClipboard(_ item: ClipboardItem) -> Bool {
         pasteService.copyToClipboard(item)
+    }
+
+    @discardableResult
+    func copyPlainText(_ item: ClipboardItem) -> Bool {
+        pasteService.copyToClipboard(item, plainText: true)
     }
 
     func openLibrary() {
@@ -311,7 +324,7 @@ final class PasteService {
         self.commitPaste = commitPaste
     }
 
-    func paste(_ item: ClipboardItem, preferredTarget: NSRunningApplication?) {
+    func paste(_ item: ClipboardItem, preferredTarget: NSRunningApplication?, plainText: Bool = false) {
         store.purgeExpired()
         guard let item = store.item(withID: item.id) else {
             store.lastCaptureStatus = "内容已过期或已删除"
@@ -321,11 +334,17 @@ final class PasteService {
             store.lastCaptureStatus = SensitivePayloadStore.unreadableStatus
             return
         }
+        if plainText && !PlainTextPaste.canPasteAsPlainText(item) {
+            store.lastCaptureStatus = "这项内容不能粘贴为纯文本"
+            return
+        }
         defer { monitor?.ignoreCurrentPasteboardUpdate() }
 
         pasteboard.clearContents()
-        guard restore(item, to: pasteboard) else {
-            store.lastCaptureStatus = item.isImage ? "图片资源不可用，请重新复制一次" : "恢复剪贴内容失败"
+        guard restore(item, to: pasteboard, plainText: plainText) else {
+            store.lastCaptureStatus = plainText
+                ? "恢复纯文本失败"
+                : (item.isImage ? "图片资源不可用，请重新复制一次" : "恢复剪贴内容失败")
             return
         }
 
@@ -337,11 +356,12 @@ final class PasteService {
 
         let targetApp = preferredTarget ?? NSWorkspace.shared.frontmostApplication
         commitPaste(targetApp)
-        store.lastCaptureStatus = "已粘贴到 \(targetApp?.localizedName ?? "前台应用")"
+        let name = targetApp?.localizedName ?? "前台应用"
+        store.lastCaptureStatus = plainText ? "已粘贴纯文本到 \(name)" : "已粘贴到 \(name)"
     }
 
     @discardableResult
-    func copyToClipboard(_ item: ClipboardItem) -> Bool {
+    func copyToClipboard(_ item: ClipboardItem, plainText: Bool = false) -> Bool {
         store.purgeExpired()
         guard let item = store.item(withID: item.id) else {
             store.lastCaptureStatus = "内容已过期或已删除"
@@ -351,19 +371,31 @@ final class PasteService {
             store.lastCaptureStatus = SensitivePayloadStore.unreadableStatus
             return false
         }
+        if plainText && !PlainTextPaste.canPasteAsPlainText(item) {
+            store.lastCaptureStatus = "这项内容不能复制为纯文本"
+            return false
+        }
         defer { monitor?.ignoreCurrentPasteboardUpdate() }
 
         pasteboard.clearContents()
-        guard restore(item, to: pasteboard) else {
-            store.lastCaptureStatus = item.isImage ? "图片资源不可用，请重新复制一次" : "复制到剪贴板失败"
+        guard restore(item, to: pasteboard, plainText: plainText) else {
+            store.lastCaptureStatus = plainText
+                ? "复制纯文本失败"
+                : (item.isImage ? "图片资源不可用，请重新复制一次" : "复制到剪贴板失败")
             return false
         }
 
-        store.lastCaptureStatus = "已复制到剪贴板，可在目标输入框中手动粘贴"
+        store.lastCaptureStatus = plainText
+            ? "已复制纯文本到剪贴板，可在目标输入框中手动粘贴"
+            : "已复制到剪贴板，可在目标输入框中手动粘贴"
         return true
     }
 
-    func restore(_ item: ClipboardItem, to pasteboard: NSPasteboard) -> Bool {
+    func restore(_ item: ClipboardItem, to pasteboard: NSPasteboard, plainText: Bool = false) -> Bool {
+        if plainText {
+            guard PlainTextPaste.canPasteAsPlainText(item) else { return false }
+            return PlainTextPaste.write(item.fullText, to: pasteboard)
+        }
         if item.isImage {
             guard let imageData = store.imageData(for: item),
                   let image = NSImage(data: imageData) else {
@@ -390,13 +422,17 @@ final class PasteService {
 final class QuickPastePanelController: NSObject, NSWindowDelegate {
     private let store: ClipFlowStore
     private let onPaste: (ClipboardItem) -> Void
+    private let onPastePlain: (ClipboardItem) -> Void
     private let onOpenLibrary: () -> Void
     private var panel: QuickPastePanel?
     private var inspector: InspectorPresentation?
 
-    init(store: ClipFlowStore, onPaste: @escaping (ClipboardItem) -> Void, onOpenLibrary: @escaping () -> Void) {
+    init(store: ClipFlowStore, onPaste: @escaping (ClipboardItem) -> Void,
+         onPastePlain: @escaping (ClipboardItem) -> Void = { _ in },
+         onOpenLibrary: @escaping () -> Void) {
         self.store = store
         self.onPaste = onPaste
+        self.onPastePlain = onPastePlain
         self.onOpenLibrary = onOpenLibrary
     }
 
@@ -424,6 +460,7 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
                 store: store,
                 preferredTargetName: preferredTarget?.localizedName,
                 onPaste: onPaste,
+                onPastePlain: onPastePlain,
                 onOpenLibrary: onOpenLibrary,
                 onClose: { [weak self] in
                     self?.hide()
@@ -590,6 +627,7 @@ struct QuickPastePanelView: View {
     @ObservedObject var store: ClipFlowStore
     let preferredTargetName: String?
     let onPaste: (ClipboardItem) -> Void
+    let onPastePlain: (ClipboardItem) -> Void
     let onOpenLibrary: () -> Void
     let onClose: () -> Void
 
@@ -602,11 +640,13 @@ struct QuickPastePanelView: View {
     private var reduceMotion: Bool { motionPreferences.reduceMotion }
 
     init(store: ClipFlowStore, preferredTargetName: String?, onPaste: @escaping (ClipboardItem) -> Void,
+         onPastePlain: @escaping (ClipboardItem) -> Void = { _ in },
          onOpenLibrary: @escaping () -> Void, onClose: @escaping () -> Void,
          inspector: InspectorPresentation? = nil) {
         self.store = store
         self.preferredTargetName = preferredTargetName
         self.onPaste = onPaste
+        self.onPastePlain = onPastePlain
         self.onOpenLibrary = onOpenLibrary
         self.onClose = onClose
         _inspector = StateObject(wrappedValue: inspector ??
@@ -676,11 +716,8 @@ struct QuickPastePanelView: View {
                     QuickPasteNativeList(items: clips, store: store, selection: selection, proxy: listProxy,
                         isBlocked: { [weak inspector] in inspector?.blocksBackground != false },
                         onSelect: { item in selection.itemID = item.id },
-                        onPaste: { item in
-                            selection.itemID = item.id
-                            onClose()
-                            onPaste(item)
-                        },
+                        onPaste: { item in paste(item, plainText: false) },
+                        onPastePlain: { item in paste(item, plainText: true) },
                         onInspect: { item in
                             selection.itemID = item.id
                             if inspector.snapshot.itemID == item.id && inspector.snapshot.phase != .closing {
@@ -700,22 +737,26 @@ struct QuickPastePanelView: View {
                     .frame(height: QuickPasteCardLayout.viewportHeight)
                 }
 
-                HStack(spacing: 8) {
-                    QuickPasteKeyHint(keys: "↑↓", title: "选择")
-                    QuickPasteKeyHint(keys: "↩", title: "粘贴")
-                    QuickPasteKeyHint(keys: "⌘1–9", title: "直接粘贴")
-                    QuickPasteKeyHint(keys: "空格", title: "详情")
-                    Spacer(minLength: 0)
-                    Button {
-                        onClose()
-                        onOpenLibrary()
-                    } label: {
-                        Text("历史记录")
+                VStack(alignment: .leading, spacing: QuickPastePanelLayout.plainHintSpacing) {
+                    HStack(spacing: 8) {
+                        QuickPasteKeyHint(keys: "↑↓", title: "选择")
+                        QuickPasteKeyHint(keys: "↩", title: "粘贴")
+                        QuickPasteKeyHint(keys: "⌘1–9", title: "直接粘贴")
+                        QuickPasteKeyHint(keys: "空格", title: "详情")
+                        Spacer(minLength: 0)
+                        Button {
+                            onClose()
+                            onOpenLibrary()
+                        } label: {
+                            Text("历史记录")
+                        }
+                        .buttonStyle(MenuFooterActionStyle(fill: palette.secondaryButtonFill))
                     }
-                    .buttonStyle(MenuFooterActionStyle(fill: palette.secondaryButtonFill))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: ClipFlowLayout.controlHeight)
+                    QuickPasteKeyHint(shortcut: PlainTextPaste.quickPasteShortcut, title: PlainTextPaste.hintTitle)
+                        .frame(height: QuickPastePanelLayout.plainHintHeight, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: ClipFlowLayout.controlHeight)
             }
             .padding(ClipFlowLayout.pageInset)
             .allowsHitTesting(!inspector.blocksBackground)
@@ -740,6 +781,13 @@ struct QuickPastePanelView: View {
                             guard let current = store.item(withID: inspectingItem.id) else { return }
                             onClose()
                             onPaste(current)
+                        }
+                    },
+                    onPastePlain: {
+                        inspector.dismiss(reduceMotion: reduceMotion) {
+                            guard let current = store.item(withID: inspectingItem.id) else { return }
+                            onClose()
+                            onPastePlain(current)
                         }
                     }
                 )
@@ -796,10 +844,12 @@ struct QuickPastePanelView: View {
         case .moveUp, .moveDown:
             return selection.move(by: command == .moveUp ? -1 : 1, in: clips.map(\.id)) != nil
         case .activate:
-            paste(selected ?? clips[0])
+            paste(selected ?? clips[0], plainText: false)
+        case .pastePlain:
+            paste(selected ?? clips[0], plainText: true)
         case .pasteIndex(let index):
             guard clips.indices.contains(index) else { return false }
-            paste(clips[index])
+            paste(clips[index], plainText: false)
         case .toggleDetails:
             guard let selected else { return false }
             if listProxy.list?.openDetails(for: selected.id) != true {
@@ -809,21 +859,37 @@ struct QuickPastePanelView: View {
         return true
     }
 
-    private func paste(_ item: ClipboardItem) {
+    private func paste(_ item: ClipboardItem, plainText: Bool) {
         selection.itemID = item.id
         onClose()
-        onPaste(item)
+        if plainText, PlainTextPaste.canPasteAsPlainText(item) {
+            onPastePlain(item)
+        } else {
+            onPaste(item)
+        }
     }
 }
 
 struct QuickPasteKeyHint: View {
-    let keys: String
-    let title: String
+    private let title: String
+    private let keys: String?
+    private let shortcut: ClipFlowShortcut?
+
+    init(keys: String, title: String) {
+        self.keys = keys
+        self.title = title
+        self.shortcut = nil
+    }
+
+    init(shortcut: ClipFlowShortcut, title: String) {
+        self.keys = nil
+        self.title = title
+        self.shortcut = shortcut
+    }
 
     var body: some View {
         HStack(spacing: 3) {
-            Text(keys)
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
+            keyCap
                 .padding(.horizontal, 4).frame(minWidth: 16, minHeight: 16)
                 .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 4))
             Text(title).font(.system(size: 10))
@@ -831,7 +897,21 @@ struct QuickPasteKeyHint: View {
         .foregroundStyle(.secondary)
         .lineLimit(1).fixedSize()
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(keys) \(title)")
+        .accessibilityLabel("\(spokenKeys) \(title)")
+    }
+
+    @ViewBuilder
+    private var keyCap: some View {
+        if let shortcut {
+            ShortcutGlyphLayout.text(for: shortcut, pointSize: 9, weight: .semibold)
+        } else {
+            Text(keys ?? "")
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+        }
+    }
+
+    private var spokenKeys: String {
+        shortcut?.displayName ?? keys ?? ""
     }
 }
 
@@ -953,6 +1033,7 @@ struct HUDInteractiveRow: NSViewRepresentable {
     var onInspectFrom: ((InspectorSourceAnchor) -> Void)? = nil
     let onSelect: () -> Void
     let onPaste: () -> Void
+    var onPastePlain: () -> Void = {}
     let onInspect: () -> Void
 
     func makeNSView(context: Context) -> HUDInteractiveHostingView {
@@ -971,6 +1052,7 @@ struct HUDInteractiveRow: NSViewRepresentable {
                 tint: item.kind.tint)),
             onSelect: onSelect,
             onPaste: onPaste,
+            onPastePlain: onPastePlain,
             onInspect: InspectorSourceAnchor.callback(for: view, fallback: onInspect, anchored: onInspectFrom)
         )
         return view
@@ -991,6 +1073,7 @@ struct HUDInteractiveRow: NSViewRepresentable {
                 tint: item.kind.tint)),
             onSelect: onSelect,
             onPaste: onPaste,
+            onPastePlain: onPastePlain,
             onInspect: InspectorSourceAnchor.callback(for: nsView, fallback: onInspect, anchored: onInspectFrom)
         )
     }
@@ -1006,6 +1089,7 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
     private var itemID: UUID?
     private var onSelect: () -> Void = {}
     private var onPaste: () -> Void = {}
+    private var onPastePlain: () -> Void = {}
     private var onInspect: () -> Void = {}
 
     override init(frame frameRect: NSRect) {
@@ -1049,6 +1133,7 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
         selectionView: AnyView? = nil,
         onSelect: @escaping () -> Void,
         onPaste: @escaping () -> Void,
+        onPastePlain: @escaping () -> Void = {},
         onInspect: @escaping () -> Void,
         menuProvider: (() -> [ClipboardRowMenuEntry])? = nil
     ) {
@@ -1061,6 +1146,7 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
         if let selectionView { selectionHostingView.rootView = selectionView }
         self.onSelect = onSelect
         self.onPaste = onPaste
+        self.onPastePlain = onPastePlain
         self.onInspect = onInspect
         self.menuProvider = menuProvider ?? { [] }
     }
@@ -1089,7 +1175,11 @@ final class HUDInteractiveHostingView: ClipboardRowHitView {
         } == true
         if isDoubleClick {
             resetClickSequence()
-            onPaste()
+            if PlainTextPaste.isPlainTextClick(event.modifierFlags) {
+                onPastePlain()
+            } else {
+                onPaste()
+            }
         } else {
             Self.lastClickedRow = self
             previousClick = event
@@ -1146,6 +1236,7 @@ struct HUDInspectorOverlay: View {
     var motion: InspectorMotionProgress? = nil
     let onClose: () -> Void
     let onPaste: () -> Void
+    var onPastePlain: (() -> Void)? = nil
 
     var body: some View {
         GeometryReader { proxy in
@@ -1153,7 +1244,8 @@ struct HUDInspectorOverlay: View {
             ZStack {
                 LibraryInspectorOverlay(item: item, store: store,
                     palette: .resolve(for: colorScheme), maxHeight: max(280, proxy.size.height - 12),
-                    contentWidth: cardWidth, onPasteAction: onPaste, sourceRectInWindow: sourceRectInWindow, motion: motion, onClose: onClose)
+                    contentWidth: cardWidth, onPasteAction: onPaste, onPastePlainAction: onPastePlain,
+                    sourceRectInWindow: sourceRectInWindow, motion: motion, onClose: onClose)
                     .frame(width: cardWidth)
                     .padding(6)
             }

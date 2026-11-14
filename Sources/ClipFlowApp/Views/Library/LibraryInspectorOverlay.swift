@@ -9,6 +9,7 @@ struct LibraryInspectorOverlay: View {
     var contentWidth: CGFloat = 438
     var compactShadow = false
     var onPasteAction: (() -> Void)? = nil
+    var onPastePlainAction: (() -> Void)? = nil
     var sourceRectInWindow: CGRect? = nil
     var motion: InspectorMotionProgress? = nil
     @ViewState private var destinationRectInWindow: CGRect = .zero
@@ -30,7 +31,8 @@ struct LibraryInspectorOverlay: View {
     // private access because of the stored DynamicProperty preferences.
     init(item: ClipboardItem, store: ClipFlowStore, palette: ClipFlowPalette,
          maxHeight: CGFloat, contentWidth: CGFloat = 438, compactShadow: Bool = false,
-         onPasteAction: (() -> Void)? = nil, sourceRectInWindow: CGRect? = nil,
+         onPasteAction: (() -> Void)? = nil, onPastePlainAction: (() -> Void)? = nil,
+         sourceRectInWindow: CGRect? = nil,
          motion: InspectorMotionProgress? = nil, onClose: @escaping () -> Void) {
         self.item = item
         _store = ObservedObject(wrappedValue: store)
@@ -39,6 +41,7 @@ struct LibraryInspectorOverlay: View {
         self.contentWidth = contentWidth
         self.compactShadow = compactShadow
         self.onPasteAction = onPasteAction
+        self.onPastePlainAction = onPastePlainAction
         self.sourceRectInWindow = sourceRectInWindow
         self.motion = motion
         self.onClose = onClose
@@ -46,7 +49,8 @@ struct LibraryInspectorOverlay: View {
 
     private let drawerHeaderHeight: CGFloat = 84
     private var drawerFooterHeight: CGFloat {
-        measuredFooterHeight > 1 ? measuredFooterHeight : 96
+        if measuredFooterHeight > 1 { return measuredFooterHeight }
+        return PlainTextPaste.hasRichText(item) ? 136 : 96
     }
     private var drawerHeight: CGFloat {
         if item.isImage || item.kind == .code || markdownAvailable { return maxHeight }
@@ -253,37 +257,56 @@ struct LibraryInspectorOverlay: View {
     }
 
     private var drawerActions: some View {
-            HStack(spacing: 8) {
-                Button("复制") {
-                    let copied = ClipFlowRuntime.shared.copyToClipboard(item)
-                    copyFeedback = copied ? "已复制到剪贴板" : store.lastCaptureStatus
-                }
-                .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
-                Button("粘贴") {
-                    if let onPasteAction { onPasteAction() }
-                    else { ClipFlowRuntime.shared.paste(item); onClose() }
-                }
-                    .buttonStyle(ClipFlowActionButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
-                    .background(InspectorFrameReader(name: "ClipFlowInspector.paste"))
-                Button { store.togglePin(item.id) } label: {
-                    Image(systemName: item.pinned ? "pin.fill" : "pin").frame(width: 14)
-                }
-                .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
-                .help(item.pinned ? "取消置顶" : "置顶条目")
-                .accessibilityLabel(item.pinned ? "取消置顶" : "置顶条目")
-                if item.privacy != .standard {
-                    Button(store.isRevealed(item) ? "隐藏" : "显示") { store.toggleReveal(item.id) }
-                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
-                }
-                Spacer(minLength: 0)
-                Menu {
-                    if let url = item.primaryURL {
-                        Button("访问链接") { NSWorkspace.shared.open(url) }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Button("复制") {
+                        let copied = ClipFlowRuntime.shared.copyToClipboard(item)
+                        copyFeedback = copied ? "已复制到剪贴板" : store.lastCaptureStatus
                     }
-                    Button("删除条目", role: .destructive) { store.delete(item.id); onClose() }
-                } label: { Image(systemName: "ellipsis").frame(width: 24, height: 28) }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .accessibilityLabel("更多操作")
+                    .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
+                    Button("粘贴") {
+                        if let onPasteAction { onPasteAction() }
+                        else { ClipFlowRuntime.shared.paste(item); onClose() }
+                    }
+                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
+                        .background(InspectorFrameReader(name: "ClipFlowInspector.paste"))
+                    Button { store.togglePin(item.id) } label: {
+                        Image(systemName: item.pinned ? "pin.fill" : "pin").frame(width: 14)
+                    }
+                    .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
+                    .help(item.pinned ? "取消置顶" : "置顶条目")
+                    .accessibilityLabel(item.pinned ? "取消置顶" : "置顶条目")
+                    if item.privacy != .standard {
+                        Button(store.isRevealed(item) ? "隐藏" : "显示") { store.toggleReveal(item.id) }
+                            .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
+                    }
+                    Spacer(minLength: 0)
+                    Menu {
+                        if let url = item.primaryURL {
+                            Button("访问链接") { NSWorkspace.shared.open(url) }
+                        }
+                        Button("删除条目", role: .destructive) { store.delete(item.id); onClose() }
+                    } label: { Image(systemName: "ellipsis").frame(width: 24, height: 28) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .accessibilityLabel("更多操作")
+                }
+                if PlainTextPaste.hasRichText(item) {
+                    HStack(spacing: 8) {
+                        Button(PlainTextPaste.copyTitle) {
+                            let copied = ClipFlowRuntime.shared.copyPlainText(item)
+                            copyFeedback = copied ? "已复制纯文本到剪贴板" : store.lastCaptureStatus
+                        }
+                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
+                        .help("只复制原来的文字，不带格式")
+                        Button(PlainTextPaste.pasteTitle) {
+                            if let onPastePlainAction { onPastePlainAction() }
+                            else { ClipFlowRuntime.shared.pastePlainText(item); onClose() }
+                        }
+                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
+                        .help("只粘贴原来的文字，不带格式")
+                        Spacer(minLength: 0)
+                    }
+                }
             }
     }
 

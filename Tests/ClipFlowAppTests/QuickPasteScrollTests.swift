@@ -39,7 +39,7 @@ final class QuickPasteScrollTests: XCTestCase {
         let host = NSHostingController(rootView: QuickPastePanelView(store: store,
             preferredTargetName: nil, onPaste: { pasted.append($0.id) }, onOpenLibrary: {},
             onClose: { closes += 1 }))
-        let window = QuickPastePanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 588),
+        let window = QuickPastePanel(contentRect: NSRect(x: 0, y: 0, width: QuickPastePanelLayout.panelWidth, height: QuickPastePanelLayout.panelHeight),
             styleMask: .borderless, backing: .buffered, defer: false)
         window.contentViewController = host
         window.isReleasedWhenClosed = false

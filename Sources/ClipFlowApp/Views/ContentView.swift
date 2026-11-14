@@ -75,6 +75,12 @@ struct ContentView: View {
                                 ClipFlowRuntime.shared.paste(current)
                             }
                         },
+                        onPastePlainAction: {
+                            inspector.dismiss(reduceMotion: reduceMotion) {
+                                guard let current = store.item(withID: inspectingItem.id) else { return }
+                                ClipFlowRuntime.shared.pastePlainText(current)
+                            }
+                        },
                         sourceRectInWindow: inspector.snapshot.sourceRectInWindow,
                         motion: inspector.motion
                     ) {
@@ -164,6 +170,8 @@ struct ContentView: View {
             guard let item = items.first(where: { $0.id == store.selectedItemID }) else { return false }
             toggleLibraryInspector(for: item)
             return true
+        case .pastePlain:
+            return false
         case .pasteIndex(let index):
             guard let item = HistoryPasteRouting.item(at: index, in: items) else { return false }
             store.select(item)

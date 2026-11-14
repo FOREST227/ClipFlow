@@ -33,6 +33,16 @@ enum ClipboardRowMenu {
             guard let current = store?.item(withID: id) else { return }
             ClipFlowRuntime.shared.copyToClipboard(current)
         })
+        if PlainTextPaste.hasRichText(item) {
+            entries.append(.action(title: PlainTextPaste.pasteTitle, symbol: "text.alignleft") { [weak store] in
+                guard let current = store?.item(withID: id) else { return }
+                ClipFlowRuntime.shared.pastePlainText(current)
+            })
+            entries.append(.action(title: PlainTextPaste.copyTitle, symbol: "doc.plaintext") { [weak store] in
+                guard let current = store?.item(withID: id) else { return }
+                ClipFlowRuntime.shared.copyPlainText(current)
+            })
+        }
         entries.append(.action(title: item.pinned ? "取消置顶" : "置顶",
             symbol: item.pinned ? "pin.slash" : "pin") { [weak store] in store?.togglePin(id) })
         if item.privacy != .standard {
@@ -169,7 +179,7 @@ struct LibraryCardActionBar: View {
 }
 
 enum ListKeyCommand: Equatable {
-    case moveUp, moveDown, activate, toggleDetails
+    case moveUp, moveDown, activate, pastePlain, toggleDetails
     case pasteIndex(Int)
 
     /// - Parameters:
@@ -182,6 +192,10 @@ enum ListKeyCommand: Equatable {
         let active = modifiers.intersection([.command, .option, .control, .shift])
         if active == .command, let index = digitKeyCodes.firstIndex(of: keyCode) {
             return .pasteIndex(index)
+        }
+        // ⇧↩ pastes the quick-paste selection as plain text. Keypad Return counts too.
+        if active == .shift, keyCode == 36 || keyCode == 76 {
+            return .pastePlain
         }
         guard active.isEmpty else { return nil }
         switch keyCode {

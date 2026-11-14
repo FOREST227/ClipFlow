@@ -42,7 +42,7 @@ struct ClipFlowShortcut: Codable, Equatable, Sendable {
     }
 
     var displayName: String {
-        keyCaps.joined()
+        ShortcutGlyphLayout.plainText(for: self)
     }
 
     var keyCaps: [String] {

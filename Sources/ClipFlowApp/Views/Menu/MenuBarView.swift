@@ -134,8 +134,10 @@ struct MenuPanelHeader: View {
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
                 Text("\(store.items.count) 条历史").font(.system(size: 11, weight: .medium)).monospacedDigit()
-                Text("\(store.quickPasteShortcut.displayName) 呼出").font(.system(size: 10))
+                (ShortcutGlyphLayout.text(for: store.quickPasteShortcut, pointSize: 10) + Text(" 呼出"))
+                    .font(.system(size: 10))
                     .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+                    .accessibilityLabel("\(store.quickPasteShortcut.displayName) 呼出")
             }
             .lineLimit(1)
         }

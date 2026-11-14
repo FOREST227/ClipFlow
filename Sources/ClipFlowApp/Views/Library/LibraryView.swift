@@ -77,12 +77,19 @@ struct EmptyLibraryView: View {
                 .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
             Text(store.items.isEmpty ? "从一次复制开始" : "没有匹配的内容")
                 .font(.system(size: 16, weight: .semibold))
-            Text(store.items.isEmpty
-                ? "复制文字或图片后会出现在这里。\n按 \(store.quickPasteShortcut.displayName) 可随时快速回贴。"
-                : "试试其他关键词，或切换到“全部”。")
-                .font(.system(size: 12))
-                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
-                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            Group {
+                if store.items.isEmpty {
+                    (Text("复制文字或图片后会出现在这里。\n按 ")
+                        + ShortcutGlyphLayout.text(for: store.quickPasteShortcut, pointSize: 12)
+                        + Text(" 可随时快速回贴。"))
+                        .accessibilityLabel("复制文字或图片后会出现在这里。按 \(store.quickPasteShortcut.displayName) 可随时快速回贴。")
+                } else {
+                    Text("试试其他关键词，或切换到“全部”。")
+                }
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+            .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             if !store.items.isEmpty {
                 Button("查看全部内容") { store.searchText = ""; store.selectedCategory = .all }
                     .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))

@@ -6,13 +6,16 @@ struct ScrollEdgeFade: Equatable {
     let bottom: Double
 
     init(content: CGRect, viewportHeight: CGFloat, depth: CGFloat = 24) {
-        guard viewportHeight > 0, content.height > viewportHeight, depth > 0 else {
+        guard viewportHeight > 0, depth > 0 else {
             top = 0
             bottom = 0
             return
         }
-        top = Double(min(1, max(0, -content.minY / depth)))
-        bottom = Double(min(1, max(0, (content.maxY - viewportHeight) / depth)))
+        // A one-point remainder is rounding inside the settings page, not a scrollable overflow.
+        let scrolled = -content.minY
+        let overflow = content.maxY - viewportHeight
+        top = scrolled > 1 ? Double(min(1, max(0, scrolled / depth))) : 0
+        bottom = overflow > 1 ? Double(min(1, max(0, overflow / depth))) : 0
     }
 }
 

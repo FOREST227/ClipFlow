@@ -31,7 +31,7 @@ struct StartupPermissionOverlay: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(report.title)
                                 .font(.system(size: 18, weight: .semibold))
-                            Text(report.message)
+                            Text(QuotedCopy.keepingQuotesIntact(report.message))
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                                 .fixedSize(horizontal: false, vertical: true)
@@ -68,7 +68,7 @@ struct StartupPermissionOverlay: View {
                                         )
                                 }
 
-                                Text(item.detail)
+                                Text(QuotedCopy.keepingQuotesIntact(item.detail))
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                                     .fixedSize(horizontal: false, vertical: true)

@@ -18,6 +18,9 @@ final class ShortcutTests: XCTestCase {
 
     func testKeyCapsKeepNamedKeysTogether() {
         XCTAssertEqual(ClipFlowShortcut.default.keyCaps, ["⌥", "V"])
+        let controlV = ClipFlowShortcut(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(controlKey))
+        XCTAssertEqual(controlV.displayName, "\u{2303}V")
+        XCTAssertFalse(controlV.displayName.contains(" "))
         let shortcut = ClipFlowShortcut(keyCode: UInt32(kVK_F18), modifiers: UInt32(controlKey | optionKey | shiftKey | cmdKey))
         XCTAssertEqual(shortcut.keyCaps, ["⌃", "⌥", "⇧", "⌘", "F18"])
         XCTAssertEqual(shortcut.displayName, "⌃⌥⇧⌘F18")

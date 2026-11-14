@@ -55,6 +55,20 @@ final class DocumentationScreenshotTests: XCTestCase {
         store.ingestCopiedImage(try XCTUnwrap(image.representation(using: .png, properties: [:])),
             size: sample.size, sourceApp: "预览", sourceBundleID: nil)
         let imageItem = try XCTUnwrap(store.items.first(where: \.isImage))
+        // Last created sorts first. These stay out of history and use demo text only.
+        store.createSnippet(
+            title: "Swift 模板",
+            body: "func greeting(_ name: String) -> String {\n    return \"你好，\\(name)！\"\n}",
+            category: "代码")
+        store.createSnippet(title: "常用回复", body: "收到，我看完后回复你。", category: "回复")
+        store.createSnippet(
+            title: "邮件签名",
+            body: "ClipFlow 剪流\n复制过的内容，随时找回。",
+            category: "签名")
+        store.createSnippet(
+            title: "公司地址",
+            body: "上海市徐汇区漕溪北路 18 号\n3 楼前台",
+            category: "地址")
         store.lastCaptureStatus = "正在监听系统剪贴板"
         // Rows render their relative time once; items under a second old read "0秒后".
         RunLoop.main.run(until: Date().addingTimeInterval(1.1))
@@ -89,14 +103,21 @@ final class DocumentationScreenshotTests: XCTestCase {
         defer { window.close() }
         RunLoop.main.run(until: Date().addingTimeInterval(1.5))
         try save(try XCTUnwrap(window.contentView?.superview), name: "history")
+        controller.navigation.select(.snippets)
+        RunLoop.main.run(until: Date().addingTimeInterval(1.5))
+        try save(try XCTUnwrap(window.contentView?.superview), name: "snippets")
         controller.navigation.selectSettings(.general)
         RunLoop.main.run(until: Date().addingTimeInterval(1.5))
         try save(try XCTUnwrap(window.contentView?.superview), name: "settings")
         let backdrop = Color.white
+        let quickPasteChrome: CGFloat = 12
+        let quickPasteSize = NSSize(
+            width: QuickPastePanelLayout.panelWidth + quickPasteChrome * 2,
+            height: QuickPastePanelLayout.panelHeight + quickPasteChrome * 2)
         try export(QuickPastePanelView(store: store, preferredTargetName: nil,
             onPaste: { _ in }, onOpenLibrary: {}, onClose: {})
-                .padding(12).background(backdrop),
-            size: NSSize(width: 384, height: 612), name: "quick-paste")
+                .padding(quickPasteChrome).background(backdrop),
+            size: quickPasteSize, name: "quick-paste")
         // NSPopover's compositor-owned edge is not included by cacheDisplay.
         // Supply its rounded presentation frame around the unmodified app content.
         let menuHeight = ceil(NSHostingController(rootView: MenuBarView(store: store)

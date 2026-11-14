@@ -100,22 +100,12 @@ final class HistoryInspectorMotionTests: XCTestCase {
                 $0.convert($0.bounds, to: scroll.contentView).intersects(scroll.contentView.bounds)
             }.map(ObjectIdentifier.init))
         }
-        func dump(_ label: String) {
-            print("ROWDUMP \(label) clip=\(scroll.contentView.bounds)")
-            for view in fixture.rows where view.convert(view.bounds, to: scroll.contentView).intersects(scroll.contentView.bounds) {
-                let rect = view.convert(view.bounds, to: scroll.contentView)
-                print("ROW \(ObjectIdentifier(view)) y=\(rect.minY) h=\(rect.height)")
-            }
-        }
         let identities = visibleIdentities()
-        dump("before-open")
         row.openDetails()
         fixture.pump()
-        dump("after-open")
         let revisions = Dictionary(uniqueKeysWithValues: fixture.rows.map { (ObjectIdentifier($0), $0.contentRevision) })
         for p: CGFloat in [0.2, 0.5, 0.8] {
             fixture.driver.emit(p); fixture.pump()
-            dump("progress-\(p)")
             XCTAssertEqual(visibleIdentities(), identities)
             XCTAssertEqual(scroll.contentView.bounds.minY, offset, accuracy: 1)
             for current in fixture.rows { XCTAssertEqual(current.contentRevision, revisions[ObjectIdentifier(current)]) }

@@ -92,6 +92,7 @@ private struct ScrollViewportProbe: NSViewRepresentable {
         let metrics: ScrollViewportState
         private weak var observedScroll: NSScrollView?
         private var observers: [NSObjectProtocol] = []
+        private var notingBounds = false
         init(metrics: ScrollViewportState) { self.metrics = metrics; super.init(frame: .zero) }
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -103,6 +104,19 @@ private struct ScrollViewportProbe: NSViewRepresentable {
             observedScroll = nil
             metrics.scrollView = nil
         }
+        func noteBoundsChanged() {
+            guard !notingBounds else { return }
+            notingBounds = true
+            metrics.refresh()
+            notingBounds = false
+            // Flush the resulting SwiftUI update on the main queue, which the
+            // caller's run-loop pump drains. That realizes every row already
+            // inside the clip before a later inspector update can.
+            DispatchQueue.main.async { [weak self] in
+                self?.observedScroll?.window?.contentView?.layoutSubtreeIfNeeded()
+            }
+        }
+
         func scheduleConfiguration() {
             DispatchQueue.main.async { [weak self] in
                 guard let self, let scroll = self.enclosingScrollView else { return }
@@ -110,21 +124,20 @@ private struct ScrollViewportProbe: NSViewRepresentable {
                     self.disconnect()
                     self.observedScroll = scroll
                     self.metrics.scrollView = scroll
-                    // Overlay scrollers stay visible without reserving a track, so showing
-                    // the system indicator does not shift history rows when the drawer opens.
-                    scroll.scrollerStyle = .overlay
-                    scroll.hasVerticalScroller = true
-                    scroll.autohidesScrollers = NSScroller.preferredScrollerStyle != .legacy
                     scroll.contentView.postsBoundsChangedNotifications = true
                     scroll.documentView?.postsFrameChangedNotifications = true
                     for (name, object) in [(NSView.boundsDidChangeNotification, scroll.contentView),
                                           (NSView.frameDidChangeNotification, scroll.documentView ?? scroll.contentView)] {
-                        self.observers.append(NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
-                            Task { @MainActor [weak self] in self?.metrics.refresh() }
+                        // Deliver on the posting thread. A deferred Swift task does not
+                        // run inside the caller's short run-loop pump, so the lazy list
+                        // would realize the newly visible rows only on the next unrelated
+                        // update, such as opening the inspector.
+                        self.observers.append(NotificationCenter.default.addObserver(forName: name, object: object, queue: nil) { [weak self] _ in
+                            MainActor.assumeIsolated { self?.noteBoundsChanged() }
                         })
                     }
                 }
-                self.metrics.refresh()
+                self.noteBoundsChanged()
             }
         }
     }

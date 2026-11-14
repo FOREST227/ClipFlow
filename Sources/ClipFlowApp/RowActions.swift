@@ -136,7 +136,7 @@ struct LibraryCardActionBar: View {
                     .foregroundStyle(action == .delete ? ClipCategory.protected.tint : Color.primary.opacity(0.75))
                     .frame(width: LibraryCardActionLayout.buttonSize.width,
                         height: LibraryCardActionLayout.buttonSize.height)
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
                     .help(title(for: action))
             }
         }

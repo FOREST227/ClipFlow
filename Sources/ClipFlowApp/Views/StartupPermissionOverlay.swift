@@ -19,7 +19,7 @@ struct StartupPermissionOverlay: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 10) {
                         ZStack {
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
                                 .fill((report.needsAttention ? ClipCategory.protected.tint : ClipCategory.images.tint).opacity(0.16))
                                 .frame(width: 42, height: 42)
 
@@ -43,7 +43,7 @@ struct StartupPermissionOverlay: View {
                     ForEach(report.items) { item in
                         HStack(alignment: .top, spacing: ClipFlowLayout.space12) {
                             ZStack {
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
                                     .fill(item.status.tint.opacity(0.14))
                                     .frame(width: 38, height: 38)
 

@@ -17,12 +17,12 @@ struct ScrollEdgeFade: Equatable {
 }
 
 /// The content stays sharp; only the viewport edges receive a masked material.
-/// Edge fade observes scroll metrics on its own. The scrolled content does not,
-/// so a bounds publish cannot rebuild the lazy rows inside it.
+/// This view owns the viewport metrics. Edge bands read the published frame;
+/// the scrolled content does not.
 struct SoftEdgeScrollView<Content: View>: View {
     var showsEdgeEffects = true
     @ViewBuilder let content: Content
-    @State private var metrics = ScrollViewportState()
+    @StateObject private var metrics = ScrollViewportState()
 
     var body: some View {
         GeometryReader { viewport in

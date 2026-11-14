@@ -14,9 +14,33 @@ final class SettingsDraft: ObservableObject {
     @Published var section: SettingsCategory = .general
     var movesForward = true
     @Published var excludedAppsText: String
+    @Published var exclusionError: String?
 
     init(store: ClipFlowStore) {
-        excludedAppsText = store.excludedBundleIDs.joined(separator: "\n")
+        excludedAppsText = ExcludedAppRules.normalizedText(store.excludedBundleIDs)
+    }
+
+    func saveExcludedApps(into store: ClipFlowStore) {
+        let parsed = ExcludedAppRules.lines(in: excludedAppsText)
+        let invalid = ExcludedAppRules.invalidLines(in: parsed)
+        guard invalid.isEmpty else {
+            exclusionError = ExcludedAppRules.invalidMessage(invalid)
+            return
+        }
+        store.updateExcludedApps(from: ExcludedAppRules.normalizedText(parsed))
+        excludedAppsText = ExcludedAppRules.normalizedText(store.excludedBundleIDs)
+        exclusionError = nil
+    }
+
+    func resetExcludedApps(in store: ClipFlowStore) {
+        store.resetExcludedAppsToDefaults()
+        excludedAppsText = ExcludedAppRules.normalizedText(store.excludedBundleIDs)
+        exclusionError = nil
+    }
+
+    func noteExclusionEdits() {
+        guard exclusionError != nil else { return }
+        exclusionError = nil
     }
 }
 
@@ -63,6 +87,8 @@ final class MainWindowNavigation: ObservableObject {
 final class MainWindowController: NSWindowController, NSWindowDelegate {
     let navigation: MainWindowNavigation
     private let store: ClipFlowStore
+    var controlsFollowSystem = false
+    var isPositioningControls = false
     static let titlebarHeight = NSWindow.frameRect(forContentRect: .zero, styleMask: .titled).height
 
     init(store: ClipFlowStore, locale: Locale, initialPage: MainWindowPage = .history) {
@@ -91,6 +117,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             height: max(ClipFlowLayout.libraryMinHeight, restored.height)))
         super.init(window: window)
         window.delegate = self
+        window.collectionBehavior.insert(.fullScreenPrimary)
     }
 
     @available(*, unavailable)
@@ -103,6 +130,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
+        scheduleWindowControlLayout()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -121,8 +149,9 @@ private struct MainWindowView: View {
     var body: some View {
         HStack(spacing: 0) {
             MainSidebarView(navigation: navigation, draft: navigation.settingsDraft)
-                .padding(.leading, 6)
-                .padding(.vertical, 8)
+                .padding(.leading, WindowChrome.cardLeading)
+                .padding(.top, WindowChrome.cardTop)
+                .padding(.bottom, WindowChrome.cardBottom)
                 .ignoresSafeArea(.container, edges: .top)
             ZStack {
                 if navigation.loadedPages.contains(.settings) {
@@ -151,6 +180,7 @@ private struct MainWindowView: View {
             .ignoresSafeArea(.container, edges: .top)
             .allowsHitTesting(false)
         }
+        .background(WindowChromeAnchor())
         .frame(minWidth: ClipFlowLayout.libraryWidth, idealWidth: ClipFlowLayout.libraryWidth,
             maxWidth: ClipFlowLayout.libraryMaxWidth,
             // This frame is laid out below the transparent titlebar, whose inset the
@@ -199,26 +229,28 @@ private struct MainSidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            navigationButton("剪贴历史", icon: "rectangle.stack", selected: navigation.page == .history) {
+            navigationButton("剪贴历史", icon: "rectangle.stack", hint: "打开剪贴历史",
+                selected: navigation.page == .history) {
                 navigation.select(.history)
             }
-            .padding(.top, 16)
             Spacer(minLength: 12)
             Text("设置")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
-                .padding(.horizontal, 10).padding(.bottom, 4)
+                .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+                .padding(.horizontal, 10)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("设置")
                 .accessibilityAddTraits(.isHeader)
             ForEach(SettingsCategory.allCases) { category in
                 navigationButton(category.rawValue, icon: category.icon,
+                    hint: "打开\(category.rawValue)设置",
                     selected: navigation.page == .settings && draft.section == category) {
                     navigation.selectSettings(category)
                 }
             }
         }
-        .padding(8)
-        // Keep navigation aligned while the shell has equal top/bottom insets.
-        .padding(.top, 30)
+        .padding(WindowChrome.cardPadding)
         .frame(width: 128)
         .frame(maxHeight: .infinity)
         .background(CleanGlassBackground(cornerRadius: ClipFlowLayout.rowRadius))
@@ -226,7 +258,7 @@ private struct MainSidebarView: View {
         .accessibilityLabel("主导航")
     }
 
-    private func navigationButton(_ title: String, icon: String, selected: Bool,
+    private func navigationButton(_ title: String, icon: String, hint: String, selected: Bool,
         action: @escaping () -> Void) -> some View {
         Button {
             NSApp.keyWindow?.makeFirstResponder(nil)
@@ -234,6 +266,7 @@ private struct MainSidebarView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: icon).font(.system(size: 13, weight: .medium)).frame(width: 18)
+                    .accessibilityHidden(true)
                 Text(title).font(.system(size: 12, weight: selected ? .semibold : .medium)).lineLimit(1)
                 Spacer(minLength: 0)
             }
@@ -244,6 +277,8 @@ private struct MainSidebarView: View {
             .contentShape(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityHint(hint)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }

@@ -45,6 +45,7 @@ struct SettingsView: View {
                         Text(draft.section.rawValue)
                             .font(.system(size: 18, weight: .bold, design: .rounded))
                             .accessibilityAddTraits(.isHeader)
+                            .accessibilityLabel("\(draft.section.rawValue)。\(draft.section.subtitle)")
                     }
                     .padding(.horizontal, 2)
                     SoftEdgeScrollView {
@@ -74,9 +75,11 @@ struct SettingsView: View {
                 HStack(spacing: 6) {
                     Circle().fill(store.capturePaused ? Color.orange : Color.green).frame(width: 6, height: 6)
                     Text(store.capturePaused ? "剪贴监听已暂停" : "剪贴监听运行中")
-                        .foregroundStyle(store.capturePaused ? ClipFlowPalette.pausedStatus : ClipFlowPalette.listeningStatus)
+                        .foregroundStyle(store.capturePaused
+                            ? ClipFlowPalette.pausedStatus(for: colorScheme)
+                            : ClipFlowPalette.listeningStatus(for: colorScheme))
                     Spacer()
-                    Text(draft.section == .privacy ? "排除规则需保存" : "更改即时生效")
+                    Text(draft.section == .privacy ? "敏感内容即时生效，排除规则需保存" : "更改即时生效")
                         .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                 }
                 .font(.system(size: 10))
@@ -104,6 +107,7 @@ struct SettingsView: View {
                             Text("·").foregroundStyle(.tertiary)
                             Button("恢复默认") { store.setQuickPasteShortcut(.default) }
                                 .buttonStyle(.borderless).disabled(store.isRecordingShortcut)
+                                .accessibilityLabel("恢复默认快速粘贴快捷键")
                         }
                         .font(.system(size: 10))
                     }
@@ -112,19 +116,20 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 12).padding(.vertical, 10)
                 if let error = store.shortcutError {
-                    Text(error).font(.system(size: 10)).foregroundStyle(ClipCategory.protected.tint)
+                    Text(QuotedCopy.keepingQuotesIntact(error)).font(.system(size: 10)).foregroundStyle(ClipCategory.protected.tint)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 12).padding(.bottom, 10)
+                        .accessibilityLabel("快捷键错误：\(error)")
                 }
             }
             SettingsListGroup(title: "启动与运行") {
                 SettingsListRow(title: "暂停监听", detail: "暂停记录新内容，已有历史仍可使用") {
-                    Toggle("暂停监听", isOn: $store.capturePaused).labelsHidden().toggleStyle(.switch).controlSize(.small)
+                    settingsToggle("暂停监听", isOn: $store.capturePaused)
                 }
                 Divider().padding(.horizontal, 12)
-                SettingsListRow(title: "开机自动启动", detail: "登录 macOS 后自动运行剪流") {
-                    Toggle("开机自动启动", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
-                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                SettingsListRow(title: "开机自动启动", detail: store.launchAtLoginDetail) {
+                    settingsToggle("开机自动启动", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
                 }
                 if store.accessibilityTrusted == false {
                     Divider().padding(.horizontal, 12)
@@ -133,6 +138,8 @@ struct SettingsView: View {
                             _ = AccessibilityTrust.openSystemSettings()
                         }
                         .buttonStyle(.borderless)
+                        .accessibilityLabel("打开系统设置")
+                        .accessibilityHint("辅助功能隐私设置")
                     }
                 }
             }
@@ -143,13 +150,11 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsListGroup(title: "敏感内容") {
                 SettingsListRow(title: "自动保护疑似敏感内容", detail: "识别验证码、令牌等内容并应用隐私策略") {
-                    Toggle("自动保护疑似敏感内容", isOn: $store.autoProtectSecrets)
-                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                    settingsToggle("自动保护疑似敏感内容", isOn: $store.autoProtectSecrets)
                 }
                 Divider().padding(.horizontal, 12)
                 SettingsListRow(title: "5 分钟后自动删除", detail: "按复制时间计算，置顶也会过期") {
-                    Toggle("5 分钟后自动删除", isOn: $store.sensitiveAutoExpireEnabled)
-                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                    settingsToggle("5 分钟后自动删除", isOn: $store.sensitiveAutoExpireEnabled)
                 }
             }
             Text("关闭自动删除后，敏感内容仍遮罩显示、仅本地保存。重新开启会清理已超时记录。")
@@ -159,21 +164,32 @@ struct SettingsView: View {
                 .padding(.horizontal, 2)
             SettingsListGroup(title: "排除应用") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("每行一个 Bundle ID，来自这些应用的内容不会被记录。")
+                    Text(QuotedCopy.keepingQuotesIntact("每行一个 Bundle ID，来自这些应用的内容不会被记录。钥匙串、系统密码和常见密码管理器始终排除，即使没有写在这里。"))
                         .font(.system(size: 11))
                         .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
                     RuleTextEditor(text: $draft.excludedAppsText)
-                        .padding(8).frame(height: 136)
+                        .frame(height: RuleTextEditor.viewportHeight())
+                        .padding(8)
                         .background(palette.inputFill, in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
                         .accessibilityLabel("排除应用 Bundle ID")
+                        .accessibilityHint("可上下滚动，查看其余 Bundle ID。")
+                        .onChangeBackward(of: draft.excludedAppsText) { draft.noteExclusionEdits() }
+                    if let exclusionError = draft.exclusionError {
+                        Text(exclusionError)
+                            .font(.system(size: 11))
+                            .foregroundStyle(ClipCategory.protected.labelColor(for: colorScheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel("排除规则错误")
+                    }
                     HStack {
-                        Button("恢复默认") {
-                            store.resetExcludedAppsToDefaults()
-                            draft.excludedAppsText = store.excludedBundleIDs.joined(separator: "\n")
-                        }.buttonStyle(.borderless)
+                        Button("恢复默认") { draft.resetExcludedApps(in: store) }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("恢复默认排除规则")
                         Spacer()
-                        Button("保存规则") { store.updateExcludedApps(from: draft.excludedAppsText) }
+                        Button("保存规则") { draft.saveExcludedApps(into: store) }
                             .buttonStyle(ClipFlowActionButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
+                            .accessibilityLabel("保存排除规则")
                     }
                 }.padding(12)
             }
@@ -184,18 +200,19 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsListGroup(title: "文稿目录同步") {
                 SettingsListRow(title: "同步普通历史", detail: "将普通文本与图片镜像到“文稿/ClipFlow”") {
-                    Toggle("同步普通历史", isOn: Binding(get: { store.iCloudSyncEnabled }, set: { store.setICloudSyncEnabled($0) }))
-                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                    settingsToggle("同步普通历史", isOn: Binding(get: { store.iCloudSyncEnabled }, set: { store.setICloudSyncEnabled($0) }))
                 }
                 Divider().padding(.horizontal, 12)
                 SettingsListRow(title: "同步状态") {
                     Text(store.iCloudSyncStatusValue).font(.system(size: 12))
                         .foregroundStyle(store.iCloudSyncTint(for: colorScheme))
+                        .accessibilityLabel("同步状态：\(store.iCloudSyncStatusValue)")
                 }
             }
-            Text(store.iCloudSyncDetail).font(.system(size: 11))
+            Text(QuotedCopy.keepingQuotesIntact(store.iCloudSyncDetail)).font(.system(size: 11))
                 .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(store.iCloudSyncDetail)
             Label("受保护内容始终保留在本机", systemImage: "lock.shield")
                 .font(.system(size: 11)).foregroundStyle(ClipCategory.protected.tint)
         }
@@ -211,6 +228,8 @@ private struct SettingsListGroup<Content: View>: View {
             Text(title).font(.system(size: 11, weight: .medium))
                 .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                 .padding(.horizontal, 4)
+                .accessibilityLabel(title)
+                .accessibilityAddTraits(.isHeader)
             VStack(spacing: 0) { content }
                 .background(CleanGlassBackground(cornerRadius: ClipFlowLayout.rowRadius))
         }
@@ -227,9 +246,10 @@ private struct SettingsListRow<Control: View>: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.system(size: 12, weight: .medium))
                 if let detail {
-                    Text(detail).font(.system(size: 10))
+                    Text(QuotedCopy.keepingQuotesIntact(detail)).font(.system(size: 10))
                         .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(detail)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -260,7 +280,9 @@ private struct AppearanceModeControl: View {
                         Text(mode.title).font(.system(size: 11, weight: selection == mode ? .semibold : .medium))
                             .lineLimit(1)
                     }
-                    .foregroundStyle(selection == mode ? ClipCategory.all.solid : ClipFlowPalette.secondaryText(for: colorScheme))
+                    .foregroundStyle(selection == mode
+                        ? ClipCategory.all.labelColor(for: colorScheme)
+                        : ClipFlowPalette.secondaryText(for: colorScheme))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background {
                         if selection == mode {
@@ -285,4 +307,12 @@ private struct AppearanceModeControl: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("外观模式")
     }
+}
+
+private func settingsToggle(_ title: String, isOn: Binding<Bool>) -> some View {
+    Toggle(title, isOn: isOn)
+        .labelsHidden()
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .accessibilityLabel(title)
 }

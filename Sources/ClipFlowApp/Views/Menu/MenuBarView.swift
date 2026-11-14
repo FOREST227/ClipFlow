@@ -24,6 +24,7 @@ struct MenuBarView: View {
                 Divider()
                 statusToggle("开机自动启动", icon: "power", tint: ClipCategory.all.tint,
                     isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
+                    .help(store.launchAtLoginDetail)
                 Divider()
                 HStack(spacing: 8) {
                     Image(systemName: "folder").foregroundStyle(ClipCategory.images.tint).frame(width: 16)
@@ -36,7 +37,7 @@ struct MenuBarView: View {
                         .accessibilityLabel("启用文稿同步")
                 }
                 .font(.system(size: 11)).frame(height: 34)
-                .help(store.iCloudSyncDetail)
+                .help(QuotedCopy.keepingQuotesIntact(store.iCloudSyncDetail))
             }
             .padding(.horizontal, ClipFlowLayout.space12).padding(.vertical, ClipFlowLayout.space4)
             .background(CleanGlassBackground(cornerRadius: ClipFlowLayout.rowRadius))
@@ -124,7 +125,9 @@ struct MenuPanelHeader: View {
                     Image(systemName: store.capturePaused ? "pause.circle.fill" : "record.circle.fill")
                         .foregroundStyle(store.capturePaused ? Color.orange : Color.green)
                     Text(store.capturePaused ? "监听已暂停" : "正在监听")
-                        .foregroundStyle(store.capturePaused ? ClipFlowPalette.pausedStatus : ClipFlowPalette.listeningStatus)
+                        .foregroundStyle(store.capturePaused
+                            ? ClipFlowPalette.pausedStatus(for: colorScheme)
+                            : ClipFlowPalette.listeningStatus(for: colorScheme))
                 }
                 .font(.system(size: 10))
             }

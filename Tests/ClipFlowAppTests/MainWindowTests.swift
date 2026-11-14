@@ -314,23 +314,52 @@ final class MainWindowTests: XCTestCase {
             "The settings pane must not reserve the full window width or a nested sidebar")
     }
 
-    func testTrafficLightsSitInsideSidebarHeaderAfterResize() throws {
+    func testTrafficLightsClearTheSidebarCardAcrossResizeAndReopen() throws {
         _ = NSApplication.shared
         let controller = MainWindowController(store: try makeStore(), locale: Locale(identifier: "zh-Hans"))
         let window = try XCTUnwrap(controller.window)
         defer { window.close() }
-        for height: CGFloat in [680, 800] {
-            window.setContentSize(NSSize(width: 620, height: height))
-            window.makeKeyAndOrderFront(nil)
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        func assertLights(file: StaticString = #filePath, line: UInt = #line) throws {
             for (index, type) in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].enumerated() {
-                let button = try XCTUnwrap(window.standardWindowButton(type))
+                let button = try XCTUnwrap(window.standardWindowButton(type), file: file, line: line)
                 let rect = button.convert(button.bounds, to: nil)
-                XCTAssertEqual(rect.midX, 26 + CGFloat(index) * 20, accuracy: 1)
-                XCTAssertEqual(window.frame.height - rect.midY, 26, accuracy: 1)
-                XCTAssertTrue(try XCTUnwrap(button.superview).bounds.contains(button.frame))
+                XCTAssertEqual(rect.midX, WindowChrome.firstButtonCenterX + CGFloat(index) * WindowChrome.buttonSpacing,
+                    accuracy: 1, file: file, line: line)
+                XCTAssertEqual(window.frame.height - rect.midY, WindowChrome.buttonCenterFromTop,
+                    accuracy: 1, file: file, line: line)
+                XCTAssertGreaterThanOrEqual(window.frame.height - rect.maxY, 10,
+                    "Traffic lights must sit below the window edge", file: file, line: line)
+                XCTAssertLessThan(window.frame.height - rect.minY, WindowChrome.cardTop - 4,
+                    "Traffic lights must clear the sidebar card", file: file, line: line)
+                XCTAssertTrue(try XCTUnwrap(button.superview, file: file, line: line).bounds.contains(button.frame),
+                    file: file, line: line)
             }
         }
+        window.makeKeyAndOrderFront(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        try assertLights()
+        for height: CGFloat in [680, 800] {
+            window.setContentSize(NSSize(width: 620, height: height))
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            try assertLights()
+        }
+        window.orderOut(nil)
+        controller.show(page: .settings)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        try assertLights()
+        // A live fullscreen transition does not finish inside XCTest. The delegate still has to
+        // leave the buttons alone while the system owns them, then put them back when it returns.
+        let fullscreen = Notification(name: NSWindow.didEnterFullScreenNotification, object: window)
+        controller.windowWillEnterFullScreen(fullscreen)
+        controller.windowDidEnterFullScreen(fullscreen)
+        XCTAssertTrue(controller.controlsFollowSystem)
+        controller.positionWindowControls()
+        try assertLights()
+        controller.windowWillExitFullScreen(fullscreen)
+        controller.windowDidExitFullScreen(fullscreen)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.45))
+        XCTAssertFalse(controller.controlsFollowSystem)
+        try assertLights()
     }
 
     func testBothPagesUseTheSameWindowAndHostingController() throws {

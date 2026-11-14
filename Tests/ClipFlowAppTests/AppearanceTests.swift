@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import QuartzCore
 import XCTest
 @testable import ClipFlowApp
@@ -98,6 +99,28 @@ final class AppearanceTests: XCTestCase {
         store.appearanceMode = .system
         XCTAssertEqual(ClipFlowStore(storageDirectory: directory, defaults: defaults).appearanceMode, .system)
         XCTAssertNil(store.appearanceMode.appKitAppearance)
+    }
+
+    func testSavedAppearanceAppliesWhenObservationStarts() throws {
+        let suite = "ClipFlowAppearanceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        defaults.set(ClipFlowAppearance.dark.rawValue, forKey: "appearanceMode")
+        let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        let application = NSApplication.shared
+        let original = application.appearance
+        defer { application.appearance = original }
+        application.appearance = nil
+        let transition = AppearanceTransition()
+        let subscription = store.$appearanceMode.sink { transition.apply($0) }
+        XCTAssertEqual(application.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
+        store.appearanceMode = .light
+        XCTAssertEqual(application.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]), .aqua)
+        withExtendedLifetime(subscription) {}
     }
 
     func testUnrecognizedSavedAppearanceFallsBackToSystem() throws {

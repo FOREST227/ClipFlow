@@ -38,6 +38,10 @@ final class ClipFlowStore: ObservableObject {
         }
     }
     @Published var launchAtLogin: Bool
+    /// True when macOS registered the login item but still needs the user to allow it.
+    @Published private(set) var launchAtLoginNeedsApproval = false
+    /// Shown in Settings after a failed change. Nil while the system status speaks for itself.
+    @Published private(set) var launchAtLoginNotice: String?
     @Published var iCloudSyncEnabled: Bool
     @Published var excludedBundleIDs: [String] {
         didSet { defaults.set(excludedBundleIDs, forKey: Keys.excludedBundleIDs) }
@@ -121,7 +125,9 @@ final class ClipFlowStore: ObservableObject {
         capturePaused = defaults.object(forKey: Keys.capturePaused) as? Bool ?? false
         autoProtectSecrets = defaults.object(forKey: Keys.autoProtectSecrets) as? Bool ?? true
         sensitiveAutoExpireEnabled = defaults.object(forKey: Keys.sensitiveAutoExpireEnabled) as? Bool ?? true
-        launchAtLogin = Self.currentLaunchAtLoginState()
+        let loginStatus = Self.currentLaunchAtLoginStatus()
+        launchAtLogin = loginStatus.isOn
+        launchAtLoginNeedsApproval = loginStatus == .needsApproval
         iCloudSyncEnabled = defaults.object(forKey: Keys.iCloudSyncEnabled) as? Bool ?? false
         excludedBundleIDs = defaults.stringArray(forKey: Keys.excludedBundleIDs) ?? PasswordManagerApps.bundleIDs
         iCloudLastSyncedAt = defaults.object(forKey: Keys.iCloudLastSyncedAt) as? Date
@@ -307,11 +313,7 @@ final class ClipFlowStore: ObservableObject {
     }
 
     func updateExcludedApps(from rawValue: String) {
-        let cleaned = rawValue
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
+        let cleaned = ExcludedAppRules.lines(in: rawValue)
         excludedBundleIDs = cleaned.isEmpty ? PasswordManagerApps.bundleIDs : cleaned
     }
 
@@ -319,10 +321,16 @@ final class ClipFlowStore: ObservableObject {
         excludedBundleIDs = PasswordManagerApps.bundleIDs
     }
 
+    var launchAtLoginDetail: String {
+        if let launchAtLoginNotice { return launchAtLoginNotice }
+        if launchAtLoginNeedsApproval { return LaunchAtLoginStatus.approvalDetail }
+        return LaunchAtLoginStatus.standardDetail
+    }
+
     func setLaunchAtLogin(_ enabled: Bool) {
         guard #available(macOS 13, *) else {
-            launchAtLogin = false
-            lastCaptureStatus = "macOS 12 请在系统偏好设置的用户与群组中添加登录项"
+            applyLaunchAtLogin(.unsupported, failed: false)
+            lastCaptureStatus = LaunchAtLoginStatus.unsupportedDetail
             return
         }
         do {
@@ -331,13 +339,26 @@ final class ClipFlowStore: ObservableObject {
             } else {
                 try SMAppService.mainApp.unregister()
             }
-
-            launchAtLogin = enabled
-            defaults.set(enabled, forKey: Keys.launchAtLogin)
+            let status = LaunchAtLoginStatus.resolve(SMAppService.mainApp.status)
+            applyLaunchAtLogin(status, failed: false)
+            defaults.set(status.isOn, forKey: Keys.launchAtLogin)
             lastCaptureStatus = enabled ? "已开启开机自动启动" : "已关闭开机自动启动"
         } catch {
-            launchAtLogin = Self.currentLaunchAtLoginState()
-            lastCaptureStatus = "开机自动启动设置失败，请将 ClipFlow 放在应用程序目录后再试"
+            applyLaunchAtLogin(LaunchAtLoginStatus.resolve(SMAppService.mainApp.status), failed: true)
+            lastCaptureStatus = LaunchAtLoginStatus.registrationFailed
+        }
+    }
+
+    /// Records the login-item result without calling ServiceManagement. Settings reads this directly.
+    func applyLaunchAtLogin(_ status: LaunchAtLoginStatus, failed: Bool) {
+        launchAtLogin = status.isOn
+        launchAtLoginNeedsApproval = status == .needsApproval
+        if failed {
+            launchAtLoginNotice = LaunchAtLoginStatus.registrationFailed
+        } else if status == .unsupported {
+            launchAtLoginNotice = LaunchAtLoginStatus.unsupportedDetail
+        } else {
+            launchAtLoginNotice = nil
         }
     }
 
@@ -435,14 +456,9 @@ final class ClipFlowStore: ObservableObject {
         static let excludedBundleIDs = "excludedBundleIDs"
     }
 
-    private static func currentLaunchAtLoginState() -> Bool {
-        guard #available(macOS 13, *) else { return false }
-        switch SMAppService.mainApp.status {
-        case .enabled, .requiresApproval:
-            return true
-        default:
-            return false
-        }
+    private static func currentLaunchAtLoginStatus() -> LaunchAtLoginStatus {
+        guard #available(macOS 13, *) else { return .unsupported }
+        return LaunchAtLoginStatus.resolve(SMAppService.mainApp.status)
     }
 
     private static func decodeTombstones(from data: Data?) -> [UUID: Date] {

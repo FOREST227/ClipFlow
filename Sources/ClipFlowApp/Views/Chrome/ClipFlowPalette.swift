@@ -156,6 +156,15 @@ struct ClipFlowPalette {
     /// Paused sentence. System orange on cream is about 2.1:1.
     static let pausedStatus = Color(red: 0.62, green: 0.32, blue: 0.04)
 
+    /// The light-mode inks disappear on the dark settings background. Keep those values and lift the sentence in dark mode.
+    static func listeningStatus(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(red: 0.55, green: 0.88, blue: 0.70) : listeningStatus
+    }
+
+    static func pausedStatus(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(red: 1.0, green: 0.74, blue: 0.45) : pausedStatus
+    }
+
     static func detailShellColors(for colorScheme: ColorScheme) -> (top: Color, bottom: Color) {
         if colorScheme == .dark {
             return (Color(red: 0.17, green: 0.19, blue: 0.23), Color(red: 0.14, green: 0.16, blue: 0.20))

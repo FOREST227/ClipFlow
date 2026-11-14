@@ -27,6 +27,14 @@ final class ScrollEdgeFadeTests: XCTestCase {
         XCTAssertEqual(bounce.top, 0)
         XCTAssertEqual(bounce.bottom, 1)
     }
+    func testHairlineOverflowDoesNotFadeTheFittedPage() {
+        let fitted = ScrollEdgeFade(content: CGRect(x: 0, y: 0, width: 454, height: 431), viewportHeight: 430)
+        XCTAssertEqual(fitted.top, 0)
+        XCTAssertEqual(fitted.bottom, 0)
+        let nudged = ScrollEdgeFade(content: CGRect(x: 0, y: -1, width: 400, height: 1000), viewportHeight: 600)
+        XCTAssertEqual(nudged.top, 0)
+        XCTAssertEqual(nudged.bottom, 1)
+    }
 }
 
 @MainActor

@@ -17,8 +17,8 @@ struct ShortcutRecorder: View {
                     .fill(store.isRecordingShortcut ? accent.opacity(0.10) : Color.primary.opacity(0.035))
             }
             .overlay {
-                Text(store.isRecordingShortcut ? "按下组合键…" : store.quickPasteShortcut.keyCaps.joined(separator: " "))
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                Text(store.isRecordingShortcut ? "按下组合键…" : store.quickPasteShortcut.displayName)
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(store.isRecordingShortcut ? accent : Color.primary)
                     .lineLimit(1).minimumScaleFactor(0.7)
                     .padding(.horizontal, 10)
@@ -45,7 +45,7 @@ private struct ShortcutRecorderInput: NSViewRepresentable {
         let button = ShortcutRecorderButton()
         button.isBordered = false
         button.isTransparent = true
-        button.font = .monospacedSystemFont(ofSize: 14, weight: .semibold)
+        button.font = .systemFont(ofSize: 14, weight: .medium)
         button.setAccessibilityElement(true)
         button.setAccessibilityRole(.button)
         button.setAccessibilityLabel("录入快速粘贴快捷键")
@@ -56,6 +56,11 @@ private struct ShortcutRecorderInput: NSViewRepresentable {
 
     func updateNSView(_ button: ShortcutRecorderButton, context: Context) {
         configure(button)
+        // Leaving Settings ends recording on the store. The button stays mounted
+        // on the hidden page, so drop its monitor here or the next key is swallowed.
+        if !store.isRecordingShortcut {
+            button.disarmLocalCapture()
+        }
     }
 
     @available(macOS 13, *)
@@ -64,9 +69,16 @@ private struct ShortcutRecorderInput: NSViewRepresentable {
     }
 
     private func configure(_ button: ShortcutRecorderButton) {
-        button.focusChanged = { focused = $0 }
+        button.focusChanged = { isFocused in
+            // Resigning during a page change is inside the SwiftUI update.
+            // Writing focus state there cycles the attribute graph.
+            DispatchQueue.main.async {
+                if focused != isFocused { focused = isFocused }
+            }
+        }
         button.beginRecording = { store.beginShortcutRecording() }
         button.endRecording = { store.endShortcutRecording() }
+        button.recordingIsActive = { store.isRecordingShortcut }
         button.capture = { shortcut in _ = store.setQuickPasteShortcut(shortcut) }
         button.shortcutTitle = store.quickPasteShortcut.displayName
         button.setAccessibilityValue(store.isRecordingShortcut ? "正在录入快捷键" : store.quickPasteShortcut.displayName)
@@ -83,9 +95,11 @@ final class ShortcutRecorderButton: NSButton {
     var focusChanged: ((Bool) -> Void)?
     var beginRecording: (() -> Bool)?
     var endRecording: (() -> Void)?
+    var recordingIsActive: (() -> Bool)?
     var capture: ((ClipFlowShortcut) -> Void)?
     var shortcutTitle = ""
     private var recording = false
+    var isCapturing: Bool { recording }
     private var resignObserver: NSObjectProtocol?
     private var clickMonitor: Any?
     override var acceptsFirstResponder: Bool { true }
@@ -113,7 +127,11 @@ final class ShortcutRecorderButton: NSButton {
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self else { return event }
             if event.type == .keyDown {
-                guard self.recording, self.window?.isKeyWindow == true else { return event }
+                if self.recording, self.recordingIsActive?() == false {
+                    self.disarmLocalCapture()
+                }
+                let active = self.recording && (self.recordingIsActive?() ?? true) && self.window?.isKeyWindow == true
+                guard active else { return event }
                 self.keyDown(with: event)
                 return nil
             }
@@ -126,18 +144,27 @@ final class ShortcutRecorderButton: NSButton {
     }
 
     func refreshTitle() {
-        title = recording ? "请按组合键…（Esc 取消）" : shortcutTitle
+        let next = recording ? "请按组合键…（Esc 取消）" : shortcutTitle
+        guard title != next else { return }
+        title = next
     }
 
-    func finishRecording() {
+    /// Stops the local monitor without asking the store to restore the shortcut.
+    /// The store is already idle when Settings hides the recorder but keeps the view.
+    func disarmLocalCapture() {
         guard recording else { return }
         recording = false
         if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
         resignObserver = nil
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         clickMonitor = nil
-        endRecording?()
         refreshTitle()
+    }
+
+    func finishRecording() {
+        guard recording else { return }
+        disarmLocalCapture()
+        endRecording?()
     }
 
     override func becomeFirstResponder() -> Bool {

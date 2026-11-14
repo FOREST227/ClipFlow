@@ -22,9 +22,55 @@ final class SettingsDraft: ObservableObject {
     var movesForward = true
     @Published var excludedAppsText: String
     @Published var exclusionError: String?
+    /// A lower history limit that is waiting for the inline confirmation.
+    @Published var pendingHistoryLimit: Int?
 
     init(store: ClipFlowStore) {
         excludedAppsText = ExcludedAppRules.normalizedText(store.excludedBundleIDs)
+    }
+
+    func requestHistoryLimit(_ limit: Int, in store: ClipFlowStore) {
+        let resolved = HistoryRetention.normalized(limit)
+        if resolved == store.historyItemLimit {
+            pendingHistoryLimit = nil
+            return
+        }
+        let removal = HistoryRetention.removalCount(in: store.items, limit: resolved)
+        if HistoryRetention.needsConfirmation(
+            currentLimit: store.historyItemLimit,
+            proposedLimit: resolved,
+            removalCount: removal
+        ) {
+            pendingHistoryLimit = resolved
+            return
+        }
+        pendingHistoryLimit = nil
+        store.applyHistoryItemLimit(resolved)
+    }
+
+    func confirmHistoryLimitChange(in store: ClipFlowStore) {
+        guard let pendingHistoryLimit else { return }
+        self.pendingHistoryLimit = nil
+        store.applyHistoryItemLimit(pendingHistoryLimit)
+    }
+
+    func cancelHistoryLimitChange() {
+        pendingHistoryLimit = nil
+    }
+
+    /// Drops a confirmation that would no longer delete anything, and applies that choice.
+    func refreshHistoryLimitPrompt(in store: ClipFlowStore) {
+        guard let pending = pendingHistoryLimit else { return }
+        let removal = HistoryRetention.removalCount(in: store.items, limit: pending)
+        guard !HistoryRetention.needsConfirmation(
+            currentLimit: store.historyItemLimit,
+            proposedLimit: pending,
+            removalCount: removal
+        ) else { return }
+        pendingHistoryLimit = nil
+        if pending != store.historyItemLimit {
+            store.applyHistoryItemLimit(pending)
+        }
     }
 
     func saveExcludedApps(into store: ClipFlowStore) {

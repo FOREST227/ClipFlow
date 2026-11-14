@@ -84,8 +84,17 @@ final class ClipFlowStore: ObservableObject {
         }
     }
 
+    @Published private(set) var historyItemLimit = HistoryRetention.defaultLimit {
+        didSet {
+            defaults.set(historyItemLimit, forKey: Keys.historyItemLimit)
+            imagePreviewCache.countLimit = historyItemLimit + 20
+        }
+    }
+
+    /// Unpinned rows kept. Pinned rows are extra and are not evicted to meet this.
+    var maxItems: Int { historyItemLimit }
+
     let integrations = ClipFlowCatalog.integrations
-    let maxItems = 80
 
     let defaults: UserDefaults
     let fileManager = FileManager.default
@@ -140,7 +149,8 @@ final class ClipFlowStore: ObservableObject {
         snippetWriter = HistoryFileWriter(url: snippetsURL)
         imagesDirectoryURL = appSupport.appendingPathComponent("images", isDirectory: true)
         try? FileManager.default.createDirectory(at: imagesDirectoryURL, withIntermediateDirectories: true)
-        imagePreviewCache.countLimit = maxItems + 20
+        let loadedHistoryLimit = HistoryRetention.normalized(defaults.object(forKey: Keys.historyItemLimit) as? Int)
+        imagePreviewCache.countLimit = loadedHistoryLimit + 20
         imagePreviewCache.totalCostLimit = 64 * 1024 * 1024
         cloudSyncCoordinator = ClipFlowCloudSyncCoordinator(localImagesDirectoryURL: imagesDirectoryURL, documentsDirectoryURL: syncDirectory)
 
@@ -157,7 +167,10 @@ final class ClipFlowStore: ObservableObject {
         snippetTombstones = Self.decodeTombstones(from: defaults.data(forKey: Keys.snippetSyncTombstones))
         items = loadItems()
         snippets = loadSnippets()
+        // Property observers do not run while initializing, so publish the loaded limit explicitly.
+        historyItemLimit = loadedHistoryLimit
         cleanupOrphanedImageFiles()
+        trimItemsToLimit()
         selectedItemID = items.first?.id
     }
 
@@ -236,6 +249,20 @@ final class ClipFlowStore: ObservableObject {
         items = pinned
         revealedItemIDs.removeAll()
         lastCaptureStatus = pinned.isEmpty ? "历史记录已清空" : "历史记录已清空，已保留置顶内容"
+    }
+
+    /// Persists a supported history limit. A lower limit trims immediately;
+    /// the settings page confirms that deletion before calling this.
+    func applyHistoryItemLimit(_ limit: Int) {
+        let resolved = HistoryRetention.normalized(limit)
+        guard resolved != historyItemLimit else { return }
+        let removedCount = HistoryRetention.removalCount(in: items, limit: resolved)
+        historyItemLimit = resolved
+        trimItemsToLimit()
+        if removedCount > 0 {
+            flushPendingPersistence()
+        }
+        lastCaptureStatus = HistoryRetention.appliedStatus(limit: resolved, removedCount: removedCount)
     }
 
     func ingestCopiedText(
@@ -435,16 +462,13 @@ final class ClipFlowStore: ObservableObject {
         lastCaptureStatus = "已清理过期的敏感内容"
     }
 
-    private func trimItemsToLimit() {
-        guard items.count > maxItems else { return }
-        let ordered = sortItems(items)
-        let retained = ordered.filter(\.pinned) + ordered.filter { !$0.pinned }
-            .prefix(max(0, maxItems - ordered.filter(\.pinned).count))
-        let retainedIDs = Set(retained.map(\.id))
-        let overflow = items.filter { !retainedIDs.contains($0.id) }
-        rememberCloudDeletion(for: overflow)
-        overflow.forEach(removeStoredAssetIfNeeded)
-        items = retained
+    func trimItemsToLimit() {
+        let split = HistoryRetention.partition(items, limit: maxItems)
+        guard !split.removed.isEmpty else { return }
+        rememberCloudDeletion(for: split.removed)
+        split.removed.forEach(removeStoredAssetIfNeeded)
+        revealedItemIDs.subtract(split.removed.map(\.id))
+        items = split.kept
     }
 
     func applyCloudItems(_ cloudItems: [ClipboardItem]) {
@@ -479,6 +503,7 @@ final class ClipFlowStore: ObservableObject {
         static let iCloudSyncTombstones = "iCloudSyncTombstones"
         static let snippetSyncTombstones = "snippetSyncTombstones"
         static let excludedBundleIDs = "excludedBundleIDs"
+        static let historyItemLimit = "historyItemLimit"
     }
 
     private static func currentLaunchAtLoginStatus() -> LaunchAtLoginStatus {

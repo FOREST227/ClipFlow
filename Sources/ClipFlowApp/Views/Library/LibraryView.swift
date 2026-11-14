@@ -55,24 +55,47 @@ struct LibraryView: View {
                     EmptyLibraryView(store: store, palette: palette)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollViewReader { scroll in
-                        SoftEdgeScrollView(showsEdgeEffects: false) {
-                            // Fixed card heights and an independent selection layer allow
-                            // offscreen content to stay unloaded without selection relayout.
-                            LazyVStack(spacing: LibraryCardLayout.spacing) {
-                                ForEach(store.filteredItems) { item in
-                                    StableHistoryRow(item: item, store: store, palette: palette,
-                                        onInspectFrom: onInspectFrom, onInspectItem: onInspectItem)
-                                        .equatable()
-                                }
-                            }
-                        }
-                        // Only keyboard navigation scrolls; pointer selection keeps the viewport.
-                        .onReceive(store.historySelection.revealRequests) { id in scroll.scrollTo(id) }
-                    }
-                    .frame(maxHeight: .infinity)
+                    HistoryRowList(items: store.filteredItems, revealedItemIDs: store.revealedItemIDs,
+                        store: store, palette: palette, onInspectFrom: onInspectFrom,
+                        onInspectItem: onInspectItem)
+                        .equatable()
+                        .frame(maxHeight: .infinity)
                 }
             }
+        }
+    }
+}
+
+/// The history stack stays mounted while the inspector opens. Re-evaluating this
+/// `LazyVStack` is what inserts or replaces scrolled hosting views on Xcode 26.3.
+private struct HistoryRowList: View, Equatable {
+    let items: [ClipboardItem]
+    let revealedItemIDs: Set<UUID>
+    let store: ClipFlowStore
+    let palette: ClipFlowPalette
+    var onInspectFrom: ((ClipboardItem, InspectorSourceAnchor) -> Void)?
+    let onInspectItem: (ClipboardItem) -> Void
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.items == rhs.items && lhs.revealedItemIDs == rhs.revealedItemIDs
+    }
+
+    var body: some View {
+        ScrollViewReader { scroll in
+            SoftEdgeScrollView(showsEdgeEffects: false) {
+                // Fixed card heights and an independent selection layer allow
+                // offscreen content to stay unloaded without selection relayout.
+                LazyVStack(spacing: LibraryCardLayout.spacing) {
+                    ForEach(items) { item in
+                        StableHistoryRow(item: item, store: store, palette: palette,
+                            showsSensitive: store.isRevealed(item),
+                            onInspectFrom: onInspectFrom, onInspectItem: onInspectItem)
+                            .equatable()
+                    }
+                }
+            }
+            // Only keyboard navigation scrolls; pointer selection keeps the viewport.
+            .onReceive(store.historySelection.revealRequests) { id in scroll.scrollTo(id) }
         }
     }
 }
@@ -83,11 +106,12 @@ private struct StableHistoryRow: View, Equatable {
     let item: ClipboardItem
     let store: ClipFlowStore
     let palette: ClipFlowPalette
+    let showsSensitive: Bool
     var onInspectFrom: ((ClipboardItem, InspectorSourceAnchor) -> Void)?
     let onInspectItem: (ClipboardItem) -> Void
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.item == rhs.item
+        lhs.item == rhs.item && lhs.showsSensitive == rhs.showsSensitive
     }
 
     var body: some View {

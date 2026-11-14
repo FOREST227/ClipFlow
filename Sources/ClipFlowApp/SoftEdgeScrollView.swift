@@ -17,41 +17,52 @@ struct ScrollEdgeFade: Equatable {
 }
 
 /// The content stays sharp; only the viewport edges receive a masked material.
+/// Edge fade observes scroll metrics on its own. The scrolled content does not,
+/// so a bounds publish cannot rebuild the lazy rows inside it.
 struct SoftEdgeScrollView<Content: View>: View {
     var showsEdgeEffects = true
     @ViewBuilder let content: Content
-    @StateObject private var metrics = ScrollViewportState()
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @State private var metrics = ScrollViewportState()
 
     var body: some View {
         GeometryReader { viewport in
             let height = viewport.size.height
-            let fade = ScrollEdgeFade(content: metrics.frame, viewportHeight: height)
             ScrollView(showsIndicators: true) {
                 content.frame(maxWidth: .infinity, alignment: .leading)
                     .background(ScrollViewportProbe(metrics: metrics))
             }
             .frame(width: viewport.size.width, height: height)
-            .overlay(alignment: .top) { edge(top: true, strength: fade.top) }
-            .overlay(alignment: .bottom) { edge(top: false, strength: fade.bottom) }
+            .overlay(alignment: .top) {
+                if showsEdgeEffects {
+                    ScrollEdgeBand(metrics: metrics, top: true, viewportHeight: height)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if showsEdgeEffects {
+                    ScrollEdgeBand(metrics: metrics, top: false, viewportHeight: height)
+                }
+            }
             .mask {
-                if !showsEdgeEffects || reduceTransparency || height <= 0 {
-                    Rectangle()
+                if showsEdgeEffects {
+                    ScrollEdgeMask(metrics: metrics, viewportHeight: height)
                 } else {
-                    let fraction = min(CGFloat(28) / height, 0.33)
-                    LinearGradient(stops: [
-                        .init(color: .black.opacity(1 - fade.top), location: 0),
-                        .init(color: .black, location: fraction),
-                        .init(color: .black, location: 1 - fraction),
-                        .init(color: .black.opacity(1 - fade.bottom), location: 1)
-                    ], startPoint: .top, endPoint: .bottom)
+                    Rectangle()
                 }
             }
         }
     }
+}
 
-    @ViewBuilder private func edge(top: Bool, strength: Double) -> some View {
-        if showsEdgeEffects && !reduceTransparency {
+private struct ScrollEdgeBand: View {
+    @ObservedObject var metrics: ScrollViewportState
+    let top: Bool
+    let viewportHeight: CGFloat
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        let fade = ScrollEdgeFade(content: metrics.frame, viewportHeight: viewportHeight)
+        let strength = top ? fade.top : fade.bottom
+        if !reduceTransparency {
             Rectangle().fill(.ultraThinMaterial)
                 .mask(LinearGradient(colors: top ? [.black, .clear] : [.clear, .black],
                     startPoint: .top, endPoint: .bottom))
@@ -63,15 +74,45 @@ struct SoftEdgeScrollView<Content: View>: View {
     }
 }
 
+private struct ScrollEdgeMask: View {
+    @ObservedObject var metrics: ScrollViewportState
+    let viewportHeight: CGFloat
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        let fade = ScrollEdgeFade(content: metrics.frame, viewportHeight: viewportHeight)
+        if reduceTransparency || viewportHeight <= 0 {
+            Rectangle()
+        } else {
+            let fraction = min(CGFloat(28) / viewportHeight, 0.33)
+            LinearGradient(stops: [
+                .init(color: .black.opacity(1 - fade.top), location: 0),
+                .init(color: .black, location: fraction),
+                .init(color: .black, location: 1 - fraction),
+                .init(color: .black.opacity(1 - fade.bottom), location: 1)
+            ], startPoint: .top, endPoint: .bottom)
+        }
+    }
+}
+
 @MainActor
 final class ScrollViewportState: ObservableObject {
     @Published var frame = CGRect.zero
     weak var scrollView: NSScrollView?
+    private var pendingFrame: CGRect?
     func refresh() {
         guard let scrollView, let document = scrollView.documentView else { return }
         let next = CGRect(x: 0, y: -scrollView.contentView.bounds.minY,
             width: document.bounds.width, height: document.bounds.height)
-        if next != frame { frame = next }
+        guard next != frame, next != pendingFrame else { return }
+        pendingFrame = next
+        // Bounds notifications arrive inside the layout pass. Publishing there
+        // rebuilds whatever view owns this object.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let pending = self.pendingFrame else { return }
+            self.pendingFrame = nil
+            if pending != self.frame { self.frame = pending }
+        }
     }
     func scroll(to offset: CGFloat) {
         guard let scrollView, let document = scrollView.documentView else { return }
@@ -109,12 +150,6 @@ private struct ScrollViewportProbe: NSViewRepresentable {
             notingBounds = true
             metrics.refresh()
             notingBounds = false
-            // Flush the resulting SwiftUI update on the main queue, which the
-            // caller's run-loop pump drains. That realizes every row already
-            // inside the clip before a later inspector update can.
-            DispatchQueue.main.async { [weak self] in
-                self?.observedScroll?.window?.contentView?.layoutSubtreeIfNeeded()
-            }
         }
 
         func scheduleConfiguration() {
@@ -128,10 +163,6 @@ private struct ScrollViewportProbe: NSViewRepresentable {
                     scroll.documentView?.postsFrameChangedNotifications = true
                     for (name, object) in [(NSView.boundsDidChangeNotification, scroll.contentView),
                                           (NSView.frameDidChangeNotification, scroll.documentView ?? scroll.contentView)] {
-                        // Deliver on the posting thread. A deferred Swift task does not
-                        // run inside the caller's short run-loop pump, so the lazy list
-                        // would realize the newly visible rows only on the next unrelated
-                        // update, such as opening the inspector.
                         self.observers.append(NotificationCenter.default.addObserver(forName: name, object: object, queue: nil) { [weak self] _ in
                             MainActor.assumeIsolated { self?.noteBoundsChanged() }
                         })

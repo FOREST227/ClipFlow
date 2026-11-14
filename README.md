@@ -5,38 +5,38 @@
   <p>一款轻量的原生 macOS 剪贴板工具，集中管理文本、代码、链接与图片。</p>
   <p>
     <a href="https://github.com/FOREST227/ClipFlow/releases/latest">下载最新版</a>
-    · <a href="docs/releases/v0.1.3.md">v0.1.3 更新说明</a>
+    · <a href="docs/releases/v0.1.4.md">v0.1.4 更新说明</a>
     · <a href="https://github.com/FOREST227/ClipFlow/issues">反馈问题</a>
   </p>
   <p>macOS 12+ · Apple 芯片 / Intel / 通用版本 · 中文界面 · 本地保存</p>
 </div>
 
 <p align="center">
-  <img src="docs/images/v0.1.3/history.png" width="720" alt="ClipFlow 剪贴历史：左侧导航、顶部筛选标签与文本、代码、图片卡片">
+  <img src="docs/images/v0.1.4/history.png" width="720" alt="ClipFlow 剪贴历史：左侧导航、顶部筛选标签与文本、代码、图片卡片">
 </p>
 
 ## 复制之后，不用再找一遍
 
 - **随手呼出，快速粘贴**：默认按 <code>⌥ Option + V</code> 在鼠标附近打开面板。单击选中、双击粘贴；也可以全程用键盘：<code>↑</code> <code>↓</code> 选择、<code>↩</code> 粘贴、<code>⌘1</code>–<code>⌘9</code> 直接粘贴对应条目。
-- **一眼分清内容**：文本蓝、代码紫、链接靛青、图片青绿、敏感内容红。保存最近 80 条历史，可按“全部 / 置顶 / 文本 / 代码 / 链接 / 图片 / 敏感”筛选，并按内容、来源和标签搜索。
+- **一眼分清内容**：文本蓝、代码紫、链接靛青、图片青绿、敏感内容红。保存最近 80 条历史，可按“全部 / 置顶 / 文本 / 代码 / 链接 / 图片 / 敏感”筛选，并按内容、来源和标签搜索。受保护记录只按标题、来源和标签匹配，不按正文搜索。
 - **就地操作，按需展开详情**：鼠标悬停历史卡片即可复制、置顶或删除，右键菜单提供全部操作；双击或按空格从条目位置展开抽屉，内容与操作分层呈现。
 - **代码与 Markdown，都能好好读**：常见语言语法高亮，支持手动指定语言；Markdown 可切换源码与排版预览。
 - **图片不只是一张缩略图**：详情支持滚轮与双指捏合缩放、拖动查看局部，双击恢复完整显示。
 - **状态与隐私，清楚可控**：菜单栏集中放置监听和隐私开关；可排除应用、设置敏感内容自动过期，并单独控制文稿目录同步。
 
-> 代码高亮与 Markdown 预览离线可用，不会执行复制的代码。复制、粘贴保留原始文本及其缩进、换行；分类和语法识别仍可能有误，可通过语言选择调整显示。
+> 代码高亮与 Markdown 预览离线可用，不会执行复制的代码。复制、粘贴保留原始文本及其缩进、换行，并在再次粘贴或复制回剪贴板时恢复当时的富文本、HTML 和文件链接。分类和语法识别仍可能有误，可通过语言选择调整显示。
 
 ## 界面一览
 
-以下由当前 **v0.1.3 的真实应用组件**重新生成，全部使用演示数据，不包含个人剪贴历史。图片外部的白色留白仅用于文档展示。
+以下由当前 **v0.1.4 的真实应用组件**重新生成，全部使用演示数据，不包含个人剪贴历史。图片外部的白色留白仅用于文档展示。
 
 ### 快速粘贴与菜单栏
 
 快捷面板专注搜索、选中与粘贴；菜单栏专注运行状态和关键开关。两者分工明确，不重复堆放历史列表。
 
 <p align="center">
-  <img src="docs/images/v0.1.3/quick-paste.png" width="48%" align="middle" alt="v0.1.3 快速粘贴面板：搜索、条目列表、快捷键提示与历史入口">
-  <img src="docs/images/v0.1.3/menu.png" width="48%" align="middle" alt="菜单栏面板：监听状态、历史条数、功能开关与入口按钮">
+  <img src="docs/images/v0.1.4/quick-paste.png" width="48%" align="middle" alt="v0.1.4 快速粘贴面板：搜索、条目列表、快捷键提示与历史入口">
+  <img src="docs/images/v0.1.4/menu.png" width="48%" align="middle" alt="菜单栏面板：监听状态、历史条数、功能开关与入口按钮">
 </p>
 <p align="center">快速粘贴 · 菜单栏概览</p>
 
@@ -47,8 +47,8 @@
 高亮支持 PowerShell、Bash、Swift、Python、JavaScript、TypeScript、C / C++、C#、Java、Go、Rust、SQL、JSON、YAML、HTML、CSS 等常见语言。自动识别不准确时，可在详情中手动指定语言。
 
 <p align="center">
-  <img src="docs/images/v0.1.3/code-detail.png" width="48%" align="middle" alt="完整代码抽屉详情：语法高亮、语言选择、来源摘要和复制粘贴操作">
-  <img src="docs/images/v0.1.3/markdown-preview.png" width="48%" align="middle" alt="完整 Markdown 抽屉详情：源码预览切换、排版内容和底部操作">
+  <img src="docs/images/v0.1.4/code-detail.png" width="48%" align="middle" alt="完整代码抽屉详情：语法高亮、语言选择、来源摘要和复制粘贴操作">
+  <img src="docs/images/v0.1.4/markdown-preview.png" width="48%" align="middle" alt="完整 Markdown 抽屉详情：源码预览切换、排版内容和底部操作">
 </p>
 <p align="center">代码详情 · Markdown 预览</p>
 
@@ -57,7 +57,7 @@
 图片在独立画布中查看：滚轮或双指捏合缩放，放大后可拖动查看局部；双击恢复完整显示。
 
 <p align="center">
-  <img src="docs/images/v0.1.3/image-detail.png" width="420" alt="图片抽屉详情：独立缩放画布、图片尺寸及复制粘贴操作">
+  <img src="docs/images/v0.1.4/image-detail.png" width="420" alt="图片抽屉详情：独立缩放画布、图片尺寸及复制粘贴操作">
 </p>
 
 ### 设置
@@ -65,7 +65,7 @@
 按「通用 / 隐私 / 同步」分组管理选项，修改外观、快捷键和运行方式；排除应用规则需点击保存。
 
 <p align="center">
-  <img src="docs/images/v0.1.3/settings.png" width="680" alt="设置页面：侧栏分类、外观模式、快捷键和启动选项">
+  <img src="docs/images/v0.1.4/settings.png" width="680" alt="设置页面：侧栏分类、外观模式、快捷键和启动选项">
 </p>
 
 ## 下载与安装
@@ -74,13 +74,13 @@
 
 | 你的 Mac | 安装包 |
 | --- | --- |
-| Apple 芯片 | [ClipFlow-v0.1.3-arm64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.3/ClipFlow-v0.1.3-arm64.dmg) |
-| Intel 处理器 | [ClipFlow-v0.1.3-x86_64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.3/ClipFlow-v0.1.3-x86_64.dmg) |
-| 两种架构通用，或不确定芯片类型 | [ClipFlow-v0.1.3-universal.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.3/ClipFlow-v0.1.3-universal.dmg) |
+| Apple 芯片 | [ClipFlow-v0.1.4-arm64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.4/ClipFlow-v0.1.4-arm64.dmg) |
+| Intel 处理器 | [ClipFlow-v0.1.4-x86_64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.4/ClipFlow-v0.1.4-x86_64.dmg) |
+| 两种架构通用，或不确定芯片类型 | [ClipFlow-v0.1.4-universal.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.4/ClipFlow-v0.1.4-universal.dmg) |
 
 1. 打开 .dmg，将 **ClipFlow** 拖入“应用程序”。
 2. 从“应用程序”启动，点击菜单栏中的 ClipFlow 图标。
-3. 按提示授予“辅助功能”权限，以便自动粘贴回其他应用。
+3. 首次自动粘贴时再授予“辅助功能”权限。未授权时内容留在剪贴板，可在目标应用按 ⌘V。
 
 应用启动后驻留菜单栏，不自动弹出主窗口，也不显示程序坞图标。安装包旁的 .sha256 文件用于校验，正常安装只需下载 .dmg。
 
@@ -95,15 +95,15 @@
 | 单击卡片 | 仅选中，不修改系统剪贴板 |
 | 在快速粘贴面板双击卡片，或按 ↩ | 粘贴到此前使用的应用 |
 | 在快速粘贴面板按 ↑ / ↓ | 切换选中的条目 |
-| 在快速粘贴面板按 ⌘1–⌘9 | 直接粘贴对应位置的条目 |
+| 在快速粘贴面板或历史页按 ⌘1–⌘9 | 直接粘贴对应位置的条目 |
 | 在历史页双击卡片；历史页和快速粘贴面板均可按空格 | 打开选中条目的详情 |
 | 在历史页悬停卡片 | 显示复制、置顶、删除按钮 |
 | 右键点击卡片 | 打开操作菜单：查看详情、粘贴、复制、置顶、删除等 |
 | 详情中的“复制 / 粘贴 / 图钉” | 复制原文、直接粘贴或置顶 |
 | 图片详情中滚轮 / 双指捏合 | 放大缩小；放大后拖动查看，双击恢复 |
-| 历史页“清空未置顶历史” | 删除未置顶记录，保留置顶记录 |
+| 历史页“清空未置顶历史” | 确认后删除未置顶记录，保留置顶记录 |
 
-未授予辅助功能权限时，仍可保存历史，并在详情中点击“复制”，然后手动使用 ⌘ Command + V。
+未授予辅助功能权限时，仍可保存历史。自动粘贴会改为把内容放回剪贴板，也可在详情中点击“复制”，然后手动使用 ⌘ Command + V。
 
 ## 隐私与保存
 
@@ -129,7 +129,7 @@
 
 构建目标覆盖 macOS 12，但旧系统实机与 Intel 实机仍需要更多验证。遇到问题，欢迎 [提交 Issue](https://github.com/FOREST227/ClipFlow/issues)，附上 macOS 版本、芯片型号、应用版本及复现步骤。分享截图前请遮住私人剪贴内容。
 
-- [更新说明](docs/releases/v0.1.3.md)
+- [更新说明](docs/releases/v0.1.4.md)
 - [开发、测试与打包](docs/development.md)
 - [离线渲染组件与许可证](Sources/ClipFlowApp/Renderer/NOTICE.txt)
 

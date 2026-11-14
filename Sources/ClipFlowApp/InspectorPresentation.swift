@@ -50,7 +50,7 @@ final class InspectorPresentation: ObservableObject {
         snapshot = Snapshot(phase: .opening, itemID: itemID, revision: revision, sourceRectInWindow: origin)
         driver.cancel()
         if switchingItem { motion.setValue(0) }
-        drive(to: 1, duration: reduceMotion ? 0.11 : 0.28, revision: revision)
+        drive(to: 1, duration: reduceMotion ? ClipFlowMotion.inspectorReduced : ClipFlowMotion.inspectorOpen, revision: revision)
     }
 
     func dismiss(reduceMotion: Bool, afterClose action: (() -> Void)? = nil) {
@@ -60,7 +60,7 @@ final class InspectorPresentation: ObservableObject {
         snapshot = Snapshot(phase: .closing, itemID: snapshot.itemID, revision: revision,
             sourceRectInWindow: sourceAnchor?.rectInWindow() ?? snapshot.sourceRectInWindow)
         driver.cancel()
-        drive(to: 0, duration: reduceMotion ? 0.11 : 0.20, revision: revision)
+        drive(to: 0, duration: reduceMotion ? ClipFlowMotion.inspectorReduced : ClipFlowMotion.inspectorClose, revision: revision)
     }
 
     func reset() {

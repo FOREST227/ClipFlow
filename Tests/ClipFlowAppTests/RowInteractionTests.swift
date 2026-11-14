@@ -278,12 +278,11 @@ final class RowInteractionTests: XCTestCase {
         XCTAssertTrue(row.hover.isHovered, "Copy keeps the bar visible to show its confirmation")
         try press(x: centerX(1), fromTop: centerY)
         XCTAssertFalse(row.hover.isHovered, "Pinning reorders rows under the pointer")
-        row.hover.isHovered = true
-        try press(x: centerX(2), fromTop: centerY)
-        XCTAssertEqual(actions, [.copy, .pin, .delete])
+        XCTAssertEqual(actions, [.copy, .pin])
         XCTAssertEqual(selections, 1)
-        try press(x: centerX(2), fromTop: centerY)
-        XCTAssertEqual(actions.count, 3, "A second click after deleting must not delete the next row")
+        row.hover.isHovered = true
+        try press(x: barMinX - 4, fromTop: centerY)
+        XCTAssertEqual(actions, [.copy, .pin], "Delete is not a hover target")
         XCTAssertEqual(selections, 2)
         row.hover.isHovered = true
         try press(x: 40, fromTop: centerY)
@@ -298,9 +297,11 @@ final class RowInteractionTests: XCTestCase {
         let width: CGFloat = 454
         let minX = width - layout.trailingInset - layout.barSize.width
         let y = layout.topInset + 4
+        XCTAssertEqual(layout.buttonSize, CGSize(width: 28, height: 28))
+        XCTAssertFalse(LibraryCardAction.hoverActions.contains(.delete))
         XCTAssertEqual(layout.action(at: CGPoint(x: minX + 1, y: y), rowWidth: width), .copy)
-        XCTAssertEqual(layout.action(at: CGPoint(x: minX + layout.barSize.width / 2, y: y), rowWidth: width), .pin)
-        XCTAssertEqual(layout.action(at: CGPoint(x: minX + layout.barSize.width - 1, y: y), rowWidth: width), .delete)
+        XCTAssertEqual(layout.action(at: CGPoint(x: minX + layout.padding + layout.buttonSize.width + layout.spacing + 4, y: y), rowWidth: width), .pin)
+        XCTAssertEqual(layout.action(at: CGPoint(x: minX + layout.barSize.width - 1, y: y), rowWidth: width), .pin)
         XCTAssertNil(layout.action(at: CGPoint(x: minX - 1, y: y), rowWidth: width))
         XCTAssertNil(layout.action(at: CGPoint(x: width - 2, y: y), rowWidth: width))
         XCTAssertNil(layout.action(at: CGPoint(x: minX + 10, y: layout.topInset + layout.barSize.height + 1), rowWidth: width))

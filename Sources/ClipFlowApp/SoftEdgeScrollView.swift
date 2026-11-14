@@ -21,20 +21,13 @@ struct SoftEdgeScrollView<Content: View>: View {
     var showsEdgeEffects = true
     @ViewBuilder let content: Content
     @StateObject private var metrics = ScrollViewportState()
-    @ViewState private var hovered = false
-    @ViewState private var scrolling = false
-    @ViewState private var dragOrigin: CGFloat?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { viewport in
             let height = viewport.size.height
             let fade = ScrollEdgeFade(content: metrics.frame, viewportHeight: height)
-            let thumbHeight = min(height, max(28, height * height / max(height, metrics.frame.height)))
-            let range = max(1, metrics.frame.height - height)
-            let progress = min(1, max(0, -metrics.frame.minY / range))
-            ScrollView(showsIndicators: false) {
+            ScrollView(showsIndicators: true) {
                 content.frame(maxWidth: .infinity, alignment: .leading)
                     .background(ScrollViewportProbe(metrics: metrics))
             }
@@ -53,28 +46,6 @@ struct SoftEdgeScrollView<Content: View>: View {
                         .init(color: .black.opacity(1 - fade.bottom), location: 1)
                     ], startPoint: .top, endPoint: .bottom)
                 }
-            }
-            .overlay(alignment: .topTrailing) {
-                if metrics.frame.height > height + 1 && height > 0 {
-                    Capsule().fill(Color.primary.opacity(0.28))
-                        .frame(width: 4, height: thumbHeight)
-                        .padding(.horizontal, 3)
-                        .contentShape(Rectangle())
-                        .offset(y: progress * (height - thumbHeight))
-                        .opacity(hovered || scrolling || dragOrigin != nil ? 1 : 0)
-                        .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                            if dragOrigin == nil { dragOrigin = -metrics.frame.minY }
-                            metrics.scroll(to: (dragOrigin ?? 0) + value.translation.height * range / max(1, height - thumbHeight))
-                        }.onEnded { _ in dragOrigin = nil })
-                        .accessibilityHidden(true)
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: scrolling || hovered)
-                }
-            }
-            .onHover { hovered = $0 }
-            .task(id: metrics.frame.minY) {
-                scrolling = true
-                do { try await Task.sleep(nanoseconds: 800_000_000) } catch { return }
-                scrolling = false
             }
         }
     }

@@ -46,14 +46,13 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
                 .blur(radius: permissionOverlayActive ? ClipFlowMotion.backgroundDefocusRadius : 0)
-                .modifier(InspectorBackdropMotion(motion: inspector.motion))
                 .disabled(overlayActive)
                 .accessibilityHidden(overlayActive)
 
                 if permissionOverlayActive {
                     Color.black.opacity(0.18).ignoresSafeArea().zIndex(9)
                 } else if inspector.blocksBackground {
-                    InspectorScrim(motion: inspector.motion, opacity: 0.18) {
+                    InspectorScrim(motion: inspector.motion, opacity: 1) {
                         inspector.dismiss(reduceMotion: reduceMotion)
                     }
                     .ignoresSafeArea().zIndex(9)
@@ -93,7 +92,7 @@ struct ContentView: View {
                         report: permissionReport,
                         palette: palette,
                         onDismiss: {
-                            withAnimation(ClipFlowMotion.overlay) {
+                            withAnimation(reduceMotion ? nil : ClipFlowMotion.fade) {
                                 store.dismissStartupPermissionReport()
                             }
                         },
@@ -111,10 +110,11 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 48)
-                    .transition(ClipFlowMotion.overlayTransition)
+                    .transition(.opacity)
                     .zIndex(11)
                 }
             }
+            .animation(reduceMotion ? nil : ClipFlowMotion.fade, value: permissionOverlayActive)
         }
         .background(
             InspectorEscapeHandler(onEscape: {
@@ -164,8 +164,11 @@ struct ContentView: View {
             guard let item = items.first(where: { $0.id == store.selectedItemID }) else { return false }
             toggleLibraryInspector(for: item)
             return true
-        case .pasteIndex:
-            return false
+        case .pasteIndex(let index):
+            guard let item = HistoryPasteRouting.item(at: index, in: items) else { return false }
+            store.select(item)
+            ClipFlowRuntime.shared.paste(item)
+            return true
         }
     }
 

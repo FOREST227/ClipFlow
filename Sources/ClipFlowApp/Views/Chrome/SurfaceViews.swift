@@ -21,16 +21,16 @@ struct AppBackground: View {
             .ignoresSafeArea()
 
             Circle()
-                .fill(palette.orbA.opacity(restrained ? 0.18 : 1))
+                .fill(palette.orbA.opacity(restrained ? 0.45 : 1))
                 .frame(width: 420, height: 420)
                 .blur(radius: 60)
-                .offset(x: -420, y: -180)
+                .offset(x: -160, y: -80)
 
             Circle()
-                .fill(palette.orbB.opacity(restrained ? 0.18 : 1))
+                .fill(palette.orbB.opacity(restrained ? 0.45 : 1))
                 .frame(width: 520, height: 520)
                 .blur(radius: 80)
-                .offset(x: 420, y: 180)
+                .offset(x: 180, y: 140)
         }
     }
 }
@@ -46,8 +46,8 @@ struct FrostedPanel<Content: View>: View {
 
     var body: some View {
         content
-            .padding(18)
-            .background(CleanGlassBackground(cornerRadius: 28, elevated: true))
+            .padding(ClipFlowLayout.space16)
+            .background(CleanGlassBackground(cornerRadius: ClipFlowLayout.overlayRadius, elevated: true))
     }
 }
 
@@ -168,13 +168,12 @@ struct CategoryPill: View {
         HStack(spacing: 4) {
             Text(category.shortTitle).font(.system(size: 11, weight: isSelected ? .semibold : .medium))
             Text("\(count)").monospacedDigit().font(.system(size: 10, weight: .medium))
-                .opacity(isSelected ? 0.85 : 0.55)
         }
         .lineLimit(1).fixedSize()
         .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.8))
-        .padding(.horizontal, 10)
+        .padding(.horizontal, ClipFlowLayout.space12)
         .frame(height: Self.height)
-        .background(isSelected ? category.tint : Color.primary.opacity(0.05), in: Capsule())
+        .background(isSelected ? category.solid : Color.primary.opacity(0.05), in: Capsule())
         .contentShape(Capsule())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(category.title)，\(count) 条")

@@ -46,6 +46,8 @@ final class InspectorMotionTests: XCTestCase {
         XCTAssertEqual(open.shellScaleY, 1)
         XCTAssertEqual(open.shellOffsetY, 0)
         XCTAssertEqual(open.contentOpacity, 1)
+        XCTAssertEqual(open.contentOffsetY, 0)
+        XCTAssertEqual(open.backgroundBlur, 0, "The list is covered by a scrim, not a live blur")
         let closed = InspectorMotionValues.resolve(progress: 0, reduceMotion: false, reduceTransparency: false)
         XCTAssertEqual(closed.contentOpacity, 0)
         XCTAssertEqual(closed.shellScaleY, 1, "Drawer geometry replaces popup scaling")

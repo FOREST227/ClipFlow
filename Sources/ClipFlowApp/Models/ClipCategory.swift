@@ -60,15 +60,10 @@ enum ClipCategory: String, CaseIterable, Identifiable {
         }
     }
 
-    var tint: Color {
-        switch self {
-        case .all: Color(red: 0.34, green: 0.58, blue: 0.95)
-        case .pinned: Color(red: 0.92, green: 0.58, blue: 0.23)
-        case .text: Color(red: 0.36, green: 0.52, blue: 0.72)
-        case .code: Color(red: 0.58, green: 0.46, blue: 0.85)
-        case .links: Color(red: 0.36, green: 0.40, blue: 0.84)
-        case .images: Color(red: 0.39, green: 0.72, blue: 0.68)
-        case .protected: Color(red: 0.83, green: 0.35, blue: 0.31)
-        }
+    /// Decorative wash. Solid fills and light-mode labels use `solid`.
+    var tint: Color { CategoryInk.wash(self) }
+    var solid: Color { CategoryInk.solid(self) }
+    func labelColor(for colorScheme: ColorScheme) -> Color {
+        CategoryInk.label(self, colorScheme: colorScheme)
     }
 }

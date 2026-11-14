@@ -6,7 +6,7 @@ import SwiftUI
 private enum QuickPastePanelLayout {
     static let panelWidth: CGFloat = ClipFlowLayout.menuWidth
     static let panelHeight: CGFloat = QuickPasteCardLayout.viewportHeight + 164
-    static let cornerRadius: CGFloat = 24
+    static let cornerRadius: CGFloat = ClipFlowLayout.overlayRadius
     static let anchorOffset: CGFloat = 18
     static let screenInset: CGFloat = 12
 }
@@ -647,12 +647,11 @@ struct QuickPastePanelView: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 12, weight: .medium))
                 }
-                .padding(.horizontal, 10)
-                .frame(height: 32)
-                .background(
-                    RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous)
-                        .fill(palette.inputFill)
-                )
+                .padding(.horizontal, ClipFlowLayout.space12)
+                .frame(height: ClipFlowLayout.controlHeight)
+                .background(palette.inputFill, in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous)
+                    .strokeBorder(palette.border, lineWidth: 1))
 
                 if clips.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
@@ -706,21 +705,19 @@ struct QuickPastePanelView: View {
                     } label: {
                         Text("历史记录")
                     }
-                    .buttonStyle(MenuFooterActionStyle(fill: ClipCategory.all.tint.opacity(0.13),
-                        height: 26, fontSize: 11, cornerRadius: 8))
+                    .buttonStyle(MenuFooterActionStyle(fill: palette.secondaryButtonFill))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: ClipFlowLayout.controlHeight)
             }
             .padding(ClipFlowLayout.pageInset)
-            .modifier(InspectorBackdropMotion(motion: inspector.motion))
             .allowsHitTesting(!inspector.blocksBackground)
             .disabled(inspector.blocksBackground)
             .accessibilityHidden(inspector.blocksBackground)
 
             // The full-sized scrim survives every last closing frame.
             if inspector.blocksBackground {
-                InspectorScrim(motion: inspector.motion, opacity: 0.16) {
+                InspectorScrim(motion: inspector.motion, opacity: 1) {
                     inspector.dismiss(reduceMotion: reduceMotion)
                 }
             }
@@ -869,8 +866,8 @@ struct HUDRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: item.isImage || item.kind == .code ? 6 : 4) {
             HStack(spacing: 5) {
-                Image(systemName: iconName).foregroundStyle(tint)
-                Text(item.kind.label).foregroundStyle(tint).fixedSize()
+                Image(systemName: iconName).foregroundStyle(item.kind.labelColor(for: colorScheme))
+                Text(item.kind.label).foregroundStyle(item.kind.labelColor(for: colorScheme)).fixedSize()
                 Text(item.sourceApp).lineLimit(1)
                 if item.pinned { Image(systemName: "pin.fill").foregroundStyle(ClipCategory.pinned.tint) }
                 if item.isSensitive { Image(systemName: "lock.fill").foregroundStyle(item.privacy.color) }
@@ -884,7 +881,8 @@ struct HUDRow: View {
                         .fixedSize()
                 }
             }
-            .font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
             .frame(height: 14)
 
             if item.isImage {
@@ -895,7 +893,7 @@ struct HUDRow: View {
                     .lineLimit(5)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(7)
-                    .background(tint.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+                    .background(tint.opacity(0.045), in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
             } else {
                 Text(store.displaySnippet(for: item))
                     .font(.system(size: 12, weight: .medium))
@@ -914,13 +912,13 @@ struct HUDRow: View {
         let shape = LibraryImageShape.resolve(width: item.imageWidth, height: item.imageHeight)
         if shape == .landscape {
             VStack(alignment: .leading, spacing: 4) {
-                ClipThumbnailView(store: store, item: item, height: 76, cornerRadius: 8,
+                ClipThumbnailView(store: store, item: item, height: LibraryImageThumbnail.height, cornerRadius: ClipFlowLayout.controlRadius,
                     showsDimensionLabel: false, contentMode: .fit, insetPreview: true)
                 Text(item.imageDimensionText ?? "图片").font(.system(size: 9)).foregroundStyle(.secondary)
             }
         } else {
             HStack(spacing: 10) {
-                ClipThumbnailView(store: store, item: item, height: 96, cornerRadius: 8,
+                ClipThumbnailView(store: store, item: item, height: LibraryImageThumbnail.height, cornerRadius: ClipFlowLayout.controlRadius,
                     showsDimensionLabel: false, contentMode: .fit, insetPreview: true)
                     .frame(width: shape == .portrait ? 66 : 96)
                 VStack(alignment: .leading, spacing: 6) {
@@ -937,15 +935,7 @@ struct HUDRow: View {
         item.kind.tint
     }
 
-    private var iconName: String {
-        switch item.kind {
-        case .text: "text.alignleft"
-        case .code: "terminal"
-        case .link: "link"
-        case .secret: "lock.fill"
-        case .image: "photo.stack.fill"
-        }
-    }
+    private var iconName: String { item.kind.symbolName }
 }
 
 struct HUDInteractiveRow: NSViewRepresentable {

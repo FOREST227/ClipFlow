@@ -99,10 +99,10 @@ struct InspectorMotionValues: Equatable {
         return Self(progress: p, shellScaleY: 1,
             shellOffsetY: 0,
             contentOpacity: reduceMotion ? p : content,
-            contentOffsetY: reduceMotion ? 0 : 8 * (1 - content),
+            contentOffsetY: 0,
             chromeOpacity: reduceMotion ? p : min(1, max(0, (p - 0.06) / 0.22)),
             backdropProgress: eased,
-            backgroundBlur: reduceMotion || reduceTransparency ? 0 : ClipFlowMotion.backgroundDefocusRadius * eased)
+            backgroundBlur: 0)
     }
 }
 
@@ -124,19 +124,15 @@ struct InspectorMotionSurface<Content: View>: View {
 /// Applying visual effects as a modifier keeps the list content out of the tick observer.
 struct InspectorBackdropMotion: ViewModifier {
     @ObservedObject var motion: InspectorMotionProgress
-    private var preferences = InspectorMotionPreferences()
-    private var reduceMotion: Bool { preferences.reduceMotion }
-    private var reduceTransparency: Bool { preferences.reduceTransparency }
 
     init(motion: InspectorMotionProgress) {
         _motion = ObservedObject(wrappedValue: motion)
     }
 
     func body(content: Content) -> some View {
-        let values = InspectorMotionValues.resolve(progress: motion.value,
-            reduceMotion: reduceMotion, reduceTransparency: reduceTransparency)
-        content.blur(radius: values.backgroundBlur)
-            .opacity(1 - 0.60 * Double(values.backdropProgress))
+        // The list stays sharp. Dimming is an opaque scrim, not a live blur of the lazy stack.
+        let _ = motion.value
+        content
     }
 }
 
@@ -158,7 +154,8 @@ struct InspectorScrim: View {
     var body: some View {
         let values = InspectorMotionValues.resolve(progress: motion.value,
             reduceMotion: reduceMotion, reduceTransparency: reduceTransparency)
-        (colorScheme == .dark ? Color.black : Color.white).opacity(opacity * Double(values.backdropProgress))
+        ClipFlowPalette.inspectorScrim(for: colorScheme)
+            .opacity(opacity * Double(values.backdropProgress))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
             .onTapGesture(perform: onDismiss)

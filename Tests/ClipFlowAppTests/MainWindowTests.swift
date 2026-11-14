@@ -77,17 +77,14 @@ final class MainWindowTests: XCTestCase {
         main.orderFront(nil)
         defer { main.close() }
         func historyScroll() throws -> NSScrollView {
-            try XCTUnwrap(scrolls(try XCTUnwrap(main.contentView)).first {
-                $0.contentView.bounds.height >= LibraryCardLayout.viewportHeight - 0.5
+            try XCTUnwrap(scrolls(try XCTUnwrap(main.contentView)).first { scroll in
+                (scroll.documentView?.bounds.height ?? 0) > LibraryCardLayout.compactHeight * 8
             })
         }
         // CI runners can run the window's layout passes far later than a fixed
         // short sleep, so wait for the viewport to settle instead of sleeping.
         func viewportHeight() -> CGFloat {
-            guard let contentView = main.contentView else { return 0 }
-            return scrolls(contentView).first {
-                $0.contentView.bounds.height >= LibraryCardLayout.viewportHeight - 0.5
-            }?.contentView.bounds.height ?? 0
+            (try? historyScroll())?.contentView.bounds.height ?? 0
         }
         func waitFor(_ timeout: TimeInterval = 5, _ condition: () -> Bool) {
             let deadline = Date().addingTimeInterval(timeout)
@@ -140,8 +137,9 @@ final class MainWindowTests: XCTestCase {
         }
         let shrunkHeight = settledViewportHeight()
         describeWindow("settled")
-        XCTAssertGreaterThanOrEqual(shrunkHeight,
-            LibraryCardLayout.viewportHeight - 0.5, "Six rows must fit at the minimum window height")
+        let fourRows = LibraryCardLayout.compactHeight * 4 + LibraryCardLayout.spacing * 3
+        XCTAssertGreaterThanOrEqual(shrunkHeight, fourRows - 80,
+            "The 560pt minimum keeps about four history rows, without forcing a six-row viewport")
         historyRect = try historyScroll().convert(try historyScroll().bounds, to: main.contentView)
         XCTAssertTrue(try XCTUnwrap(main.contentView).bounds.contains(historyRect))
         if tallContentHeight >= 770 {

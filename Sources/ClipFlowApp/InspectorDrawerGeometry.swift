@@ -30,6 +30,43 @@ struct InspectorSourceAnchor {
     }
 }
 
+/// Visual expansion of a drawer that is already laid out at its final size.
+/// Scaling and offset replace per-frame changes to x/y/width/height.
+struct InspectorShellTransform: Equatable {
+    var scaleX: CGFloat
+    var scaleY: CGFloat
+    var offset: CGSize
+
+    static let identity = Self(scaleX: 1, scaleY: 1, offset: .zero)
+
+    static func resolve(progress: CGFloat, sourceRectInWindow: CGRect?,
+                        destinationRectInWindow destination: CGRect,
+                        reduceMotion: Bool) -> Self {
+        let p = min(1, max(0, progress.isFinite ? progress : 0))
+        let width = destination.width
+        let height = destination.height
+        guard !reduceMotion, width > 1, height > 1,
+              let rect = sourceRectInWindow, !rect.isNull, rect.width > 0, rect.height > 0,
+              rect.minX.isFinite, rect.minY.isFinite else { return .identity }
+        let source = CGRect(x: rect.minX - destination.minX, y: destination.maxY - rect.maxY,
+                            width: rect.width, height: rect.height)
+        let t = 1 - pow(1 - p, 3)
+        let scaleX = source.width / width + (1 - source.width / width) * t
+        let scaleY = source.height / height + (1 - source.height / height) * t
+        return Self(scaleX: scaleX, scaleY: scaleY,
+            offset: CGSize(width: (source.midX - width / 2) * (1 - t),
+                           height: (source.midY - height / 2) * (1 - t)))
+    }
+
+    /// Settled shell bounds after scale-about-center and offset. Top-down local coordinates.
+    func visualRect(in bounds: CGRect) -> CGRect {
+        let size = CGSize(width: bounds.width * scaleX, height: bounds.height * scaleY)
+        let origin = CGPoint(x: bounds.midX + offset.width - size.width / 2,
+                             y: bounds.midY + offset.height - size.height / 2)
+        return CGRect(origin: origin, size: size)
+    }
+}
+
 struct InspectorDrawerLayout: Equatable {
     let shellRect: CGRect
     let coverTop: CGFloat
@@ -103,7 +140,7 @@ struct InspectorDrawerCoverShape: Shape {
     var lipDepth: CGFloat
     func path(in rect: CGRect) -> Path {
         let depth = min(lipDepth, max(0, rect.height / 3))
-        let r = min(16, rect.height / 3, rect.width / 4)
+        let r = min(ClipFlowLayout.overlayRadius, rect.height / 3, rect.width / 4)
         var path = Path()
         path.move(to: CGPoint(x: rect.minX, y: rect.minY + r))
         path.addQuadCurve(to: CGPoint(x: rect.minX + r, y: rect.minY),

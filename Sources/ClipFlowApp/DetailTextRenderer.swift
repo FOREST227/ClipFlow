@@ -73,8 +73,9 @@ enum DetailTextDocument {
         let chosen = language == "自动识别" ? (DetailTextFormat.languageHint(text) ?? "") : language
         let safeLanguage = DetailTextFormat.languages.contains(chosen) ? chosen : ""
         let nonce = UUID().uuidString
-        let background = dark ? "#262b34" : "#ffffff"
-        let foreground = dark ? "#d9e0eb" : "#263244"
+        let ink = ClipFlowSyntax.colors(dark: dark)
+        let background = ink.background
+        let foreground = ink.foreground
         return """
         <!doctype html><html><head><meta charset="utf-8">
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-\(nonce)'; style-src 'nonce-\(nonce)'; img-src 'none'; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
@@ -86,17 +87,17 @@ enum DetailTextDocument {
         article pre{padding:12px;background:\(dark ? "#1e222a" : "#ffffff");border-radius:8px;margin:12px 0}
         article :first-child{margin-top:0}article :last-child{margin-bottom:0}
         h1{font-size:22px}h2{font-size:19px}h3{font-size:16px}h1,h2,h3{line-height:1.35}
-        a{color:\(dark ? "#91b8ff" : "#3569c8")}blockquote{margin:12px 0;padding-left:12px;border-left:3px solid #819ac1;color:\(dark ? "#aab6c7" : "#61718a")}
+        a{color:\(ink.link)}blockquote{margin:12px 0;padding-left:12px;border-left:3px solid #819ac1;color:\(ink.quote)}
         table{border-collapse:collapse;display:block;overflow:auto}th,td{border:1px solid #8291a44d;padding:6px 10px}
         hr{border:0;border-top:1px solid #8291a44d}ul,ol{padding-left:22px}
-        .hljs-keyword,.hljs-selector-tag,.hljs-literal{color:\(dark ? "#c4a0ff" : "#8554b5")}
-        .hljs-string,.hljs-regexp,.hljs-addition{color:\(dark ? "#9ad5ad" : "#327b53")}
-        .hljs-comment,.hljs-quote{color:\(dark ? "#8e9bab" : "#7b8796");font-style:italic}
-        .hljs-number,.hljs-symbol,.hljs-bullet{color:\(dark ? "#efbb86" : "#ad6431")}
-        .hljs-title,.hljs-function,.hljs-section{color:\(dark ? "#91b8ff" : "#3569c8")}
-        .hljs-attr,.hljs-attribute,.hljs-variable,.hljs-params{color:\(dark ? "#8ed2d2" : "#287d85")}
-        .hljs-type,.hljs-built_in{color:\(dark ? "#e6c482" : "#92701e")}
-        .hljs-meta,.hljs-deletion{color:\(dark ? "#f399a4" : "#bc5263")}
+        .hljs-keyword,.hljs-selector-tag,.hljs-literal{color:\(ink.keyword)}
+        .hljs-string,.hljs-regexp,.hljs-addition{color:\(ink.string)}
+        .hljs-comment,.hljs-quote{color:\(ink.comment);font-style:italic}
+        .hljs-number,.hljs-symbol,.hljs-bullet{color:\(ink.number)}
+        .hljs-title,.hljs-function,.hljs-section{color:\(ink.title)}
+        .hljs-attr,.hljs-attribute,.hljs-variable,.hljs-params{color:\(ink.attribute)}
+        .hljs-type,.hljs-built_in{color:\(ink.typeName)}
+        .hljs-meta,.hljs-deletion{color:\(ink.meta)}
         ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:#8190a666;border-radius:5px}
         </style></head><body><main id="content"></main>
         <script nonce="\(nonce)">\(scripts)</script>
@@ -135,11 +136,15 @@ struct DetailTextRenderer: NSViewRepresentable {
         let web = WKWebView(frame: .zero, configuration: configuration)
         web.navigationDelegate = context.coordinator
         web.underPageBackgroundColor = .clear
+        web.wantsLayer = true
+        web.layer?.masksToBounds = true
         web.setAccessibilityLabel(markdown ? "Markdown 预览" : "代码内容")
         return web
     }
     func updateNSView(_ web: WKWebView, context: Context) {
         let key = RenderKey(text: text, markdown: markdown, language: language, dark: dark)
+        web.wantsLayer = true
+        web.layer?.masksToBounds = true
         guard context.coordinator.key != key else { return }
         context.coordinator.key = key
         web.loadHTMLString(DetailTextDocument.html(text: text, markdown: markdown, language: language, dark: dark), baseURL: nil)

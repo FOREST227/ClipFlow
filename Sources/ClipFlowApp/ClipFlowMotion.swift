@@ -1,6 +1,7 @@
 import SwiftUI
 
 enum ClipFlowMotion {
+    /// The only spring. Reserved for the permission overlay; visible transitions use `fade`.
     static let overlay = Animation.interactiveSpring(response: 0.22, dampingFraction: 0.92, blendDuration: 0.06)
     static let tabSelection = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.16)
     static let pageSwitch = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.26)
@@ -9,10 +10,15 @@ enum ClipFlowMotion {
     static let selection = Animation.easeOut(duration: 0.14)
     static let press = Animation.easeOut(duration: 0.10)
     static let fade = Animation.easeOut(duration: 0.16)
+    static let inspectorOpen: TimeInterval = 0.28
+    static let inspectorClose: TimeInterval = 0.20
+    static let inspectorReduced: TimeInterval = 0.11
+    /// One press scale for every control. Reduce Motion skips the scale.
+    static let pressScale: CGFloat = 0.98
 
     @MainActor
     static var overlayTransition: AnyTransition {
-        .scale(scale: 0.985).combined(with: .opacity)
+        .opacity
     }
 
     static let clipboardPollInterval: TimeInterval = 0.24

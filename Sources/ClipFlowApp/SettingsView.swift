@@ -74,16 +74,17 @@ struct SettingsView: View {
                 HStack(spacing: 6) {
                     Circle().fill(store.capturePaused ? Color.orange : Color.green).frame(width: 6, height: 6)
                     Text(store.capturePaused ? "剪贴监听已暂停" : "剪贴监听运行中")
+                        .foregroundStyle(store.capturePaused ? ClipFlowPalette.pausedStatus : ClipFlowPalette.listeningStatus)
                     Spacer()
                     Text(draft.section == .privacy ? "排除规则需保存" : "更改即时生效")
+                        .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                 }
-                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .font(.system(size: 10))
             }
             .padding(ClipFlowLayout.pageInset)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(minWidth: 0, maxWidth: .infinity)
-        .frame(minHeight: 600, idealHeight: 640)
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onDisappear { store.endShortcutRecording() }
     }
 
@@ -99,7 +100,7 @@ struct SettingsView: View {
                         Text("快速粘贴").font(.system(size: 12, weight: .medium))
                         HStack(spacing: 6) {
                             Text(store.isRecordingShortcut ? "Esc 取消" : "点击组合键修改")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                             Text("·").foregroundStyle(.tertiary)
                             Button("恢复默认") { store.setQuickPasteShortcut(.default) }
                                 .buttonStyle(.borderless).disabled(store.isRecordingShortcut)
@@ -152,15 +153,18 @@ struct SettingsView: View {
                 }
             }
             Text("关闭自动删除后，敏感内容仍遮罩显示、仅本地保存。重新开启会清理已超时记录。")
-                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(.system(size: 11))
+                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 2)
             SettingsListGroup(title: "排除应用") {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("每行一个 Bundle ID，来自这些应用的内容不会被记录。")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                     RuleTextEditor(text: $draft.excludedAppsText)
                         .padding(8).frame(height: 136)
-                        .background(palette.inputFill, in: RoundedRectangle(cornerRadius: 8))
+                        .background(palette.inputFill, in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
                         .accessibilityLabel("排除应用 Bundle ID")
                     HStack {
                         Button("恢复默认") {
@@ -185,10 +189,12 @@ struct SettingsView: View {
                 }
                 Divider().padding(.horizontal, 12)
                 SettingsListRow(title: "同步状态") {
-                    Text(store.iCloudSyncStatusValue).font(.system(size: 12)).foregroundStyle(store.iCloudSyncTint)
+                    Text(store.iCloudSyncStatusValue).font(.system(size: 12))
+                        .foregroundStyle(store.iCloudSyncTint(for: colorScheme))
                 }
             }
-            Text(store.iCloudSyncDetail).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(store.iCloudSyncDetail).font(.system(size: 11))
+                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             Label("受保护内容始终保留在本机", systemImage: "lock.shield")
                 .font(.system(size: 11)).foregroundStyle(ClipCategory.protected.tint)
@@ -198,13 +204,15 @@ struct SettingsView: View {
 
 private struct SettingsListGroup<Content: View>: View {
     let title: String
+    @Environment(\.colorScheme) private var colorScheme
     @ViewBuilder var content: Content
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+            Text(title).font(.system(size: 11, weight: .medium))
+                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                 .padding(.horizontal, 4)
             VStack(spacing: 0) { content }
-                .background(CleanGlassBackground(cornerRadius: 12))
+                .background(CleanGlassBackground(cornerRadius: ClipFlowLayout.rowRadius))
         }
     }
 }
@@ -212,13 +220,15 @@ private struct SettingsListGroup<Content: View>: View {
 private struct SettingsListRow<Control: View>: View {
     let title: String
     var detail: String? = nil
+    @Environment(\.colorScheme) private var colorScheme
     @ViewBuilder var control: Control
     var body: some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.system(size: 12, weight: .medium))
                 if let detail {
-                    Text(detail).font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text(detail).font(.system(size: 10))
+                        .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -233,6 +243,7 @@ private struct SettingsListRow<Control: View>: View {
 private struct AppearanceModeControl: View {
     @Binding var selection: ClipFlowAppearance
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @Namespace private var highlight
 
     var body: some View {
@@ -249,7 +260,7 @@ private struct AppearanceModeControl: View {
                         Text(mode.title).font(.system(size: 11, weight: selection == mode ? .semibold : .medium))
                             .lineLimit(1)
                     }
-                    .foregroundStyle(selection == mode ? ClipCategory.all.tint : Color.secondary)
+                    .foregroundStyle(selection == mode ? ClipCategory.all.solid : ClipFlowPalette.secondaryText(for: colorScheme))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background {
                         if selection == mode {
@@ -270,7 +281,7 @@ private struct AppearanceModeControl: View {
         .frame(width: 216, height: 32)
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.09), lineWidth: 1))
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: selection)
+        .animation(reduceMotion ? nil : ClipFlowMotion.fade, value: selection)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("外观模式")
     }

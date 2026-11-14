@@ -22,16 +22,16 @@ extension ClipFlowStore {
 
     var iCloudSyncStatusValue: String { iCloudSyncPhase.statusLabel }
 
-    var iCloudSyncTint: Color {
+    func iCloudSyncTint(for colorScheme: ColorScheme) -> Color {
         switch iCloudSyncPhase {
         case .disabled, .pending:
-            return .secondary
+            return ClipFlowPalette.secondaryText(for: colorScheme)
         case .syncing:
-            return ClipCategory.pinned.tint
+            return ClipCategory.pinned.labelColor(for: colorScheme)
         case .active:
-            return ClipCategory.images.tint
+            return ClipCategory.images.labelColor(for: colorScheme)
         case .unavailable, .failed:
-            return ClipCategory.protected.tint
+            return ClipCategory.protected.labelColor(for: colorScheme)
         }
     }
 

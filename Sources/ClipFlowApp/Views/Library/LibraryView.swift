@@ -61,15 +61,9 @@ struct LibraryView: View {
                             // offscreen content to stay unloaded without selection relayout.
                             LazyVStack(spacing: LibraryCardLayout.spacing) {
                                 ForEach(store.filteredItems) { item in
-                                    LibraryInteractiveCard(item: item, store: store,
-                                        displayedSnippet: store.displaySnippet(for: item), palette: palette,
-                                        onInspectFrom: { source in
-                                            if let onInspectFrom { onInspectFrom(item, source) }
-                                            else { onInspectItem(item) }
-                                        }, onSelect: { store.select(item) },
-                                        onInspect: { onInspectItem(item) })
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: LibraryCardLayout.height(for: item.kind))
+                                    StableHistoryRow(item: item, store: store, palette: palette,
+                                        onInspectFrom: onInspectFrom, onInspectItem: onInspectItem)
+                                        .equatable()
                                 }
                             }
                         }
@@ -80,6 +74,32 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+}
+
+/// Skip row updates while the inspector animates. Selection is observed inside the card,
+/// so a highlight does not replace the native row.
+private struct StableHistoryRow: View, Equatable {
+    let item: ClipboardItem
+    let store: ClipFlowStore
+    let palette: ClipFlowPalette
+    var onInspectFrom: ((ClipboardItem, InspectorSourceAnchor) -> Void)?
+    let onInspectItem: (ClipboardItem) -> Void
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.item == rhs.item
+    }
+
+    var body: some View {
+        LibraryInteractiveCard(item: item, store: store,
+            displayedSnippet: store.displaySnippet(for: item), palette: palette,
+            onInspectFrom: { source in
+                if let onInspectFrom { onInspectFrom(item, source) }
+                else { onInspectItem(item) }
+            }, onSelect: { store.select(item) },
+            onInspect: { onInspectItem(item) })
+        .frame(maxWidth: .infinity)
+        .frame(height: LibraryCardLayout.height(for: item.kind))
     }
 }
 

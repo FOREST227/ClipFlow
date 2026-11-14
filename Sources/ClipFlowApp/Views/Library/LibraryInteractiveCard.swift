@@ -30,6 +30,7 @@ struct LibraryInteractiveCard: NSViewRepresentable {
         let spoken = summary.isEmpty ? displayedSnippet : summary
         view.accessibilitySummary = "\(item.sourceApp)，\(item.kind.label)，\(spoken)，\(item.timeLabel)"
         view.pinActionTitle = item.pinned ? "取消置顶" : "置顶"
+        view.lockedHeight = LibraryCardLayout.height(for: item.kind)
         view.update(
             rootView: AnyView(
                 ClipboardCard(
@@ -70,6 +71,7 @@ final class LibraryInteractiveHostingView: ClipboardRowHitView {
     private(set) var contentRevision = 0
     var accessibilitySummary = ""
     var pinActionTitle = "置顶"
+    var lockedHeight: CGFloat = 0
     let hover = RowHoverState()
     private let selectionHostingView = NSHostingView(rootView: AnyView(EmptyView()))
     private let hostingView = NSHostingView(rootView: AnyView(EmptyView()))
@@ -134,6 +136,12 @@ final class LibraryInteractiveHostingView: ClipboardRowHitView {
         self.menuProvider = menuProvider ?? { [] }
         if onAction == nil { setHovered(false) }
         refreshAccessibilityActions()
+    }
+
+    override var fittingSize: NSSize {
+        guard lockedHeight > 0 else { return super.fittingSize }
+        let width = bounds.width > 1 ? bounds.width : super.fittingSize.width
+        return NSSize(width: width, height: lockedHeight)
     }
 
     override func isAccessibilityElement() -> Bool { true }

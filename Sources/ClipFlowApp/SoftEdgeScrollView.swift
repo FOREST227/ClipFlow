@@ -110,6 +110,11 @@ private struct ScrollViewportProbe: NSViewRepresentable {
                     self.disconnect()
                     self.observedScroll = scroll
                     self.metrics.scrollView = scroll
+                    // Overlay scrollers stay visible without reserving a track, so showing
+                    // the system indicator does not shift history rows when the drawer opens.
+                    scroll.scrollerStyle = .overlay
+                    scroll.hasVerticalScroller = true
+                    scroll.autohidesScrollers = NSScroller.preferredScrollerStyle != .legacy
                     scroll.contentView.postsBoundsChangedNotifications = true
                     scroll.documentView?.postsFrameChangedNotifications = true
                     for (name, object) in [(NSView.boundsDidChangeNotification, scroll.contentView),

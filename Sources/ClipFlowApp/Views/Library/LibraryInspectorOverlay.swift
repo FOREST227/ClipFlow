@@ -276,6 +276,14 @@ struct LibraryInspectorOverlay: View {
                     .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
                     .help(item.pinned ? "取消置顶" : "置顶条目")
                     .accessibilityLabel(item.pinned ? "取消置顶" : "置顶条目")
+                    if SnippetLibrary.canSave(item) {
+                        Button { store.requestSaveSnippet(fromItemID: item.id) } label: {
+                            Image(systemName: "text.badge.plus").frame(width: 14)
+                        }
+                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
+                        .help("存为片段")
+                        .accessibilityLabel("存为片段")
+                    }
                     if item.privacy != .standard {
                         Button(store.isRevealed(item) ? "隐藏" : "显示") { store.toggleReveal(item.id) }
                             .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
@@ -284,6 +292,9 @@ struct LibraryInspectorOverlay: View {
                     Menu {
                         if let url = item.primaryURL {
                             Button("访问链接") { NSWorkspace.shared.open(url) }
+                        }
+                        if SnippetLibrary.canSave(item) {
+                            Button("存为片段") { store.requestSaveSnippet(fromItemID: item.id) }
                         }
                         Button("删除条目", role: .destructive) { store.delete(item.id); onClose() }
                     } label: { Image(systemName: "ellipsis").frame(width: 24, height: 28) }

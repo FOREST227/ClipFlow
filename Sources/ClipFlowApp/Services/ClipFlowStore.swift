@@ -59,12 +59,25 @@ final class ClipFlowStore: ObservableObject {
     var registerShortcut: ((ClipFlowShortcut) -> String?)?
     var suspendShortcut: (() -> Void)?
     @Published var historyLoadError: String?
+    @Published var snippetSearch = ""
+    @Published var sensitiveSnippetPrompt: SensitiveSnippetPrompt?
+    @Published var snippetLoadError: String?
 
     @Published private(set) var items: [ClipboardItem] = [] {
         didSet {
             itemsRevision += 1
             schedulePersistItems()
             ensureSelectionStillValid()
+            if iCloudSyncEnabled && !isApplyingCloudSnapshot {
+                scheduleICloudSync()
+            }
+        }
+    }
+
+    @Published var snippets: [SavedSnippet] = [] {
+        didSet {
+            snippetsRevision += 1
+            schedulePersistSnippets()
             if iCloudSyncEnabled && !isApplyingCloudSnapshot {
                 scheduleICloudSync()
             }
@@ -80,11 +93,14 @@ final class ClipFlowStore: ObservableObject {
     let imagePreviewCache = NSCache<NSString, NSImage>()
     let historyURL: URL
     let historyWriter: HistoryFileWriter
+    let snippetsURL: URL
+    let snippetWriter: HistoryFileWriter
     let payloadRepository: SensitivePayloadRepository
     let payloadDigests = SensitivePayloadDigest()
     let imagesDirectoryURL: URL
     let cloudSyncCoordinator: ClipFlowCloudSyncCoordinator
     var pendingPersistWorkItem: DispatchWorkItem?
+    var pendingSnippetPersist: DispatchWorkItem?
     var localSyncTombstones: [UUID: Date] = [:] {
         didSet { persistLocalSyncTombstones() }
     }
@@ -94,8 +110,12 @@ final class ClipFlowStore: ObservableObject {
     var activeCloudSyncTask: Task<Void, Never>?
     var cloudSyncGeneration = 0
     var syncRequestedWhileRunning = false
-    private var isApplyingCloudSnapshot = false
+    var isApplyingCloudSnapshot = false
     var itemsRevision = 0
+    var snippetsRevision = 0
+    var snippetTombstones: [UUID: Date] = [:] {
+        didSet { persistSnippetTombstones() }
+    }
     private let accessibility: any AccessibilityTrustChecking
 
     init(
@@ -116,6 +136,8 @@ final class ClipFlowStore: ObservableObject {
         try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
         historyURL = appSupport.appendingPathComponent("history.json")
         historyWriter = HistoryFileWriter(url: historyURL)
+        snippetsURL = appSupport.appendingPathComponent("snippets.json")
+        snippetWriter = HistoryFileWriter(url: snippetsURL)
         imagesDirectoryURL = appSupport.appendingPathComponent("images", isDirectory: true)
         try? FileManager.default.createDirectory(at: imagesDirectoryURL, withIntermediateDirectories: true)
         imagePreviewCache.countLimit = maxItems + 20
@@ -132,7 +154,9 @@ final class ClipFlowStore: ObservableObject {
         excludedBundleIDs = defaults.stringArray(forKey: Keys.excludedBundleIDs) ?? PasswordManagerApps.bundleIDs
         iCloudLastSyncedAt = defaults.object(forKey: Keys.iCloudLastSyncedAt) as? Date
         localSyncTombstones = Self.decodeTombstones(from: defaults.data(forKey: Keys.iCloudSyncTombstones))
+        snippetTombstones = Self.decodeTombstones(from: defaults.data(forKey: Keys.snippetSyncTombstones))
         items = loadItems()
+        snippets = loadSnippets()
         cleanupOrphanedImageFiles()
         selectedItemID = items.first?.id
     }
@@ -453,6 +477,7 @@ final class ClipFlowStore: ObservableObject {
         static let iCloudSyncEnabled = "iCloudSyncEnabled"
         static let iCloudLastSyncedAt = "iCloudLastSyncedAt"
         static let iCloudSyncTombstones = "iCloudSyncTombstones"
+        static let snippetSyncTombstones = "snippetSyncTombstones"
         static let excludedBundleIDs = "excludedBundleIDs"
     }
 
@@ -461,7 +486,7 @@ final class ClipFlowStore: ObservableObject {
         return LaunchAtLoginStatus.resolve(SMAppService.mainApp.status)
     }
 
-    private static func decodeTombstones(from data: Data?) -> [UUID: Date] {
+    static func decodeTombstones(from data: Data?) -> [UUID: Date] {
         guard let data else { return [:] }
         return (try? JSONDecoder().decode([UUID: Date].self, from: data)) ?? [:]
     }

@@ -193,10 +193,11 @@ final class PlainTextPasteTests: XCTestCase {
         let image = ClipboardClassifier.makeImageItem(imageFilename: "shot.png", imageSignature: "sig",
             imageSize: CGSize(width: 4, height: 3), sourceApp: "预览", sourceBundleID: nil, existingItem: nil)
 
-        XCTAssertEqual(titles(for: rich, store: store), ["粘贴", "复制", "粘贴为纯文本", "复制为纯文本", "置顶", "删除条目"])
-        XCTAssertEqual(titles(for: htmlOnly, store: store), ["粘贴", "复制", "粘贴为纯文本", "复制为纯文本", "置顶", "删除条目"])
-        XCTAssertEqual(titles(for: filesOnly, store: store), ["粘贴", "复制", "置顶", "删除条目"])
-        XCTAssertEqual(titles(for: plain, store: store), ["粘贴", "复制", "置顶", "删除条目"])
+        XCTAssertEqual(titles(for: rich, store: store), ["粘贴", "复制", "粘贴为纯文本", "复制为纯文本", "置顶", "存为片段", "删除条目"])
+        XCTAssertEqual(titles(for: htmlOnly, store: store), ["粘贴", "复制", "粘贴为纯文本", "复制为纯文本", "置顶", "存为片段", "删除条目"])
+        XCTAssertEqual(titles(for: filesOnly, store: store), ["粘贴", "复制", "置顶", "存为片段", "删除条目"])
+        XCTAssertEqual(titles(for: plain, store: store), ["粘贴", "复制", "置顶", "存为片段", "删除条目"])
+        XCTAssertFalse(titles(for: image, store: store).contains("存为片段"))
         XCTAssertFalse(titles(for: image, store: store).contains(PlainTextPaste.pasteTitle))
         XCTAssertFalse(titles(for: image, store: store).contains(PlainTextPaste.copyTitle))
         XCTAssertFalse(PlainTextPaste.hasRichText(image))

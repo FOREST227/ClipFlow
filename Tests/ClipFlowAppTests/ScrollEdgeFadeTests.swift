@@ -31,7 +31,7 @@ final class ScrollEdgeFadeTests: XCTestCase {
 
 @MainActor
 final class ScrollHostTests: XCTestCase {
-    func testLiveScrollViewHasNoReservedScrollbarTrack() throws {
+    func testLiveScrollViewUsesSystemScrollIndicators() throws {
         _ = NSApplication.shared
         let host = NSHostingController(rootView: SoftEdgeScrollView {
             VStack { ForEach(0..<30) { Text("Row \($0)").frame(height: 40) } }
@@ -46,8 +46,11 @@ final class ScrollHostTests: XCTestCase {
             return (v as? NSScrollView).map { [$0] } ?? v.subviews.flatMap { visit($0, depth: depth + 1) }
         }
         let scroll = try XCTUnwrap(visit(host.view).first)
-        XCTAssertFalse(scroll.hasVerticalScroller)
-        XCTAssertEqual(scroll.contentView.frame.width, scroll.bounds.width, accuracy: 1)
+        XCTAssertTrue(scroll.hasVerticalScroller, "System scroll indicators stay available")
+        if NSScroller.preferredScrollerStyle == .overlay {
+            XCTAssertEqual(scroll.contentView.frame.width, scroll.bounds.width, accuracy: 1,
+                "Overlay scrollers do not reserve a track")
+        }
         XCTAssertGreaterThan(scroll.documentView?.bounds.height ?? 0, scroll.contentView.bounds.height)
     }
 }

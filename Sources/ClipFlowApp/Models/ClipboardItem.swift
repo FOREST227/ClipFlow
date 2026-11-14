@@ -8,13 +8,30 @@ enum ClipboardKind: String, Codable, CaseIterable, Sendable {
     case secret
     case image
 
-    var tint: Color {
+    var category: ClipCategory {
         switch self {
-        case .text: ClipCategory.all.tint
-        case .code: ClipCategory.code.tint
-        case .link: ClipCategory.links.tint
-        case .secret: ClipCategory.protected.tint
-        case .image: ClipCategory.images.tint
+        case .text: .text
+        case .code: .code
+        case .link: .links
+        case .secret: .protected
+        case .image: .images
+        }
+    }
+
+    /// Decorative wash. Text on a light row uses `labelColor`.
+    var tint: Color { category.tint }
+
+    func labelColor(for colorScheme: ColorScheme) -> Color {
+        category.labelColor(for: colorScheme)
+    }
+
+    var symbolName: String {
+        switch self {
+        case .text: "text.alignleft"
+        case .code: "chevron.left.forwardslash.chevron.right"
+        case .link: "link"
+        case .secret: "lock.shield"
+        case .image: "photo.on.rectangle"
         }
     }
 

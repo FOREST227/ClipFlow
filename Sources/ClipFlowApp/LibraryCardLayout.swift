@@ -1,5 +1,16 @@
 import Foundation
 
+enum LibraryImageThumbnail {
+    static let height: CGFloat = 72
+    static let maxWidth: CGFloat = 160
+
+    static func width(imageWidth: Double?, imageHeight: Double?) -> CGFloat {
+        guard let imageWidth, let imageHeight, imageWidth.isFinite, imageHeight.isFinite,
+              imageWidth > 0, imageHeight > 0 else { return height }
+        return min(maxWidth, max(1, height * imageWidth / imageHeight))
+    }
+}
+
 enum LibraryImageShape: Equatable {
     case landscape, square, portrait
 

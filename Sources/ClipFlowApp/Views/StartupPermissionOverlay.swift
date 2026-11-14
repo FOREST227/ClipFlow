@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct StartupPermissionOverlay: View {
+    @Environment(\.colorScheme) private var colorScheme
     let report: ClipFlowPermissionReport
     let palette: ClipFlowPalette
     let onDismiss: () -> Void
@@ -8,13 +9,17 @@ struct StartupPermissionOverlay: View {
     let onRequestAccessibility: () -> Void
     let onOpenAccessibilitySettings: () -> Void
 
+    private var needsAccessibilitySettings: Bool {
+        report.items.contains { $0.title == "辅助功能" && $0.status == .needsAttention }
+    }
+
     var body: some View {
         FrostedPanel(palette: palette) {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: ClipFlowLayout.space8) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 10) {
                         ZStack {
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
                                 .fill((report.needsAttention ? ClipCategory.protected.tint : ClipCategory.images.tint).opacity(0.16))
                                 .frame(width: 42, height: 42)
 
@@ -25,20 +30,20 @@ struct StartupPermissionOverlay: View {
 
                         VStack(alignment: .leading, spacing: 4) {
                             Text(report.title)
-                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .font(.system(size: 18, weight: .semibold))
                             Text(report.message)
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Color.secondary)
+                                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
 
-                VStack(spacing: 10) {
+                VStack(spacing: ClipFlowLayout.space8) {
                     ForEach(report.items) { item in
-                        HStack(alignment: .top, spacing: 12) {
+                        HStack(alignment: .top, spacing: ClipFlowLayout.space12) {
                             ZStack {
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
                                     .fill(item.status.tint.opacity(0.14))
                                     .frame(width: 38, height: 38)
 
@@ -65,39 +70,28 @@ struct StartupPermissionOverlay: View {
 
                                 Text(item.detail)
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(Color.secondary)
+                                    .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        .padding(12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(palette.softFill)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .stroke(palette.border.opacity(0.64), lineWidth: 1)
-                        )
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        Button("继续使用", action: onDismiss)
-                            .buttonStyle(ClipButtonStyle(fill: palette.secondaryButtonFill))
-
-                        Button("重新检测", action: onRefresh)
-                            .buttonStyle(ClipButtonStyle(fill: palette.secondaryButtonFill))
+                VStack(alignment: .leading, spacing: ClipFlowLayout.space8) {
+                    if needsAccessibilitySettings {
+                        Button("打开系统设置", action: onOpenAccessibilitySettings)
+                            .buttonStyle(ClipFlowActionButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
+                            .help("系统设置 → 隐私与安全性 → 辅助功能")
                     }
-
-                    if report.items.contains(where: { $0.title == "辅助功能" && $0.status == .needsAttention }) {
-                        HStack(spacing: 10) {
-                            Button("打开系统设置", action: onOpenAccessibilitySettings)
-                                .buttonStyle(ClipButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
-                                .help("系统设置 → 隐私与安全性 → 辅助功能")
+                    HStack(spacing: ClipFlowLayout.space8) {
+                        if needsAccessibilitySettings {
                             Button("请求辅助功能权限", action: onRequestAccessibility)
-                                .buttonStyle(ClipButtonStyle(fill: palette.secondaryButtonFill))
+                                .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
                         }
+                        Button("继续使用", action: onDismiss)
+                            .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
+                        Button("重新检测", action: onRefresh)
+                            .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
                     }
                 }
             }

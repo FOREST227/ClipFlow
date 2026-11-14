@@ -26,6 +26,11 @@ struct LibraryInteractiveCard: NSViewRepresentable {
         view.interactionEnabled = isEnabled
         view.identifier = NSUserInterfaceItemIdentifier(id.uuidString)
         let inspect = InspectorSourceAnchor.callback(for: view, fallback: onInspect, anchored: onInspectFrom)
+        let summary = ClipboardCardSummary.plainFirstLine(of: store.displayFullText(for: item))
+        let spoken = summary.isEmpty ? displayedSnippet : summary
+        view.accessibilitySummary = "\(item.sourceApp)，\(item.kind.label)，\(spoken)，\(item.timeLabel)"
+        view.pinActionTitle = item.pinned ? "取消置顶" : "置顶"
+        view.lockedHeight = LibraryCardLayout.height(for: item.kind)
         view.update(
             rootView: AnyView(
                 ClipboardCard(
@@ -64,6 +69,9 @@ struct LibraryInteractiveCard: NSViewRepresentable {
 
 final class LibraryInteractiveHostingView: ClipboardRowHitView {
     private(set) var contentRevision = 0
+    var accessibilitySummary = ""
+    var pinActionTitle = "置顶"
+    var lockedHeight: CGFloat = 0
     let hover = RowHoverState()
     private let selectionHostingView = NSHostingView(rootView: AnyView(EmptyView()))
     private let hostingView = NSHostingView(rootView: AnyView(EmptyView()))
@@ -79,6 +87,8 @@ final class LibraryInteractiveHostingView: ClipboardRowHitView {
 
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
 
         selectionHostingView.translatesAutoresizingMaskIntoConstraints = false
         selectionHostingView.wantsLayer = true
@@ -125,6 +135,44 @@ final class LibraryInteractiveHostingView: ClipboardRowHitView {
         self.onAction = onAction
         self.menuProvider = menuProvider ?? { [] }
         if onAction == nil { setHovered(false) }
+        refreshAccessibilityActions()
+    }
+
+    override var fittingSize: NSSize {
+        guard lockedHeight > 0 else { return super.fittingSize }
+        let width = bounds.width > 1 ? bounds.width : super.fittingSize.width
+        return NSSize(width: width, height: lockedHeight)
+    }
+
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .group }
+    override func accessibilityLabel() -> String? { accessibilitySummary }
+    override func accessibilityChildren() -> [Any]? { [] }
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        interactionEnabled ? rowAccessibilityActions : nil
+    }
+
+    private var rowAccessibilityActions: [NSAccessibilityCustomAction] = []
+
+    private func refreshAccessibilityActions() {
+        guard onAction != nil else {
+            rowAccessibilityActions = []
+            return
+        }
+        rowAccessibilityActions = [
+            NSAccessibilityCustomAction(name: "复制") { [weak self] in
+                self?.onAction?(.copy)
+                return true
+            },
+            NSAccessibilityCustomAction(name: pinActionTitle) { [weak self] in
+                self?.onAction?(.pin)
+                return true
+            },
+            NSAccessibilityCustomAction(name: "删除") { [weak self] in
+                self?.onAction?(.delete)
+                return true
+            }
+        ]
     }
 
     /// Opens the detail drawer from this row (double click, middle click, menu, keyboard).

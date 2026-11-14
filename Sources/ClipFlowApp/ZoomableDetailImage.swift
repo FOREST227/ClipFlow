@@ -86,7 +86,7 @@ final class DetailImageCanvas: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.cornerRadius = 12
+        layer?.cornerRadius = ClipFlowLayout.rowRadius
         layer?.masksToBounds = true
         toolTip = "滚轮或双指捏合缩放 · 拖动查看 · 双击恢复"
         setAccessibilityLabel("图片预览，滚轮或双指捏合缩放，拖动查看，双击恢复")

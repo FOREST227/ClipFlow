@@ -24,6 +24,7 @@ struct LibraryInspectorOverlay: View {
     }
     @ViewState private var showsInfo = false
     @ViewState private var copyFeedback: String?
+    @ViewState private var measuredFooterHeight: CGFloat = 0
 
     // Explicit API: Swift 6.2 gives the synthesized memberwise initializer
     // private access because of the stored DynamicProperty preferences.
@@ -45,7 +46,7 @@ struct LibraryInspectorOverlay: View {
 
     private let drawerHeaderHeight: CGFloat = 84
     private var drawerFooterHeight: CGFloat {
-        124 + (showsInfo ? 72 : 0) + (item.isSensitive ? 22 : 0) + (copyFeedback == nil ? 0 : 20)
+        measuredFooterHeight > 1 ? measuredFooterHeight : 96
     }
     private var drawerHeight: CGFloat {
         if item.isImage || item.kind == .code || markdownAvailable { return maxHeight }
@@ -67,20 +68,23 @@ struct LibraryInspectorOverlay: View {
         let preview = drawerPreview
         let actions = drawerActions
         let info = drawerInfo
-        let summary = drawerSourceSummary
         return InspectorMotionSurface(motion: motion ?? .settled, reduceMotion: reduceMotion,
             reduceTransparency: reduceTransparency) { frame in
             let destination = CGRect(x: destinationRectInWindow.minX, y: destinationRectInWindow.minY,
                 width: contentWidth, height: height)
-            let drawer = InspectorDrawerLayout.resolve(progress: frame.progress,
+            // Lay the shell out at its final size. Motion is a scale and offset, not a layout pass.
+            let drawer = InspectorDrawerLayout.resolve(progress: 1,
                 sourceRectInWindow: sourceRectInWindow, destinationRectInWindow: destination,
-                footerHeight: footerHeight, reduceMotion: reduceMotion)
+                footerHeight: footerHeight, reduceMotion: true)
+            let transform = InspectorShellTransform.resolve(progress: frame.progress,
+                sourceRectInWindow: sourceRectInWindow, destinationRectInWindow: destination,
+                reduceMotion: reduceMotion)
             let coverRect = CGRect(x: drawer.shellRect.minX, y: drawer.coverTop,
                 width: drawer.shellRect.width, height: drawer.coverHeight)
             let coverOpacity = reduceMotion ? frame.progress : min(1, frame.progress / 0.10)
 
             return ZStack(alignment: .topLeading) {
-                DetailGlassBackground(cornerRadius: 22, compactShadow: compactShadow)
+                DetailGlassBackground(cornerRadius: ClipFlowLayout.overlayRadius, compactShadow: compactShadow)
                     .frame(width: drawer.shellRect.width, height: drawer.shellRect.height)
                     .position(x: drawer.shellRect.midX, y: drawer.shellRect.midY)
                     .opacity(coverOpacity)
@@ -96,32 +100,32 @@ struct LibraryInspectorOverlay: View {
                         .offset(x: 20, y: drawerHeaderHeight + frame.contentOffsetY)
                 }
                 .frame(width: contentWidth, height: height, alignment: .topLeading)
-                .mask(Path(roundedRect: drawer.shellRect, cornerRadius: 22))
+                .mask(Path(roundedRect: drawer.shellRect, cornerRadius: ClipFlowLayout.overlayRadius))
 
                 ZStack(alignment: .topLeading) {
                     InspectorDrawerCoverShape(lipDepth: drawer.lipDepth)
                         .path(in: coverRect)
-                        .fill(textColorScheme == .dark
-                            ? Color(red: 0.19, green: 0.21, blue: 0.25)
-                            : Color(red: 0.85, green: 0.90, blue: 0.96))
-                    VStack(alignment: .leading, spacing: 8) {
-                        summary
-                        Group {
-                            if item.isSensitive {
-                                Label(item.autoExpire ? "仅本地保存 · 复制 5 分钟后过期" : "受保护内容 · 仅本地保存", systemImage: "lock.shield")
-                                    .font(.system(size: 10)).foregroundStyle(item.kind.tint)
-                            }
-                            actions
-                            if let copyFeedback {
-                                Text(copyFeedback).font(.system(size: 10)).foregroundStyle(.secondary)
-                                    .lineLimit(1).help(copyFeedback)
-                            }
-                            info
+                        .fill(ClipFlowPalette.inspectorCover(for: textColorScheme))
+                    VStack(alignment: .leading, spacing: ClipFlowLayout.space8) {
+                        if item.isSensitive {
+                            Label(item.autoExpire ? "仅本地保存 · 复制 5 分钟后过期" : "受保护内容 · 仅本地保存", systemImage: "lock.shield")
+                                .font(.system(size: 10)).foregroundStyle(item.kind.labelColor(for: textColorScheme))
                         }
-                        .opacity(frame.contentOpacity)
-                        .allowsHitTesting(frame.contentOpacity >= 0.99)
-                        .accessibilityHidden(frame.contentOpacity < 0.99)
+                        actions
+                        if let copyFeedback {
+                            Text(copyFeedback).font(.system(size: 10))
+                                .foregroundStyle(ClipFlowPalette.secondaryText(for: textColorScheme))
+                                .lineLimit(1).help(copyFeedback)
+                        }
+                        info
                     }
+                    .padding(.bottom, ClipFlowLayout.space8)
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: InspectorFooterHeightKey.self, value: proxy.size.height + ClipFlowLayout.space16)
+                    })
+                    .opacity(frame.contentOpacity)
+                    .allowsHitTesting(frame.contentOpacity >= 0.99)
+                    .accessibilityHidden(frame.contentOpacity < 0.99)
                     .frame(width: max(1, contentWidth - 24), alignment: .topLeading)
                     .offset(x: drawer.shellRect.minX + 12, y: drawer.coverTop + 16)
                 }
@@ -129,59 +133,49 @@ struct LibraryInspectorOverlay: View {
                 .mask(InspectorDrawerCoverShape(lipDepth: drawer.lipDepth).path(in: coverRect))
                 .opacity(coverOpacity)
             }
+            .scaleEffect(x: transform.scaleX, y: transform.scaleY, anchor: .center)
+            .offset(x: transform.offset.width, y: transform.offset.height)
         }
         .frame(width: contentWidth, height: height, alignment: .topLeading)
         .opacity(sourceRectInWindow == nil || destinationRectInWindow.width > 0 ? 1 : 0)
         .background(InspectorFrameReader { rect in
+            // Ignore transforms that only move the visual shell; the layout frame is the destination.
             if destinationRectInWindow != rect { destinationRectInWindow = rect }
         })
+        .onPreferenceChange(InspectorFooterHeightKey.self) { next in
+            let rounded = ceil(next)
+            if rounded > 1, abs(rounded - measuredFooterHeight) > 0.5 {
+                measuredFooterHeight = rounded
+            }
+        }
         .onChangeBackward(of: item.id) {
             showsInfo = false; copyFeedback = nil; showsMarkdownPreview = false; codeLanguage = "自动识别"
         }
     }
 
-    private var drawerSymbol: String {
-        switch item.kind {
-        case .text: "text.alignleft"
-        case .code: "chevron.left.forwardslash.chevron.right"
-        case .link: "link"
-        case .secret: "lock.shield"
-        case .image: "photo.on.rectangle"
-        }
-    }
-
-    private var drawerSourceSummary: some View {
-        HStack(spacing: 8) {
-            Image(systemName: drawerSymbol)
-                .font(.system(size: 13, weight: .medium)).foregroundStyle(item.kind.tint)
-                .frame(width: 26, height: 26)
-                .background(item.kind.tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.isSensitive && !store.isRevealed(item) ? "受保护的敏感内容" : item.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                Text(item.sourceApp).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            Button(action: onClose) {
-                Image(systemName: "arrow.down.right.and.arrow.up.left")
-                    .font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 22, height: 26)
-            }
-            .buttonStyle(.plain).help("收起详情").accessibilityLabel("收起详情")
-        }
-        .frame(height: 28)
-    }
-
     private var drawerHeader: some View {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.kind.label).font(.system(size: 16, weight: .semibold))
+            HStack(alignment: .top, spacing: ClipFlowLayout.space12) {
+                VStack(alignment: .leading, spacing: ClipFlowLayout.space4) {
+                    HStack(spacing: ClipFlowLayout.space8) {
+                        Text(item.isSensitive && !store.isRevealed(item) ? "受保护的敏感内容" : item.title)
+                            .font(.system(size: 16, weight: .semibold))
+                            .lineLimit(1)
+                        Text(item.kind.label)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(item.kind.labelColor(for: textColorScheme))
+                            .padding(.horizontal, ClipFlowLayout.space8)
+                            .padding(.vertical, ClipFlowLayout.space4)
+                            .background(item.kind.tint.opacity(0.12), in: Capsule())
+                    }
                     Text(headerMetadata)
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(ClipFlowPalette.secondaryText(for: textColorScheme))
                         .lineLimit(2).help(headerMetadata)
                 }
                 Spacer()
                 Button(action: onClose) {
                     Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
-                        .frame(width: 26, height: 26)
+                        .frame(width: 28, height: 28)
                         .background(Color.primary.opacity(0.05), in: Circle())
                 }
                 .buttonStyle(.plain).background(InspectorFrameReader(name: "ClipFlowInspector.close")).help("关闭详情").accessibilityLabel("关闭详情")
@@ -190,17 +184,31 @@ struct LibraryInspectorOverlay: View {
 
     @ViewBuilder private var drawerPreview: some View {
             if item.isImage {
-                if (!item.isSensitive || store.isRevealed(item)), let url = store.imageURL(for: item) {
-                    ZoomableDetailImage(url: url)
-                        .frame(height: previewHeight)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                } else {
-                    ClipThumbnailView(store: store, item: item, height: previewHeight, cornerRadius: 12,
-                        showsDimensionLabel: false, contentMode: .fit, insetPreview: true)
+                let shape = LibraryImageShape.resolve(width: item.imageWidth, height: item.imageHeight)
+                let columnWidth = max(120, contentWidth - 40)
+                let pixelWidth = max(1, item.imageWidth ?? Double(columnWidth))
+                let pixelHeight = max(1, item.imageHeight ?? Double(columnWidth))
+                let naturalHeight = columnWidth * pixelHeight / pixelWidth
+                let cap = DetailImageLayout.previewHeight(shape: shape, availableHeight: drawerHeight, expandedInfo: showsInfo)
+                let imageHeight = min(previewHeight, max(64, min(cap, naturalHeight)))
+                VStack(alignment: .leading, spacing: ClipFlowLayout.space8) {
+                    if (!item.isSensitive || store.isRevealed(item)), let url = store.imageURL(for: item) {
+                        ZoomableDetailImage(url: url)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: imageHeight, alignment: .top)
+                            .clipShape(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
+                    } else {
+                        ClipThumbnailView(store: store, item: item, height: imageHeight,
+                            cornerRadius: ClipFlowLayout.rowRadius,
+                            showsDimensionLabel: false, contentMode: .fit, insetPreview: true)
+                    }
+                    if let dimensions = item.imageDimensionText {
+                        Text(dimensions).font(.system(size: 10))
+                            .foregroundStyle(ClipFlowPalette.secondaryText(for: textColorScheme))
+                    }
                 }
-                if let dimensions = item.imageDimensionText {
-                    Text(dimensions).font(.system(size: 10)).foregroundStyle(.secondary)
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.bottom, ClipFlowLayout.space8)
             } else if item.kind == .code || markdownAvailable {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -224,7 +232,8 @@ struct LibraryInspectorOverlay: View {
                         language: markdownAvailable && item.kind != .code && codeLanguage == "自动识别" ? "markdown" : codeLanguage,
                         dark: textColorScheme == .dark)
                         .frame(height: max(64, previewHeight - 32))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .clipShape(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
+                        .padding(.bottom, ClipFlowLayout.space8)
                 }
             } else {
                 SoftEdgeScrollView(showsEdgeEffects: false) {
@@ -236,7 +245,9 @@ struct LibraryInspectorOverlay: View {
                         .padding(12)
                 }
                 .frame(height: previewHeight)
-                .background(textColorScheme == .dark ? palette.inputFill : Color.white, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.bottom, ClipFlowLayout.space8)
+                .background(textColorScheme == .dark ? palette.inputFill : Color.white,
+                    in: RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
             }
 
     }
@@ -285,7 +296,7 @@ struct LibraryInspectorOverlay: View {
                 }
                 .font(.system(size: 11)).padding(.top, 8)
             }
-            .font(.system(size: 11)).foregroundStyle(.secondary)
+            .font(.system(size: 11)).foregroundStyle(ClipFlowPalette.secondaryText(for: textColorScheme))
     }
 
     private var headerMetadata: String {
@@ -297,7 +308,14 @@ struct LibraryInspectorOverlay: View {
     }
 
     private func infoRow(_ title: String, value: String) -> some View {
-        HStack { Text(title).foregroundStyle(.secondary); Spacer(); Text(value) }
+        HStack { Text(title).foregroundStyle(ClipFlowPalette.secondaryText(for: textColorScheme)); Spacer(); Text(value) }
+    }
+}
+
+private struct InspectorFooterHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

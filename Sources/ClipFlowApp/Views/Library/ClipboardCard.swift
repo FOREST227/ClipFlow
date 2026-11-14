@@ -2,10 +2,12 @@ import AppKit
 import SwiftUI
 
 struct ClipThumbnailView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var store: ClipFlowStore
     let item: ClipboardItem
     let height: CGFloat
-    var cornerRadius: CGFloat = 20
+    var cornerRadius: CGFloat = ClipFlowLayout.overlayRadius
+    var expandsToContainer: Bool = true
     var showsDimensionLabel: Bool = true
     var contentMode: ContentMode = .fill
     var insetPreview: Bool = false
@@ -30,7 +32,7 @@ struct ClipThumbnailView: View {
                     .padding(12)
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: expandsToContainer ? .infinity : nil)
         .frame(height: height)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(
@@ -69,7 +71,7 @@ struct ClipThumbnailView: View {
                 .foregroundStyle(tint)
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.secondary)
+                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
@@ -94,7 +96,7 @@ struct LibrarySelectionChrome: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
-            .fill(isSelected ? palette.softFill : palette.rowFill)
+            .fill(isSelected ? palette.selectedRowFill : palette.rowFill)
             .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
                 .fill(isSelected ? tint.opacity(colorScheme == .dark ? 0.22 : 0.14) : .clear))
             .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
@@ -114,15 +116,32 @@ struct LibrarySelectionChrome: View {
     }
 }
 
+enum ClipboardCardSummary {
+    /// First readable line, with Markdown markers removed so a heading is not shown as source.
+    static func plainFirstLine(of text: String) -> String {
+        let stripped = text
+            .replacingOccurrences(of: #"(?m)^\s{0,3}#{1,6}\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?m)^\s*[-*+]\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[*_`>#]+"#, with: "", options: .regularExpression)
+        for line in stripped.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty { return String(trimmed) }
+        }
+        return ""
+    }
+}
+
 struct ClipboardCard: View {
     let item: ClipboardItem
     let displayedSnippet: String
     let palette: ClipFlowPalette
     @ObservedObject var store: ClipFlowStore
     var hover: RowHoverState? = nil
+    @Environment(\.colorScheme) private var colorScheme
+    @ViewState private var isSelected = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: item.kind == .image || item.kind == .code ? 6 : 3) {
+        VStack(alignment: .leading, spacing: item.kind == .image || item.kind == .code ? 6 : ClipFlowLayout.space4) {
             metadata
             if item.isImage {
                 imageContent
@@ -131,23 +150,26 @@ struct ClipboardCard: View {
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .lineLimit(5).multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(8)
-                    .background(itemTint.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+                    .padding(ClipFlowLayout.space8)
+                    .background(item.kind.tint.opacity(0.045), in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
                 tags
             } else {
-                Text(displayedSnippet)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                Text(summaryLine)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 18, maxHeight: 18, alignment: .leading)
                 tags
             }
         }
         // Reserve the selection rail's gutter even when not selected.
-        .padding(.leading, 24)
-        .padding(.trailing, 12)
-        .padding(.vertical, 10)
+        .padding(.leading, ClipFlowLayout.space16)
+        .padding(.trailing, ClipFlowLayout.space12)
+        .padding(.vertical, ClipFlowLayout.space8)
         .frame(maxWidth: .infinity)
         .frame(height: LibraryCardLayout.height(for: item.kind), alignment: .top)
+        .onReceive(store.historySelection.$itemID.map { $0 == item.id }.removeDuplicates()) {
+            if isSelected != $0 { isSelected = $0 }
+        }
         .overlay(alignment: .topTrailing) {
             if let hover { LibraryCardActionBar(hover: hover, pinned: item.pinned) }
         }
@@ -158,39 +180,31 @@ struct ClipboardCard: View {
             Text(item.sourceApp).lineLimit(1)
             Text(item.kind.label)
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(itemTint)
+                .foregroundStyle(item.kind.labelColor(for: colorScheme))
                 .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(itemTint.opacity(0.1), in: Capsule())
-            if item.pinned { Image(systemName: "pin.fill").foregroundStyle(ClipCategory.pinned.tint) }
+                .background(item.kind.tint.opacity(0.1), in: Capsule())
+            if item.pinned { Image(systemName: "pin.fill").foregroundStyle(ClipCategory.pinned.labelColor(for: colorScheme)) }
             Spacer(minLength: 4)
             Text(item.timeLabel).lineLimit(1)
         }
-        .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+        .font(.system(size: 10, weight: .medium))
+        .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
         .frame(height: 16)
     }
 
     @ViewBuilder private var imageContent: some View {
-        let shape = LibraryImageShape.resolve(width: item.imageWidth, height: item.imageHeight)
-        if shape == .landscape {
-            ClipThumbnailView(store: store, item: item, height: 88, cornerRadius: 8,
-                showsDimensionLabel: false, contentMode: .fit, insetPreview: true)
-            HStack {
-                Text(item.title).font(.system(size: 10, weight: .medium)).lineLimit(1)
-                Spacer(minLength: 8)
-                Text("横向").font(.system(size: 9)).foregroundStyle(.secondary)
+        let thumbWidth = LibraryImageThumbnail.width(imageWidth: item.imageWidth, imageHeight: item.imageHeight)
+        HStack(alignment: .center, spacing: ClipFlowLayout.space12) {
+            ClipThumbnailView(store: store, item: item, height: LibraryImageThumbnail.height,
+                cornerRadius: ClipFlowLayout.controlRadius, expandsToContainer: false,
+                showsDimensionLabel: false, contentMode: .fit, insetPreview: false)
+                .frame(width: thumbWidth, height: LibraryImageThumbnail.height)
+            VStack(alignment: .leading, spacing: ClipFlowLayout.space8) {
+                Text(item.title).font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                    .lineLimit(2)
+                tags
             }
-        } else {
-            HStack(alignment: .center, spacing: 12) {
-                ClipThumbnailView(store: store, item: item, height: 104, cornerRadius: 8,
-                    showsDimensionLabel: false, contentMode: .fit, insetPreview: true)
-                    .frame(width: shape == .portrait ? 76 : 104)
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(item.title).font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .lineLimit(2)
-                    tags
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -204,12 +218,14 @@ struct ClipboardCard: View {
                     .foregroundStyle(item.privacy.color).lineLimit(1)
             }
         }
-        .font(.system(size: 9)).foregroundStyle(.secondary)
+        .font(.system(size: 9))
+        .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
         .frame(height: 12)
     }
 
-    private var itemTint: Color {
-        item.kind.tint
+    private var summaryLine: String {
+        let line = ClipboardCardSummary.plainFirstLine(of: store.displayFullText(for: item))
+        return line.isEmpty ? displayedSnippet : line
     }
 }
 

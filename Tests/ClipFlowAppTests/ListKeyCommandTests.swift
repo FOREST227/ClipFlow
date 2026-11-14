@@ -142,7 +142,8 @@ final class ListKeyboardFlowTests: XCTestCase {
         XCTAssertTrue(keys.handle(try key(126, in: fixture.window)))
         XCTAssertTrue(keys.handle(try key(126, in: fixture.window)))
         XCTAssertEqual(context.store.selectedItemID, items[0].id, "The first row does not wrap")
-        XCTAssertFalse(keys.handle(try key(18, .command, in: fixture.window)), "⌘1 belongs to quick paste only")
+        XCTAssertTrue(keys.handle(try key(18, .command, in: fixture.window)), "⌘1 pastes the first visible history row")
+        XCTAssertEqual(context.store.selectedItemID, items[0].id)
 
         // The harness hosts the page the way the main window does: the report is drawn outside it.
         context.store.startupPermissionReport = ClipFlowPermissionReport(title: "权限", message: "", items: [])

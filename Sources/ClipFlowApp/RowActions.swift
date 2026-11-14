@@ -83,19 +83,22 @@ final class RowHoverState: ObservableObject {
 
 enum LibraryCardAction: Int, CaseIterable {
     case copy, pin, delete
+
+    /// Delete stays in the context menu and in VoiceOver actions.
+    static let hoverActions: [LibraryCardAction] = [.copy, .pin]
 }
 
 /// The action bar is drawn by SwiftUI but clicked through the row's native
 /// event handling, so both sides share this geometry.
 enum LibraryCardActionLayout {
-    static let buttonSize = CGSize(width: 26, height: 22)
-    static let spacing: CGFloat = 2
-    static let padding: CGFloat = 2
-    static let trailingInset: CGFloat = 8
-    static let topInset: CGFloat = 5
+    static let buttonSize = CGSize(width: 28, height: 28)
+    static let spacing: CGFloat = ClipFlowLayout.space4
+    static let padding: CGFloat = ClipFlowLayout.space4
+    static let trailingInset: CGFloat = ClipFlowLayout.space8
+    static let topInset: CGFloat = ClipFlowLayout.space4
 
     static var barSize: CGSize {
-        let count = CGFloat(LibraryCardAction.allCases.count)
+        let count = CGFloat(LibraryCardAction.hoverActions.count)
         return CGSize(width: count * buttonSize.width + (count - 1) * spacing + 2 * padding,
             height: buttonSize.height + 2 * padding)
     }
@@ -106,9 +109,16 @@ enum LibraryCardActionLayout {
             width: barSize.width, height: barSize.height)
         guard bar.minX >= 0, bar.contains(point) else { return nil }
         let x = point.x - bar.minX - padding
-        guard x >= 0 else { return .copy }
-        let index = min(LibraryCardAction.allCases.count - 1, Int(x / (buttonSize.width + spacing)))
-        return LibraryCardAction(rawValue: index)
+        guard x >= 0 else { return LibraryCardAction.hoverActions.first }
+        let index = min(LibraryCardAction.hoverActions.count - 1, Int(x / (buttonSize.width + spacing)))
+        return LibraryCardAction.hoverActions[index]
+    }
+}
+
+enum HistoryPasteRouting {
+    /// Same index rule as quick paste: ⌘1 is the first visible row.
+    static func item(at index: Int, in items: [ClipboardItem]) -> ClipboardItem? {
+        items.indices.contains(index) ? items[index] : nil
     }
 }
 
@@ -120,20 +130,20 @@ struct LibraryCardActionBar: View {
 
     var body: some View {
         HStack(spacing: LibraryCardActionLayout.spacing) {
-            ForEach(LibraryCardAction.allCases, id: \.self) { action in
+            ForEach(LibraryCardAction.hoverActions, id: \.self) { action in
                 Image(systemName: hover.confirmedAction == action ? "checkmark" : symbol(for: action))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(action == .delete ? ClipCategory.protected.tint : Color.primary.opacity(0.75))
                     .frame(width: LibraryCardActionLayout.buttonSize.width,
                         height: LibraryCardActionLayout.buttonSize.height)
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
                     .help(title(for: action))
             }
         }
         .padding(LibraryCardActionLayout.padding)
         .background(colorScheme == .dark ? Color(red: 0.22, green: 0.24, blue: 0.29) : Color.white,
-            in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+            in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
         .padding(.trailing, LibraryCardActionLayout.trailingInset)
         .padding(.top, LibraryCardActionLayout.topInset)
         .opacity(hover.isHovered ? 1 : 0)

@@ -165,10 +165,12 @@ private struct MainWindowView: View {
                         onRefresh: { store.rerunPermissionCheck() },
                         onRequestAccessibility: { store.requestAccessibilityPermissionPrompt() },
                         onOpenAccessibilitySettings: { _ = AccessibilityTrust.openSystemSettings() })
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, ClipFlowLayout.space24)
                 }
+                .transition(.opacity)
             }
         }
+        .animation(reduceMotion ? nil : ClipFlowMotion.fade, value: store.startupPermissionReport != nil)
         .environment(\.locale, locale)
     }
 }
@@ -191,6 +193,7 @@ private struct PageMotion: ViewModifier {
 }
 
 private struct MainSidebarView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var navigation: MainWindowNavigation
     @ObservedObject var draft: SettingsDraft
 
@@ -202,7 +205,8 @@ private struct MainSidebarView: View {
             .padding(.top, 16)
             Spacer(minLength: 12)
             Text("设置")
-                .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                 .padding(.horizontal, 10).padding(.bottom, 4)
                 .accessibilityAddTraits(.isHeader)
             ForEach(SettingsCategory.allCases) { category in
@@ -217,7 +221,7 @@ private struct MainSidebarView: View {
         .padding(.top, 30)
         .frame(width: 128)
         .frame(maxHeight: .infinity)
-        .background(CleanGlassBackground(cornerRadius: 16))
+        .background(CleanGlassBackground(cornerRadius: ClipFlowLayout.rowRadius))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("主导航")
     }
@@ -235,9 +239,9 @@ private struct MainSidebarView: View {
             }
             .foregroundStyle(selected ? Color.white : Color.primary.opacity(0.8))
             .padding(.horizontal, 10).frame(height: 36)
-            .background(selected ? ClipCategory.all.tint : .clear,
-                in: RoundedRectangle(cornerRadius: 10))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
+            .background(selected ? ClipCategory.all.solid : .clear,
+                in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? [.isSelected] : [])

@@ -17,70 +17,52 @@ struct ScrollEdgeFade: Equatable {
 }
 
 /// The content stays sharp; only the viewport edges receive a masked material.
+/// Edge fade observes scroll metrics on its own. The scrolled content does not,
+/// so a bounds publish cannot rebuild the lazy rows inside it.
 struct SoftEdgeScrollView<Content: View>: View {
     var showsEdgeEffects = true
     @ViewBuilder let content: Content
-    @StateObject private var metrics = ScrollViewportState()
-    @ViewState private var hovered = false
-    @ViewState private var scrolling = false
-    @ViewState private var dragOrigin: CGFloat?
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var metrics = ScrollViewportState()
 
     var body: some View {
         GeometryReader { viewport in
             let height = viewport.size.height
-            let fade = ScrollEdgeFade(content: metrics.frame, viewportHeight: height)
-            let thumbHeight = min(height, max(28, height * height / max(height, metrics.frame.height)))
-            let range = max(1, metrics.frame.height - height)
-            let progress = min(1, max(0, -metrics.frame.minY / range))
-            ScrollView(showsIndicators: false) {
+            ScrollView(showsIndicators: true) {
                 content.frame(maxWidth: .infinity, alignment: .leading)
                     .background(ScrollViewportProbe(metrics: metrics))
             }
             .frame(width: viewport.size.width, height: height)
-            .overlay(alignment: .top) { edge(top: true, strength: fade.top) }
-            .overlay(alignment: .bottom) { edge(top: false, strength: fade.bottom) }
+            .overlay(alignment: .top) {
+                if showsEdgeEffects {
+                    ScrollEdgeBand(metrics: metrics, top: true, viewportHeight: height)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if showsEdgeEffects {
+                    ScrollEdgeBand(metrics: metrics, top: false, viewportHeight: height)
+                }
+            }
             .mask {
-                if !showsEdgeEffects || reduceTransparency || height <= 0 {
-                    Rectangle()
+                if showsEdgeEffects {
+                    ScrollEdgeMask(metrics: metrics, viewportHeight: height)
                 } else {
-                    let fraction = min(CGFloat(28) / height, 0.33)
-                    LinearGradient(stops: [
-                        .init(color: .black.opacity(1 - fade.top), location: 0),
-                        .init(color: .black, location: fraction),
-                        .init(color: .black, location: 1 - fraction),
-                        .init(color: .black.opacity(1 - fade.bottom), location: 1)
-                    ], startPoint: .top, endPoint: .bottom)
+                    Rectangle()
                 }
-            }
-            .overlay(alignment: .topTrailing) {
-                if metrics.frame.height > height + 1 && height > 0 {
-                    Capsule().fill(Color.primary.opacity(0.28))
-                        .frame(width: 4, height: thumbHeight)
-                        .padding(.horizontal, 3)
-                        .contentShape(Rectangle())
-                        .offset(y: progress * (height - thumbHeight))
-                        .opacity(hovered || scrolling || dragOrigin != nil ? 1 : 0)
-                        .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                            if dragOrigin == nil { dragOrigin = -metrics.frame.minY }
-                            metrics.scroll(to: (dragOrigin ?? 0) + value.translation.height * range / max(1, height - thumbHeight))
-                        }.onEnded { _ in dragOrigin = nil })
-                        .accessibilityHidden(true)
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: scrolling || hovered)
-                }
-            }
-            .onHover { hovered = $0 }
-            .task(id: metrics.frame.minY) {
-                scrolling = true
-                do { try await Task.sleep(nanoseconds: 800_000_000) } catch { return }
-                scrolling = false
             }
         }
     }
+}
 
-    @ViewBuilder private func edge(top: Bool, strength: Double) -> some View {
-        if showsEdgeEffects && !reduceTransparency {
+private struct ScrollEdgeBand: View {
+    @ObservedObject var metrics: ScrollViewportState
+    let top: Bool
+    let viewportHeight: CGFloat
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        let fade = ScrollEdgeFade(content: metrics.frame, viewportHeight: viewportHeight)
+        let strength = top ? fade.top : fade.bottom
+        if !reduceTransparency {
             Rectangle().fill(.ultraThinMaterial)
                 .mask(LinearGradient(colors: top ? [.black, .clear] : [.clear, .black],
                     startPoint: .top, endPoint: .bottom))
@@ -92,15 +74,45 @@ struct SoftEdgeScrollView<Content: View>: View {
     }
 }
 
+private struct ScrollEdgeMask: View {
+    @ObservedObject var metrics: ScrollViewportState
+    let viewportHeight: CGFloat
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        let fade = ScrollEdgeFade(content: metrics.frame, viewportHeight: viewportHeight)
+        if reduceTransparency || viewportHeight <= 0 {
+            Rectangle()
+        } else {
+            let fraction = min(CGFloat(28) / viewportHeight, 0.33)
+            LinearGradient(stops: [
+                .init(color: .black.opacity(1 - fade.top), location: 0),
+                .init(color: .black, location: fraction),
+                .init(color: .black, location: 1 - fraction),
+                .init(color: .black.opacity(1 - fade.bottom), location: 1)
+            ], startPoint: .top, endPoint: .bottom)
+        }
+    }
+}
+
 @MainActor
 final class ScrollViewportState: ObservableObject {
     @Published var frame = CGRect.zero
     weak var scrollView: NSScrollView?
+    private var pendingFrame: CGRect?
     func refresh() {
         guard let scrollView, let document = scrollView.documentView else { return }
         let next = CGRect(x: 0, y: -scrollView.contentView.bounds.minY,
             width: document.bounds.width, height: document.bounds.height)
-        if next != frame { frame = next }
+        guard next != frame, next != pendingFrame else { return }
+        pendingFrame = next
+        // Bounds notifications arrive inside the layout pass. Publishing there
+        // rebuilds whatever view owns this object.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let pending = self.pendingFrame else { return }
+            self.pendingFrame = nil
+            if pending != self.frame { self.frame = pending }
+        }
     }
     func scroll(to offset: CGFloat) {
         guard let scrollView, let document = scrollView.documentView else { return }
@@ -121,6 +133,7 @@ private struct ScrollViewportProbe: NSViewRepresentable {
         let metrics: ScrollViewportState
         private weak var observedScroll: NSScrollView?
         private var observers: [NSObjectProtocol] = []
+        private var notingBounds = false
         init(metrics: ScrollViewportState) { self.metrics = metrics; super.init(frame: .zero) }
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -132,6 +145,13 @@ private struct ScrollViewportProbe: NSViewRepresentable {
             observedScroll = nil
             metrics.scrollView = nil
         }
+        func noteBoundsChanged() {
+            guard !notingBounds else { return }
+            notingBounds = true
+            metrics.refresh()
+            notingBounds = false
+        }
+
         func scheduleConfiguration() {
             DispatchQueue.main.async { [weak self] in
                 guard let self, let scroll = self.enclosingScrollView else { return }
@@ -143,12 +163,12 @@ private struct ScrollViewportProbe: NSViewRepresentable {
                     scroll.documentView?.postsFrameChangedNotifications = true
                     for (name, object) in [(NSView.boundsDidChangeNotification, scroll.contentView),
                                           (NSView.frameDidChangeNotification, scroll.documentView ?? scroll.contentView)] {
-                        self.observers.append(NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
-                            Task { @MainActor [weak self] in self?.metrics.refresh() }
+                        self.observers.append(NotificationCenter.default.addObserver(forName: name, object: object, queue: nil) { [weak self] _ in
+                            MainActor.assumeIsolated { self?.noteBoundsChanged() }
                         })
                     }
                 }
-                self.metrics.refresh()
+                self.noteBoundsChanged()
             }
         }
     }

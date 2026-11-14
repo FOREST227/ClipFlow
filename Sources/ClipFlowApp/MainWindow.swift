@@ -4,9 +4,16 @@ import SwiftUI
 enum MainWindowPage: String, CaseIterable, Identifiable, ClipFlowTab {
     case settings = "设置"
     case history = "剪贴历史"
+    case snippets = "片段"
     var id: Self { self }
     var title: String { rawValue }
-    var icon: String { self == .history ? "rectangle.stack" : "gearshape" }
+    var icon: String {
+        switch self {
+        case .history: "rectangle.stack"
+        case .snippets: "text.quote"
+        case .settings: "gearshape"
+        }
+    }
 }
 
 @MainActor
@@ -49,6 +56,8 @@ final class MainWindowNavigation: ObservableObject {
     @Published private(set) var page: MainWindowPage
     @Published private(set) var loadedPages: Set<MainWindowPage>
     let settingsDraft: SettingsDraft
+    /// Used to present the editor on first appearance. Nil in normal use.
+    var initialSnippetEditor: SnippetEditorDraft?
     private let store: ClipFlowStore
 
     init(store: ClipFlowStore, initialPage: MainWindowPage = .history) {
@@ -66,14 +75,17 @@ final class MainWindowNavigation: ObservableObject {
         if !loadedPages.contains(page) { loadedPages.insert(page) }
         self.page = page
     }
-    /// Sidebar order: history first, then the settings sections.
+    /// Sidebar order: history, snippets, then the settings sections.
     var selectedIndex: Int {
-        page == .history ? 0
-            : 1 + (SettingsCategory.allCases.firstIndex(of: settingsDraft.section) ?? 0)
+        switch page {
+        case .history: 0
+        case .snippets: 1
+        case .settings: 2 + (SettingsCategory.allCases.firstIndex(of: settingsDraft.section) ?? 0)
+        }
     }
 
     func selectSettings(_ category: SettingsCategory) {
-        let target = 1 + (SettingsCategory.allCases.firstIndex(of: category) ?? 0)
+        let target = 2 + (SettingsCategory.allCases.firstIndex(of: category) ?? 0)
         guard page != .settings || settingsDraft.section != category else { return }
         settingsDraft.movesForward = target > selectedIndex
         store.endShortcutRecording()
@@ -164,6 +176,11 @@ private struct MainWindowView: View {
                         .modifier(PageMotion(isSelected: navigation.page == .history,
                             hiddenOffset: -12, reduceMotion: reduceMotion))
                 }
+                if navigation.loadedPages.contains(.snippets) {
+                    SnippetsView(store: store, initialEditor: navigation.initialSnippetEditor)
+                        .modifier(PageMotion(isSelected: navigation.page == .snippets,
+                            hiddenOffset: 12, reduceMotion: reduceMotion))
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Do not clip the detail scrim to the safe-area content rectangle:
@@ -201,6 +218,7 @@ private struct MainWindowView: View {
             }
         }
         .animation(reduceMotion ? nil : ClipFlowMotion.fade, value: store.startupPermissionReport != nil)
+        .modifier(SensitiveSnippetConfirmation(store: store))
         .environment(\.locale, locale)
     }
 }
@@ -232,6 +250,10 @@ private struct MainSidebarView: View {
             navigationButton("剪贴历史", icon: "rectangle.stack", hint: "打开剪贴历史",
                 selected: navigation.page == .history) {
                 navigation.select(.history)
+            }
+            navigationButton("片段", icon: "text.quote", hint: "打开常用片段",
+                selected: navigation.page == .snippets) {
+                navigation.select(.snippets)
             }
             Spacer(minLength: 12)
             Text("设置")

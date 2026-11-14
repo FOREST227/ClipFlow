@@ -52,6 +52,11 @@ enum ClipboardRowMenu {
         if let url = item.primaryURL {
             entries.append(.action(title: "访问链接", symbol: "safari") { NSWorkspace.shared.open(url) })
         }
+        if SnippetLibrary.canSave(item) {
+            entries.append(.action(title: "存为片段", symbol: "text.badge.plus") { [weak store] in
+                store?.requestSaveSnippet(fromItemID: id)
+            })
+        }
         entries.append(.separator)
         entries.append(.action(title: "删除条目", symbol: "trash") { [weak store] in store?.delete(id) })
         return entries
@@ -181,6 +186,9 @@ struct LibraryCardActionBar: View {
 enum ListKeyCommand: Equatable {
     case moveUp, moveDown, activate, pastePlain, toggleDetails
     case pasteIndex(Int)
+    case showHistory
+    case showSnippets
+    case reorder(Int)
 
     /// - Parameters:
     ///   - isEditingText: a text field owns keyboard focus.
@@ -196,6 +204,20 @@ enum ListKeyCommand: Equatable {
         // ⇧↩ pastes the quick-paste selection as plain text. Keypad Return counts too.
         if active == .shift, keyCode == 36 || keyCode == 76 {
             return .pastePlain
+        }
+        if active == .control {
+            switch keyCode {
+            case 123: return .showHistory
+            case 124: return .showSnippets
+            default: break
+            }
+        }
+        if active == .option, !isEditingText {
+            switch keyCode {
+            case 126: return .reorder(-1)
+            case 125: return .reorder(1)
+            default: break
+            }
         }
         guard active.isEmpty else { return nil }
         switch keyCode {

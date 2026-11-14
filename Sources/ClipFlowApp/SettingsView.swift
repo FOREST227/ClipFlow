@@ -16,7 +16,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .general: "外观、快捷键与运行方式"
         case .privacy: "敏感内容保护与应用排除规则"
-        case .sync: "在设备之间同步普通历史"
+        case .sync: "在设备之间同步普通历史和常用片段"
         }
     }
 }
@@ -199,7 +199,7 @@ struct SettingsView: View {
     private var syncSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsListGroup(title: "文稿目录同步") {
-                SettingsListRow(title: "同步普通历史", detail: "将普通文本与图片镜像到“文稿/ClipFlow”") {
+                SettingsListRow(title: "同步普通历史", detail: "将普通文本、图片和常用片段镜像到“文稿/ClipFlow”") {
                     settingsToggle("同步普通历史", isOn: Binding(get: { store.iCloudSyncEnabled }, set: { store.setICloudSyncEnabled($0) }))
                 }
                 Divider().padding(.horizontal, 12)
@@ -213,7 +213,7 @@ struct SettingsView: View {
                 .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel(store.iCloudSyncDetail)
-            Label("受保护内容始终保留在本机", systemImage: "lock.shield")
+            Label("受保护内容与敏感片段始终保留在本机", systemImage: "lock.shield")
                 .font(.system(size: 11)).foregroundStyle(ClipCategory.protected.tint)
         }
     }

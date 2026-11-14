@@ -177,6 +177,8 @@ struct ContentView: View {
             store.select(item)
             ClipFlowRuntime.shared.paste(item)
             return true
+        case .showHistory, .showSnippets, .reorder:
+            return false
         }
     }
 

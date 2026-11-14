@@ -130,6 +130,7 @@ extension ClipFlowStore {
         if historyWriter.flush() == .failed {
             lastCaptureStatus = "保存历史记录失败"
         }
+        flushPendingSnippets()
     }
 
     /// Writes the latest history snapshot now and drops the delayed copy.

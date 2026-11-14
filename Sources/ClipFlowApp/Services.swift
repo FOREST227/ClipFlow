@@ -82,6 +82,21 @@ final class ClipFlowRuntime: NSObject {
         pasteService.paste(item, preferredTarget: lastExternalApp, plainText: true)
     }
 
+    func pasteSnippet(_ snippet: SavedSnippet) {
+        hudController.hide()
+        pasteService.pastePlainText(snippet.body, preferredTarget: lastExternalApp, announcingPlain: false)
+    }
+
+    func pasteSnippetPlain(_ snippet: SavedSnippet) {
+        hudController.hide()
+        pasteService.pastePlainText(snippet.body, preferredTarget: lastExternalApp, announcingPlain: true)
+    }
+
+    @discardableResult
+    func copySnippet(_ snippet: SavedSnippet) -> Bool {
+        pasteService.copyPlainText(snippet.body)
+    }
+
     @discardableResult
     func copyToClipboard(_ item: ClipboardItem) -> Bool {
         pasteService.copyToClipboard(item)
@@ -360,6 +375,41 @@ final class PasteService {
         store.lastCaptureStatus = plainText ? "已粘贴纯文本到 \(name)" : "已粘贴到 \(name)"
     }
 
+    func pastePlainText(_ text: String, preferredTarget: NSRunningApplication?, announcingPlain: Bool = false) {
+        guard SnippetLibrary.hasBody(text) else {
+            store.lastCaptureStatus = SnippetLibrary.emptyBodyStatus
+            return
+        }
+        defer { monitor?.ignoreCurrentPasteboardUpdate() }
+        guard PlainTextPaste.write(text, to: pasteboard) else {
+            store.lastCaptureStatus = announcingPlain ? "恢复纯文本失败" : "恢复剪贴内容失败"
+            return
+        }
+        guard store.isAccessibilityTrusted(prompt: true) else {
+            store.notePasteBlockedByAccessibility()
+            return
+        }
+        let targetApp = preferredTarget ?? NSWorkspace.shared.frontmostApplication
+        commitPaste(targetApp)
+        let name = targetApp?.localizedName ?? "前台应用"
+        store.lastCaptureStatus = announcingPlain ? "已粘贴纯文本到 \(name)" : "已粘贴到 \(name)"
+    }
+
+    @discardableResult
+    func copyPlainText(_ text: String) -> Bool {
+        guard SnippetLibrary.hasBody(text) else {
+            store.lastCaptureStatus = SnippetLibrary.emptyBodyStatus
+            return false
+        }
+        defer { monitor?.ignoreCurrentPasteboardUpdate() }
+        guard PlainTextPaste.write(text, to: pasteboard) else {
+            store.lastCaptureStatus = "复制到剪贴板失败"
+            return false
+        }
+        store.lastCaptureStatus = "已复制到剪贴板，可在目标输入框中手动粘贴"
+        return true
+    }
+
     @discardableResult
     func copyToClipboard(_ item: ClipboardItem, plainText: Bool = false) -> Bool {
         store.purgeExpired()
@@ -464,6 +514,12 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
                 onOpenLibrary: onOpenLibrary,
                 onClose: { [weak self] in
                     self?.hide()
+                },
+                onPasteSnippet: { snippet in
+                    ClipFlowRuntime.shared.pasteSnippet(snippet)
+                },
+                onPasteSnippetPlain: { snippet in
+                    ClipFlowRuntime.shared.pasteSnippetPlain(snippet)
                 },
                 inspector: inspector
             )
@@ -630,8 +686,11 @@ struct QuickPastePanelView: View {
     let onPastePlain: (ClipboardItem) -> Void
     let onOpenLibrary: () -> Void
     let onClose: () -> Void
+    var onPasteSnippet: ((SavedSnippet) -> Void)?
+    var onPasteSnippetPlain: ((SavedSnippet) -> Void)?
 
     @ViewState private var query = ""
+    @ViewState private var scope: QuickPasteScope
     // Keep selection independent of the parent view's layout/scroll identity.
     @ViewState private var selection = HistorySelection()
     @ViewState private var listProxy = QuickPasteListProxy()
@@ -642,6 +701,9 @@ struct QuickPastePanelView: View {
     init(store: ClipFlowStore, preferredTargetName: String?, onPaste: @escaping (ClipboardItem) -> Void,
          onPastePlain: @escaping (ClipboardItem) -> Void = { _ in },
          onOpenLibrary: @escaping () -> Void, onClose: @escaping () -> Void,
+         onPasteSnippet: ((SavedSnippet) -> Void)? = nil,
+         onPasteSnippetPlain: ((SavedSnippet) -> Void)? = nil,
+         initialScope: QuickPasteScope = .history,
          inspector: InspectorPresentation? = nil) {
         self.store = store
         self.preferredTargetName = preferredTargetName
@@ -649,6 +711,9 @@ struct QuickPastePanelView: View {
         self.onPastePlain = onPastePlain
         self.onOpenLibrary = onOpenLibrary
         self.onClose = onClose
+        self.onPasteSnippet = onPasteSnippet
+        self.onPasteSnippetPlain = onPasteSnippetPlain
+        _scope = State(initialValue: initialScope)
         _inspector = StateObject(wrappedValue: inspector ??
             InspectorPresentation(driver: AppKitInspectorAnimationDriver()))
     }
@@ -656,6 +721,8 @@ struct QuickPastePanelView: View {
     var body: some View {
         let palette = ClipFlowPalette.resolve(for: colorScheme)
         let clips = store.hudItems(matching: query)
+        let snippetRows = store.snippets(matching: query)
+        let snippetMatches = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : snippetRows.count
 
         ZStack {
             VStack(alignment: .leading, spacing: 12) {
@@ -679,21 +746,33 @@ struct QuickPastePanelView: View {
                 }
 
                 HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.secondary)
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.secondary)
 
-                    TextField("搜索最近内容", text: $query)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12, weight: .medium))
+                        TextField(scope == .history ? "搜索最近内容" : "搜索片段", text: $query)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12, weight: .medium))
+                            .accessibilityLabel(scope == .history ? "搜索最近内容" : "搜索片段")
+                    }
+                    .padding(.horizontal, ClipFlowLayout.space12)
+                    .frame(height: ClipFlowLayout.controlHeight)
+                    .background(palette.inputFill, in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous)
+                        .strokeBorder(palette.border, lineWidth: 1))
+
+                    QuickPasteScopeBar(scope: scope, snippetMatchCount: snippetMatches, palette: palette) { next in
+                        guard scope != next else { return }
+                        scope = next
+                        selection.itemID = next == .history ? clips.first?.id : snippetRows.first?.id
+                    }
+                    .fixedSize()
                 }
-                .padding(.horizontal, ClipFlowLayout.space12)
-                .frame(height: ClipFlowLayout.controlHeight)
-                .background(palette.inputFill, in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous)
-                    .strokeBorder(palette.border, lineWidth: 1))
 
-                if clips.isEmpty {
+                if scope == .snippets {
+                    quickPasteSnippets(snippetRows, palette: palette)
+                } else if clips.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(query.isEmpty ? "还没有捕获到内容" : "没有匹配的内容")
                             .font(.system(size: 15, weight: .bold, design: .rounded))
@@ -742,7 +821,11 @@ struct QuickPastePanelView: View {
                         QuickPasteKeyHint(keys: "↑↓", title: "选择")
                         QuickPasteKeyHint(keys: "↩", title: "粘贴")
                         QuickPasteKeyHint(keys: "⌘1–9", title: "直接粘贴")
-                        QuickPasteKeyHint(keys: "空格", title: "详情")
+                        if scope == .history {
+                            QuickPasteKeyHint(keys: "空格", title: "详情")
+                        } else {
+                            QuickPasteKeyHint(keys: "⌃←→", title: "切换")
+                        }
                         Spacer(minLength: 0)
                         Button {
                             onClose()
@@ -811,10 +894,19 @@ struct QuickPastePanelView: View {
             }
         }
         .onChangeBackward(of: query) {
-            selection.itemID = clips.first?.id
+            selection.itemID = scope == .history ? clips.first?.id : snippetRows.first?.id
         }
+        .onChangeBackward(of: scope) {
+            selection.itemID = scope == .history ? clips.first?.id : snippetRows.first?.id
+        }
+        .modifier(SensitiveSnippetConfirmation(store: store))
         .background(
-            ListKeyCommandMonitor(queryIsEmpty: query.isEmpty, onCommand: { handleKeyCommand($0, clips: clips) })
+            ListKeyCommandMonitor(queryIsEmpty: query.isEmpty, onCommand: { command in
+                if scope == .snippets {
+                    return handleSnippetKey(command, snippets: snippetRows)
+                }
+                return handleKeyCommand(command, clips: clips)
+            })
                 .frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
         )
         .background {
@@ -855,8 +947,83 @@ struct QuickPastePanelView: View {
             if listProxy.list?.openDetails(for: selected.id) != true {
                 inspector.open(itemID: selected.id, reduceMotion: reduceMotion)
             }
+        case .showSnippets:
+            scope = .snippets
+        case .showHistory:
+            scope = .history
+        case .reorder:
+            return false
         }
         return true
+    }
+
+    private func handleSnippetKey(_ command: ListKeyCommand, snippets: [SavedSnippet]) -> Bool {
+        guard !inspector.blocksBackground else { return false }
+        switch command {
+        case .showHistory:
+            scope = .history
+        case .showSnippets:
+            scope = .snippets
+        case .moveUp, .moveDown:
+            guard !snippets.isEmpty else { return false }
+            return selection.move(by: command == .moveUp ? -1 : 1, in: snippets.map(\.id)) != nil
+        case .activate:
+            guard !snippets.isEmpty else { return false }
+            let selected = snippets.first(where: { $0.id == selection.itemID }) ?? snippets[0]
+            pasteSnippet(selected, plain: false)
+        case .pastePlain:
+            guard !snippets.isEmpty else { return false }
+            let selected = snippets.first(where: { $0.id == selection.itemID }) ?? snippets[0]
+            pasteSnippet(selected, plain: true)
+        case .pasteIndex(let index):
+            guard snippets.indices.contains(index) else { return false }
+            pasteSnippet(snippets[index], plain: false)
+        case .toggleDetails, .reorder:
+            return false
+        }
+        return true
+    }
+
+    /// Snippet bodies are already plain text. ↩ and ⇧↩ both write only that string;
+    /// ⇧↩ uses the plain-text status so the gesture matches history.
+    private func pasteSnippet(_ snippet: SavedSnippet, plain: Bool) {
+        selection.itemID = snippet.id
+        onClose()
+        if plain {
+            if let onPasteSnippetPlain {
+                onPasteSnippetPlain(snippet)
+            } else {
+                ClipFlowRuntime.shared.pasteSnippetPlain(snippet)
+            }
+        } else if let onPasteSnippet {
+            onPasteSnippet(snippet)
+        } else {
+            ClipFlowRuntime.shared.pasteSnippet(snippet)
+        }
+    }
+
+    @ViewBuilder
+    private func quickPasteSnippets(_ snippets: [SavedSnippet], palette: ClipFlowPalette) -> some View {
+        if snippets.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "还没有常用片段" : "没有匹配的片段")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "在历史里选择“存为片段”，或到主窗口的片段页新建。片段不会被历史条数清掉。"
+                    : "试试其他关键词，或切回历史。")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(height: QuickPasteCardLayout.viewportHeight, alignment: .top)
+        } else {
+            QuickPasteSnippetList(snippets: snippets, selection: selection,
+                onSelect: { selection.itemID = $0.id },
+                onPaste: { pasteSnippet($0, plain: false) },
+                onPastePlain: { pasteSnippet($0, plain: true) })
+                .frame(height: QuickPasteCardLayout.viewportHeight)
+        }
     }
 
     private func paste(_ item: ClipboardItem, plainText: Bool) {

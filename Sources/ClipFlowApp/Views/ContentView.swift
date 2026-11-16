@@ -6,6 +6,7 @@ struct ContentView: View {
     @ObservedObject var store: ClipFlowStore
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isEnabled) private var isPageEnabled
+    @Environment(\.librarySearchFocus) private var searchFocus
     private var motionPreferences = InspectorMotionPreferences()
     private var reduceMotion: Bool { motionPreferences.reduceMotion }
     @StateObject private var inspector: InspectorPresentation
@@ -32,7 +33,7 @@ struct ContentView: View {
 
                 VStack(spacing: ClipFlowLayout.sectionGap) {
                     VStack(spacing: 10) {
-                        HeaderView(store: store, palette: palette)
+                        HeaderView(store: store, palette: palette, searchFocus: searchFocus)
                         CategoryFilterBar(store: store)
                     }
                     LibraryView(store: store, palette: palette,
@@ -124,8 +125,19 @@ struct ContentView: View {
         }
         .background(
             InspectorEscapeHandler(onEscape: {
-                guard isPageEnabled, inspector.blocksBackground,
-                      store.startupPermissionReport == nil else { return false }
+                guard isPageEnabled, store.startupPermissionReport == nil else { return false }
+                // The library window can own the field editor without being NSApp.keyWindow.
+                let window = NSApp.windows.first { LibrarySearchFocus.searchFieldIsFirstResponder(in: $0) }
+                // A committed query leaves on the first Escape. The next one reaches the inspector.
+                if LibrarySearchFocus.escapeClearsQuery(
+                    query: store.searchText,
+                    fieldFocused: window != nil,
+                    isComposing: LibrarySearchFocus.isComposing(in: window)
+                ) {
+                    store.searchText = ""
+                    return true
+                }
+                guard inspector.blocksBackground else { return false }
                 inspector.dismiss(reduceMotion: reduceMotion)
                 return true
             }, onWindowInactive: { inspector.reset() }).frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)

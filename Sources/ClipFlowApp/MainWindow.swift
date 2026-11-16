@@ -102,6 +102,7 @@ final class MainWindowNavigation: ObservableObject {
     @Published private(set) var page: MainWindowPage
     @Published private(set) var loadedPages: Set<MainWindowPage>
     let settingsDraft: SettingsDraft
+    let searchFocus = LibrarySearchFocusModel()
     /// Used to present the editor on first appearance. Nil in normal use.
     var initialSnippetEditor: SnippetEditorDraft?
     private let store: ClipFlowStore
@@ -189,6 +190,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         scheduleWindowControlLayout()
+        guard page == .history else { return }
+        // Claim focus after AppKit finishes making the window key.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.navigation.page == .history else { return }
+            self.navigation.searchFocus.request()
+        }
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -219,6 +226,7 @@ private struct MainWindowView: View {
                 }
                 if navigation.loadedPages.contains(.history) {
                     ContentView(showsBackground: false, showsPermissionOverlay: false, store: store)
+                        .environment(\.librarySearchFocus, navigation.searchFocus)
                         .modifier(PageMotion(isSelected: navigation.page == .history,
                             hiddenOffset: -12, reduceMotion: reduceMotion))
                 }

@@ -50,6 +50,9 @@ final class InspectorEscapeView: NSView {
         guard scopeEnabled, !isHiddenOrHasHiddenAncestor,
               event.type == .keyDown, event.keyCode == 53,
               let window, window.isVisible, event.windowNumber == window.windowNumber else { return false }
+        let previous = LibrarySearchFocus.eventWindow
+        LibrarySearchFocus.eventWindow = window
+        defer { LibrarySearchFocus.eventWindow = previous }
         return onEscape()
     }
     func stop() {

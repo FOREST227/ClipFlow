@@ -3,13 +3,31 @@ import SwiftUI
 
 struct HeaderView: View {
     @ObservedObject var store: ClipFlowStore
+    @ObservedObject var searchFocus: LibrarySearchFocusModel
     let palette: ClipFlowPalette
+    @FocusState private var searchFieldFocused: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var appliedFocusRequest = 0
+
+    init(store: ClipFlowStore, palette: ClipFlowPalette, searchFocus: LibrarySearchFocusModel? = nil) {
+        self.store = store
+        self.palette = palette
+        self.searchFocus = searchFocus ?? .inactive
+    }
+
+    private var canClaimSearchFocus: Bool {
+        isEnabled && store.startupPermissionReport == nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("搜索内容、来源或标签", text: $store.searchText).textFieldStyle(.plain)
+                TextField("搜索内容、来源或标签", text: $store.searchText)
+                    .textFieldStyle(.plain)
+                    .focused($searchFieldFocused)
+                    .accessibilityIdentifier(LibrarySearchFocus.fieldIdentifier)
+                    .background(LibrarySearchFieldAnchor(requestID: searchFocus.requestID, canClaim: canClaimSearchFocus))
                 if !store.searchText.isEmpty {
                     Button { store.searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.plain).foregroundStyle(.secondary).help("清除搜索")
@@ -21,6 +39,23 @@ struct HeaderView: View {
             .background(palette.inputFill, in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous).strokeBorder(palette.border, lineWidth: 1))
         }
+        .onAppear(perform: claimRequestedFocus)
+        .onChangeBackward(of: searchFocus.requestID) { claimRequestedFocus() }
+        .onChangeBackward(of: canClaimSearchFocus) {
+            if canClaimSearchFocus {
+                claimRequestedFocus()
+            } else if searchFieldFocused {
+                searchFieldFocused = false
+            }
+        }
+    }
+
+    /// `@FocusState` asks SwiftUI; the anchor repeats the claim once the field is in the key window.
+    private func claimRequestedFocus() {
+        let request = searchFocus.requestID
+        guard request != 0, request != appliedFocusRequest, canClaimSearchFocus else { return }
+        appliedFocusRequest = request
+        searchFieldFocused = true
     }
 }
 

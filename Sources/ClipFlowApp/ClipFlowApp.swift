@@ -63,11 +63,15 @@ final class ClipFlowAppDelegate: NSObject, NSApplicationDelegate {
         AppNavigationCenter.shared.openLibrary()
     }
 
+    @objc func focusLibrarySearchFromMenu(_ sender: Any?) {
+        showLibraryWindow()
+    }
+
     @objc private func openSettingsFromMenu(_ sender: Any?) {
         AppNavigationCenter.shared.openSettings()
     }
 
-    private func configureMainMenu() {
+    func configureMainMenu() {
         let menuBar = NSMenu()
         func addMenu(_ title: String) -> NSMenu {
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
@@ -105,6 +109,8 @@ final class ClipFlowAppDelegate: NSObject, NSApplicationDelegate {
         for (title, action, key) in [("剪切", "cut:", "x"), ("复制", "copy:", "c"), ("粘贴", "paste:", "v"), ("全选", "selectAll:", "a")] {
             editMenu.addItem(withTitle: title, action: Selector(action), keyEquivalent: key)
         }
+        editMenu.addItem(.separator())
+        editMenu.addItem(LibrarySearchFocus.menuItem(target: self, action: #selector(focusLibrarySearchFromMenu(_:))))
 
         let windowMenu = addMenu("窗口")
         let libraryItem = windowMenu.addItem(withTitle: "打开剪贴历史", action: #selector(openLibraryFromMenu(_:)), keyEquivalent: "")

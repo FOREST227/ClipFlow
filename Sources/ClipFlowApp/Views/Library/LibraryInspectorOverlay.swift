@@ -52,7 +52,9 @@ struct LibraryInspectorOverlay: View {
          maxHeight: CGFloat, contentWidth: CGFloat = 438, compactShadow: Bool = false,
          onPasteAction: (() -> Void)? = nil, onPastePlainAction: (() -> Void)? = nil,
          sourceRectInWindow: CGRect? = nil,
-         motion: InspectorMotionProgress? = nil, onClose: @escaping () -> Void) {
+         motion: InspectorMotionProgress? = nil,
+         preferMarkdownPreview: Bool = false, onClose: @escaping () -> Void) {
+        // Documentation screenshots open Markdown on 预览. The pill is not an AppKit control.
         self.item = item
         _store = ObservedObject(wrappedValue: store)
         self.palette = palette
@@ -63,6 +65,7 @@ struct LibraryInspectorOverlay: View {
         self.onPastePlainAction = onPastePlainAction
         self.sourceRectInWindow = sourceRectInWindow
         self.motion = motion
+        _showsMarkdownPreview = State(initialValue: preferMarkdownPreview)
         self.onClose = onClose
     }
 

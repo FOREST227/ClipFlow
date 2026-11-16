@@ -184,37 +184,20 @@ final class DocumentationScreenshotTests: XCTestCase {
         let markdown = ClipboardClassifier.makeItem(text: markdownText, sourceApp: "文本编辑",
             sourceBundleID: nil, autoProtectSecrets: false, existingItem: nil)
         RunLoop.main.run(until: Date().addingTimeInterval(1.1))
-        func detail(_ item: ClipboardItem) -> some View {
+        func detail(_ item: ClipboardItem, preferMarkdownPreview: Bool = false) -> some View {
             ZStack(alignment: .top) {
                 Color.white
                 LibraryInspectorOverlay(item: item, store: store, palette: .resolve(for: .light),
-                    maxHeight: 576, contentWidth: 340, compactShadow: true, onClose: {}).frame(width: 340)
+                    maxHeight: 576, contentWidth: 340, compactShadow: true,
+                    preferMarkdownPreview: preferMarkdownPreview, onClose: {}).frame(width: 340)
                     .overlay(RoundedRectangle(cornerRadius: 22)
                         .strokeBorder(Color.black.opacity(0.16), lineWidth: 1))
                     .padding(24)
             }.frame(width: 388, height: 624)
         }
         try export(detail(code), size: NSSize(width: 388, height: 624), name: "code-detail")
-        try export(detail(markdown), size: NSSize(width: 388, height: 624), name: "markdown-preview") { root in
-            let pressed = MainActor.assumeIsolated { () -> Bool in
-                var stack = [root]
-                var preview: NSView?
-                while let view = stack.popLast() {
-                    if view.accessibilityIdentifier() == "markdown-preview" {
-                        preview = view
-                        break
-                    }
-                    stack.append(contentsOf: view.subviews)
-                }
-                guard let preview else { return false }
-                if let button = preview as? NSButton {
-                    button.performClick(nil)
-                    return true
-                }
-                return preview.accessibilityPerformPress()
-            }
-            XCTAssertTrue(pressed, "预览按钮没有出现")
-        }
+        // The 源码/预览 control is a SwiftUI pill, so the preview is selected up front.
+        try export(detail(markdown, preferMarkdownPreview: true), size: NSSize(width: 388, height: 624), name: "markdown-preview")
         try export(detail(imageItem), size: NSSize(width: 388, height: 624), name: "image-detail")
     }
 }

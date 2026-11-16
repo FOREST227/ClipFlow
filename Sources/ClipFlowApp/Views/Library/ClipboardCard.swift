@@ -85,14 +85,11 @@ struct ClipThumbnailView: View {
 }
 
 /// A separate hosting surface keeps highlight animation out of image/text layout.
-struct LibrarySelectionChrome: View {
-    let itemID: ClipboardItem.ID
-    let selection: HistorySelection
+struct CardSelectionChrome: View {
+    let isSelected: Bool
     let tint: Color
     let palette: ClipFlowPalette
-    @ViewState private var isSelected = false
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
@@ -107,6 +104,21 @@ struct LibrarySelectionChrome: View {
                     .opacity(isSelected ? 1 : 0)
                     .padding(.vertical, 18).padding(.leading, 9)
             }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+struct LibrarySelectionChrome: View {
+    let itemID: ClipboardItem.ID
+    let selection: HistorySelection
+    let tint: Color
+    let palette: ClipFlowPalette
+    @ViewState private var isSelected = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        CardSelectionChrome(isSelected: isSelected, tint: tint, palette: palette)
             .animation(reduceMotion ? nil : ClipFlowMotion.rowSelection, value: isSelected)
             .onReceive(selection.$itemID.map { $0 == itemID }.removeDuplicates()) {
                 if isSelected != $0 { isSelected = $0 }
@@ -141,7 +153,8 @@ struct ClipboardCard: View {
     @ViewState private var isSelected = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: item.kind == .image || item.kind == .code ? 6 : ClipFlowLayout.space4) {
+        VStack(alignment: .leading, spacing: item.kind == .image || item.kind == .code
+            ? LibraryCardLayout.blockSpacing : ClipFlowLayout.space4) {
             metadata
             if item.isImage {
                 imageContent
@@ -164,7 +177,7 @@ struct ClipboardCard: View {
         // Reserve the selection rail's gutter even when not selected.
         .padding(.leading, ClipFlowLayout.space16)
         .padding(.trailing, ClipFlowLayout.space12)
-        .padding(.vertical, ClipFlowLayout.space8)
+        .padding(.vertical, LibraryCardLayout.contentPadding)
         .frame(maxWidth: .infinity)
         .frame(height: LibraryCardLayout.height(for: item.kind), alignment: .top)
         .onReceive(store.historySelection.$itemID.map { $0 == item.id }.removeDuplicates()) {
@@ -189,7 +202,7 @@ struct ClipboardCard: View {
         }
         .font(.system(size: 10, weight: .medium))
         .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
-        .frame(height: 16)
+        .frame(height: LibraryCardLayout.metadataHeight)
     }
 
     @ViewBuilder private var imageContent: some View {

@@ -4,10 +4,11 @@ import SwiftUI
 
 struct ZoomableDetailImage: View {
     let url: URL
+    var fillsHeight = false
     @StateObject private var pinch = DetailImagePinchBridge()
     @GestureState private var pinching = false
     var body: some View {
-        DetailImageCanvasView(url: url, pinch: pinch)
+        DetailImageCanvasView(url: url, fillsHeight: fillsHeight, pinch: pinch)
             .contentShape(Rectangle())
             .simultaneousGesture(MagnificationGesture(minimumScaleDelta: 0.001)
                 .updating($pinching) { _, active, _ in active = true }
@@ -35,13 +36,21 @@ final class DetailImagePinchBridge: ObservableObject {
 }
 private struct DetailImageCanvasView: NSViewRepresentable {
     let url: URL
+    let fillsHeight: Bool
     let pinch: DetailImagePinchBridge
     func makeNSView(context: Context) -> DetailImageCanvas {
         let view = DetailImageCanvas()
+        view.fillsHeight = fillsHeight
         pinch.canvas = view
         return view
     }
-    func updateNSView(_ view: DetailImageCanvas, context: Context) { pinch.canvas = view; view.load(url) }
+    func updateNSView(_ view: DetailImageCanvas, context: Context) {
+        pinch.canvas = view
+        let fillChanged = view.fillsHeight != fillsHeight
+        view.fillsHeight = fillsHeight
+        view.load(url)
+        if fillChanged { view.needsDisplay = true }
+    }
     static func dismantleNSView(_ view: DetailImageCanvas, coordinator: ()) { view.cancelLoading() }
 }
 
@@ -51,9 +60,10 @@ struct ImageViewport {
     var offset: CGPoint = .zero
 
     mutating func reset() { zoom = 1; offset = .zero }
-    mutating func scale(by factor: CGFloat, anchor: CGPoint, viewport: CGSize, fitted: CGSize) {
+    mutating func scale(by factor: CGFloat, anchor: CGPoint, viewport: CGSize, fitted: CGSize, minimum: CGFloat = 1) {
         guard factor.isFinite, factor > 0 else { return }
-        let next = min(12, max(1, zoom * factor))
+        let floor = min(1, max(0.05, minimum))
+        let next = min(12, max(floor, zoom * factor))
         let ratio = next / zoom
         let relative = CGPoint(x: anchor.x - viewport.width / 2, y: anchor.y - viewport.height / 2)
         offset = CGPoint(x: relative.x - (relative.x - offset.x) * ratio,
@@ -72,6 +82,7 @@ struct ImageViewport {
 @MainActor
 final class DetailImageCanvas: NSView {
     private var image: NSImage?
+    var fillsHeight = false
     var isImageReady: Bool { image != nil }
     private var url: URL?
     private var loading: Task<Void, Never>?
@@ -141,10 +152,25 @@ final class DetailImageCanvas: NSView {
         return true
     }
 
+    private var containScale: CGFloat {
+        guard let image, image.size.width > 0, image.size.height > 0 else { return 1 }
+        return min(max(1, bounds.width - 16) / image.size.width,
+                   max(1, bounds.height - 16) / image.size.height)
+    }
+    private var coverScale: CGFloat {
+        guard let image, image.size.width > 0, image.size.height > 0 else { return 1 }
+        return max(max(1, bounds.width) / image.size.width, max(1, bounds.height) / image.size.height)
+    }
+    /// Zoom 1 is the height-filling size. Pinching out still reaches the whole image.
+    private var zoomFloor: CGFloat {
+        guard fillsHeight else { return 1 }
+        let cover = coverScale
+        guard cover > 0 else { return 1 }
+        return min(1, containScale / cover)
+    }
     private var fitted: CGSize {
         guard let image, image.size.width > 0, image.size.height > 0 else { return .zero }
-        let scale = min(max(1, bounds.width - 16) / image.size.width,
-                        max(1, bounds.height - 16) / image.size.height)
+        let scale = fillsHeight ? coverScale : containScale
         return CGSize(width: image.size.width * scale, height: image.size.height * scale)
     }
     override func layout() {
@@ -175,7 +201,7 @@ final class DetailImageCanvas: NSView {
     private func zoom(by factor: CGFloat, event: NSEvent) {
         guard image != nil else { return }
         viewport.scale(by: factor, anchor: convert(event.locationInWindow, from: nil),
-                       viewport: bounds.size, fitted: fitted)
+                       viewport: bounds.size, fitted: fitted, minimum: zoomFloor)
         needsDisplay = true
     }
     override func scrollWheel(with event: NSEvent) {
@@ -184,7 +210,7 @@ final class DetailImageCanvas: NSView {
     }
     func applyPinch(factor: CGFloat, anchor: CGPoint) {
         guard image != nil else { return }
-        viewport.scale(by: factor, anchor: anchor, viewport: bounds.size, fitted: fitted)
+        viewport.scale(by: factor, anchor: anchor, viewport: bounds.size, fitted: fitted, minimum: zoomFloor)
         needsDisplay = true
     }
     override func mouseDown(with event: NSEvent) {

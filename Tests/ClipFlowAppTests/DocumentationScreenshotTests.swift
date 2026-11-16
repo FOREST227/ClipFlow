@@ -196,12 +196,24 @@ final class DocumentationScreenshotTests: XCTestCase {
         }
         try export(detail(code), size: NSSize(width: 388, height: 624), name: "code-detail")
         try export(detail(markdown), size: NSSize(width: 388, height: 624), name: "markdown-preview") { root in
-            func controls(_ view: NSView) -> [NSSegmentedControl] {
-                (view as? NSSegmentedControl).map { [$0] } ?? view.subviews.flatMap(controls)
+            let pressed = MainActor.assumeIsolated { () -> Bool in
+                var stack = [root]
+                var preview: NSView?
+                while let view = stack.popLast() {
+                    if view.accessibilityIdentifier() == "markdown-preview" {
+                        preview = view
+                        break
+                    }
+                    stack.append(contentsOf: view.subviews)
+                }
+                guard let preview else { return false }
+                if let button = preview as? NSButton {
+                    button.performClick(nil)
+                    return true
+                }
+                return preview.accessibilityPerformPress()
             }
-            let picker = try XCTUnwrap(controls(root).first { $0.segmentCount == 2 })
-            picker.selectedSegment = 1
-            XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(picker.action), to: picker.target, from: picker))
+            XCTAssertTrue(pressed, "预览按钮没有出现")
         }
         try export(detail(imageItem), size: NSSize(width: 388, height: 624), name: "image-detail")
     }

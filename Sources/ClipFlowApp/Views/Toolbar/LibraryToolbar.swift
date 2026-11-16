@@ -24,6 +24,13 @@ struct HeaderView: View {
     }
 }
 
+/// Zero-count chips stay off the bar. The selected chip stays so an empty filter is still visible.
+enum CategoryFilterChips {
+    static func isVisible(category: ClipCategory, count: Int, selected: ClipCategory) -> Bool {
+        category == .all || count > 0 || category == selected
+    }
+}
+
 /// One row of filters. Extra pills scroll instead of being clipped by the 620pt window.
 struct CategoryFilterBar: View {
     @ObservedObject var store: ClipFlowStore
@@ -32,7 +39,12 @@ struct CategoryFilterBar: View {
     var body: some View {
         CategoryFilterScroll {
             HStack(spacing: ClipFlowLayout.space8) {
-                ForEach(ClipCategory.allCases) { category in
+                ForEach(ClipCategory.allCases.filter { category in
+                    CategoryFilterChips.isVisible(
+                        category: category,
+                        count: store.count(for: category),
+                        selected: store.selectedCategory)
+                }) { category in
                     Button {
                         withAnimation(reduceMotion ? nil : ClipFlowMotion.selection) {
                             store.selectedCategory = category

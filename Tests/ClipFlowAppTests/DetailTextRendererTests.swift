@@ -98,7 +98,7 @@ final class DetailTextRendererTests: XCTestCase {
 
     func testBundledRendererResourceLoads() {
         let source = DetailTextDocument.resource("highlight.min.js")
-        XCTAssertFalse(source.isEmpty)
+        XCTAssertFalse(source.isEmpty, DetailTextDocument.resourceSearchDescription())
         XCTAssertNil(DetailTextDocument.rendererVerificationError())
     }
 

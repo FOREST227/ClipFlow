@@ -39,8 +39,22 @@ enum DetailTextDocument {
         ["powershell", "swift", "objectivec", "kotlin", "dart", "scala", "perl", "r",
          "dockerfile", "makefile", "shell", "diff", "lua"].map { "lang-\($0).js" }
 
+    static func resourceSearchDescription() -> String {
+        let anchor = Bundle(for: RendererBundleAnchor.self)
+        return [
+            "main.resource=\(Bundle.main.resourceURL?.path ?? "nil")",
+            "main.bundle=\(Bundle.main.bundleURL.path)",
+            "main.exec=\(Bundle.main.executableURL?.path ?? "nil")",
+            "anchor.resource=\(anchor.resourceURL?.path ?? "nil")",
+            "anchor.bundle=\(anchor.bundleURL.path)",
+            "module=\(moduleResourceRoot()?.path ?? "nil")",
+        ].joined(separator: "\n")
+    }
+
     static func resource(_ name: String) -> String {
-        if let installedRoot = Bundle.main.resourceURL, let value = read(name, from: installedRoot) {
+        if let installedRoot = Bundle.main.resourceURL,
+           let value = read(name, from: installedRoot),
+           !value.isEmpty {
             return value
         }
         return load(name: name, installedRoot: nil, moduleRoot: resolvedModuleResourceRoot)
@@ -74,8 +88,8 @@ enum DetailTextDocument {
         return try? String(contentsOf: url, encoding: .utf8)
     }
 
-    /// Directories SwiftPM searches for `ClipFlow_ClipFlowApp.bundle`, without the
-    /// generated accessor's fatal error. Nil means the bundle is not installed.
+    /// Directories SwiftPM searches for the resource bundle, without the generated
+    /// accessor's fatal error. Nil means the bundle is not installed.
     static func moduleResourceRoot(
         mainResourceURL: URL? = Bundle.main.resourceURL,
         mainBundleURL: URL? = Bundle.main.bundleURL,
@@ -87,19 +101,14 @@ enum DetailTextDocument {
         if let override = environment["PACKAGE_RESOURCE_BUNDLE_PATH"] ?? environment["PACKAGE_RESOURCE_BUNDLE_URL"] {
             candidates.append(URL(fileURLWithPath: override))
         }
-        candidates.append(contentsOf: [mainResourceURL, anchorResourceURL, mainBundleURL].compactMap { $0 })
-        if let executableURL {
-            var directory = executableURL.deletingLastPathComponent()
-            // .xctest/Contents/MacOS/<executable> and the products directory beside that bundle.
-            for _ in 0..<4 {
-                candidates.append(directory)
-                directory = directory.deletingLastPathComponent()
-            }
-        }
-        if let mainBundleURL {
-            candidates.append(mainBundleURL.deletingLastPathComponent())
-        }
+        appendAncestors(of: mainResourceURL, levels: 6, to: &candidates)
+        appendAncestors(of: anchorResourceURL, levels: 6, to: &candidates)
+        appendAncestors(of: mainBundleURL, levels: 3, to: &candidates)
+        appendAncestors(of: executableURL?.deletingLastPathComponent(), levels: 6, to: &candidates)
+        var seen = Set<String>()
         for candidate in candidates {
+            let path = candidate.standardizedFileURL.path
+            guard seen.insert(path).inserted, shouldSearch(path) else { continue }
             if let root = swiftPMResourceRoot(at: candidate) {
                 return root
             }
@@ -108,22 +117,63 @@ enum DetailTextDocument {
     }
 
     private static let resolvedModuleResourceRoot: URL? = moduleResourceRoot()
+    private static let skippedSearchRoots: Set<String> = [
+        "/", "/usr", "/bin", "/sbin", "/opt", "/Applications", "/Library", "/System", "/private", "/var", "/Users",
+    ]
 
-    private static func swiftPMResourceRoot(at candidate: URL) -> URL? {
-        var bundleURLs = [candidate.appendingPathComponent(swiftPMBundleName + ".bundle")]
-        if candidate.pathExtension.lowercased() == "bundle" {
-            bundleURLs.append(candidate)
+    private static func appendAncestors(of url: URL?, levels: Int, to candidates: inout [URL]) {
+        guard var directory = url else { return }
+        for _ in 0..<levels {
+            candidates.append(directory)
+            let parent = directory.deletingLastPathComponent()
+            if parent.path == directory.path { break }
+            directory = parent
         }
-        for bundleURL in bundleURLs {
-            guard let resourceURL = Bundle(url: bundleURL)?.resourceURL else { continue }
-            // Debug builds symlink Renderer into the bundle. fileExists reports
-            // that link as a non-directory on some macOS versions, so resolve it first.
-            let renderer = resourceURL.appendingPathComponent("Renderer").resolvingSymlinksInPath()
-            var isDirectory = ObjCBool(false)
-            guard FileManager.default.fileExists(atPath: renderer.path, isDirectory: &isDirectory),
-                  isDirectory.boolValue else {
-                continue
+    }
+
+    private static func shouldSearch(_ path: String) -> Bool {
+        !skippedSearchRoots.contains(path)
+    }
+
+    /// A bundle matches when `Renderer/highlight.min.js` can be read. Symlinks are
+    /// followed by the read, which directory probes on some macOS versions are not.
+    private static func swiftPMResourceRoot(at candidate: URL) -> URL? {
+        if candidate.pathExtension.lowercased() == "bundle", let root = rendererRoot(inBundle: candidate) {
+            return root
+        }
+        let named = candidate.appendingPathComponent(swiftPMBundleName + ".bundle")
+        if let root = rendererRoot(inBundle: named) {
+            return root
+        }
+        guard shouldSearch(candidate.standardizedFileURL.path),
+              let children = try? FileManager.default.contentsOfDirectory(
+                at: candidate,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+              ) else {
+            return nil
+        }
+        for child in children where child.pathExtension.lowercased() == "bundle" && child != named {
+            if let root = rendererRoot(inBundle: child) {
+                return root
             }
+        }
+        return nil
+    }
+
+    private static func rendererRoot(inBundle bundleURL: URL) -> URL? {
+        let roots = [
+            bundleURL.appendingPathComponent("Contents/Resources"),
+            bundleURL,
+        ]
+        for root in roots {
+            if let source = read("highlight.min.js", from: root), !source.isEmpty {
+                return root
+            }
+        }
+        if let resourceURL = Bundle(url: bundleURL)?.resourceURL,
+           let source = read("highlight.min.js", from: resourceURL),
+           !source.isEmpty {
             return resourceURL
         }
         return nil

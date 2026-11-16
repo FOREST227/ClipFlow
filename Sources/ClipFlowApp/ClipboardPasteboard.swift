@@ -107,6 +107,18 @@ enum ClipboardPasteboardKinds {
         if lower.contains("link source") || lower.contains("linksource") { return true }
         if lower.contains("object descriptor") || lower.contains("objectdescriptor") { return true }
         if lower.contains("ownerlink") || lower.contains("owner link") { return true }
+        // Mac Excel uses hyphenated names (`Embed-Source`) and a per-process `ole.source.<pid>` token.
+        let compact = lower
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ".", with: "")
+        if compact.contains("embedsource") || compact.contains("linksource") || compact.contains("objectdescriptor") {
+            return true
+        }
+        if compact.contains("objectlink") || compact.contains("ownerlink") || compact.contains("dataobject") || compact.contains("olesource") {
+            return true
+        }
+        if compact.hasSuffix(".link") { return true }
         return false
     }
 

@@ -106,6 +106,13 @@ final class ClipboardRepresentations {
 
     @discardableResult
     static func write(plainText: String, snapshot: Snapshot, to pasteboard: NSPasteboard) -> Bool {
+        if SpreadsheetReplay.shouldReplay(snapshot.extraTypes) {
+            let records = SpreadsheetReplay.pasteRecords(from: snapshot.extraTypes)
+            if !records.isEmpty {
+                return writeOriginal(records, to: pasteboard)
+            }
+            return pasteboard.setString(plainText, forType: .string)
+        }
         if !snapshot.extraTypes.isEmpty {
             return writeOriginal(snapshot.extraTypes, to: pasteboard)
         }

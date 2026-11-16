@@ -90,6 +90,16 @@ final class ClipFlowRuntime: NSObject {
     }
 
     @discardableResult
+    func copyOriginalToClipboard(_ item: ClipboardItem) -> Bool {
+        pasteService.copyOriginalToClipboard(item)
+    }
+
+    func insertIntoExcel(_ item: ClipboardItem, shift: SpreadsheetShift) {
+        hudController.hide()
+        pasteService.insertIntoExcel(item, shift: shift)
+    }
+
+    @discardableResult
     func copyPlainText(_ item: ClipboardItem) -> Bool {
         pasteService.copyToClipboard(item, plainText: true)
     }
@@ -136,6 +146,7 @@ final class ClipFlowRuntime: NSObject {
             Task { @MainActor [weak self] in
                 if app.bundleIdentifier != Bundle.main.bundleIdentifier {
                     self?.lastExternalApp = app
+                    ExcelInsertContext.lastBundleID = app.bundleIdentifier
                 }
             }
         }

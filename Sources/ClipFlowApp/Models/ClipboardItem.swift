@@ -102,6 +102,8 @@ struct ClipboardItem: Identifiable, Hashable, Codable, Sendable {
     var htmlData: Data? = nil
     /// `file://` URLs captured with the copy (`public.file-url`).
     var fileURLs: [String]? = nil
+    /// Original pasteboard types in declaration order. Nil on history written before spreadsheet replay.
+    var extraTypes: [ClipboardPasteboardType]? = nil
 
     var captureTimestamp: Date {
         capturedAt ?? createdAt

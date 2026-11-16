@@ -124,6 +124,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
   <true/>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>ClipFlow 需要控制 Microsoft Excel，以便在 Excel 自己的复制会话结束后插入单元格并粘贴原来的表格格式。</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
 </dict>

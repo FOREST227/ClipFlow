@@ -71,7 +71,8 @@ final class ClipboardMonitor {
             return
         }
 
-        guard let choice = ClipboardCapture.choose(from: pasteboard) else {
+        let reading = ClipboardPasteboardReading.read(from: pasteboard)
+        guard let choice = ClipboardCapture.choose(reading) else {
             guard pasteboard.changeCount == changeCount else { return }
             lastChangeCount = changeCount
             return
@@ -81,7 +82,7 @@ final class ClipboardMonitor {
         let sourceApp = sourceApplication?.localizedName ?? "未知应用"
         switch choice {
         case .text(let text):
-            let richContent = ClipboardRepresentations.capture(from: pasteboard)
+            let richContent = ClipboardRepresentations.capture(reading)
             guard pasteboard.changeCount == changeCount else { return }
             lastChangeCount = changeCount
             store.ingestCopiedText(

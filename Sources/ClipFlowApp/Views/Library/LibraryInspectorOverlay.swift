@@ -39,6 +39,9 @@ struct LibraryInspectorOverlay: View {
     @Environment(\.colorScheme) private var textColorScheme
     @ViewState private var showsMarkdownPreview = false
     @ViewState private var codeLanguage = "自动识别"
+    private var showsSpreadsheetText: Bool {
+        SpreadsheetClipboard.hasTabularData(item) || item.labels.contains("表格")
+    }
     private var markdownAvailable: Bool {
         (!item.isSensitive || store.isRevealed(item)) && DetailTextFormat.isMarkdown(store.displayFullText(for: item))
     }
@@ -262,7 +265,7 @@ struct LibraryInspectorOverlay: View {
                 SoftEdgeScrollView(showsEdgeEffects: false) {
                     Text(store.displayFullText(for: item))
                         .font(.system(size: item.kind == .code ? 12 : 13, weight: .regular,
-                            design: item.kind == .code ? .monospaced : .default))
+                            design: item.kind == .code || showsSpreadsheetText ? .monospaced : .default))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
@@ -315,10 +318,51 @@ struct LibraryInspectorOverlay: View {
                         if SnippetLibrary.canSave(item) {
                             Button("存为片段") { store.requestSaveSnippet(fromItemID: item.id) }
                         }
+                        if SpreadsheetClipboard.hasOriginalTypes(item) {
+                            Button(SpreadsheetClipboard.copyOnlyTitle) {
+                                let copied = ClipFlowRuntime.shared.copyOriginalToClipboard(item)
+                                copyFeedback = copied ? "已放回剪贴板，未粘贴" : store.lastCaptureStatus
+                            }
+                        }
+                        if ExcelInsertOffer.shouldOffer(item: item, bundleIDs: ExcelInsertContext.currentBundleIDs()) {
+                            Button(SpreadsheetShift.down.menuTitle) {
+                                ClipFlowRuntime.shared.insertIntoExcel(item, shift: .down)
+                                onClose()
+                            }
+                            Button(SpreadsheetShift.right.menuTitle) {
+                                ClipFlowRuntime.shared.insertIntoExcel(item, shift: .right)
+                                onClose()
+                            }
+                        }
                         Button("删除条目", role: .destructive) { store.delete(item.id); onClose() }
                     } label: { Image(systemName: "ellipsis").frame(width: 24, height: 28) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                     .accessibilityLabel("更多操作")
+                }
+                if SpreadsheetClipboard.hasOriginalTypes(item) {
+                    Button(SpreadsheetClipboard.copyOnlyTitle) {
+                        let copied = ClipFlowRuntime.shared.copyOriginalToClipboard(item)
+                        copyFeedback = copied ? "已放回剪贴板，未粘贴" : store.lastCaptureStatus
+                    }
+                    .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
+                    .help("把原始表格数据放回剪贴板，不自动粘贴。可接着在 Excel 里用选择性粘贴或「插入复制的单元格」。")
+                }
+                if ExcelInsertOffer.shouldOffer(item: item, bundleIDs: ExcelInsertContext.currentBundleIDs()) {
+                    HStack(spacing: 8) {
+                        Button(SpreadsheetShift.down.menuTitle) {
+                            ClipFlowRuntime.shared.insertIntoExcel(item, shift: .down)
+                            onClose()
+                        }
+                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
+                        .help("在 Excel 当前单元格处插入同样大小的区域并下移原有单元格，再粘贴原格式。")
+                        Button("右移单元格") {
+                            ClipFlowRuntime.shared.insertIntoExcel(item, shift: .right)
+                            onClose()
+                        }
+                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
+                        .help("在 Excel 当前单元格处插入同样大小的区域并向右移开原有单元格，再粘贴原格式。")
+                        Spacer(minLength: 0)
+                    }
                 }
                 if PlainTextPaste.hasRichText(item) {
                     HStack(spacing: 8) {

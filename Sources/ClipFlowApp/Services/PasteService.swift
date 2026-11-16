@@ -40,6 +40,9 @@ final class PasteService {
                 : (item.isImage ? "图片资源不可用，请重新复制一次" : "恢复剪贴内容失败")
             return
         }
+        // Record the change before activating the target. Activation can spin the run loop,
+        // and a poll in that window must not ingest this write as a new or reduced copy.
+        monitor?.ignoreCurrentPasteboardUpdate()
 
         // Ask only once the user actually pastes. Without trust, the clipboard copy stands.
         guard store.isAccessibilityTrusted(prompt: true) else {
@@ -112,11 +115,50 @@ final class PasteService {
                 : (item.isImage ? "图片资源不可用，请重新复制一次" : "复制到剪贴板失败")
             return false
         }
+        monitor?.ignoreCurrentPasteboardUpdate()
 
         store.lastCaptureStatus = plainText
             ? "已复制纯文本到剪贴板，可在目标输入框中手动粘贴"
             : "已复制到剪贴板，可在目标输入框中手动粘贴"
         return true
+    }
+
+    /// Puts the original representations back and does not send a paste keystroke.
+    @discardableResult
+    func copyOriginalToClipboard(_ item: ClipboardItem) -> Bool {
+        guard copyToClipboard(item) else { return false }
+        store.lastCaptureStatus = SpreadsheetClipboard.copyOnlyStatus
+        return true
+    }
+
+    /// Inserts a matching block of cells in Excel, then pastes the original representations.
+    /// If Excel refuses the Apple event, falls back to an ordinary paste.
+    func insertIntoExcel(
+        _ item: ClipboardItem,
+        shift: SpreadsheetShift,
+        runner: @MainActor (String) -> ExcelInsertOutcome = ExcelAppleScript.run
+    ) {
+        guard let grid = SpreadsheetInsertRange.measure(tsv: item.fullText) else {
+            store.lastCaptureStatus = "这份内容没有可插入的表格范围"
+            return
+        }
+        guard ExcelAvailability.isRunning() else {
+            paste(item, preferredTarget: nil)
+            store.lastCaptureStatus = "Excel 没有在运行，已改为普通粘贴。"
+            return
+        }
+        let excel = ExcelAvailability.application()
+        switch ExcelCellInserter.insert(rows: grid.rows, columns: grid.columns, shift: shift, runner: runner) {
+        case .inserted:
+            paste(item, preferredTarget: excel)
+            store.lastCaptureStatus = "已在 Excel 中插入 \(grid.rows)×\(grid.columns) 个单元格（\(shift.statusWord)）并粘贴"
+        case .notPermitted:
+            paste(item, preferredTarget: excel)
+            store.lastCaptureStatus = "未获得控制 Excel 的权限，已改为普通粘贴。"
+        case .failed:
+            paste(item, preferredTarget: excel)
+            store.lastCaptureStatus = "无法在当前工作表插入单元格，已改为普通粘贴。"
+        }
     }
 
     func restore(_ item: ClipboardItem, to pasteboard: NSPasteboard, plainText: Bool = false) -> Bool {
@@ -140,7 +182,8 @@ final class PasteService {
         let snapshot = ClipboardRepresentations.Snapshot(
             rtfData: item.rtfData,
             htmlData: item.htmlData,
-            fileURLs: item.fileURLs ?? []
+            fileURLs: item.fileURLs ?? [],
+            extraTypes: item.extraTypes ?? []
         )
         return ClipboardRepresentations.write(plainText: item.fullText, snapshot: snapshot, to: pasteboard)
     }

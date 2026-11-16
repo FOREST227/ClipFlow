@@ -21,8 +21,18 @@ struct QuickPastePanelHeader: View {
 
             Spacer()
 
-            Button("关闭", action: onClose)
-                .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 22, height: 22)
+                    .foregroundStyle(.secondary)
+                    .background(palette.secondaryButtonFill, in: Circle())
+                    .overlay(Circle().strokeBorder(palette.border, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭")
+            .help("关闭")
         }
+        .frame(minHeight: ClipFlowLayout.controlHeight)
     }
 }

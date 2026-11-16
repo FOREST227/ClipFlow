@@ -126,12 +126,11 @@ struct ContentView: View {
         .background(
             InspectorEscapeHandler(onEscape: {
                 guard isPageEnabled, store.startupPermissionReport == nil else { return false }
-                // The library window can own the field editor without being NSApp.keyWindow.
-                let window = NSApp.windows.first { LibrarySearchFocus.searchFieldIsFirstResponder(in: $0) }
+                let window = LibrarySearchFocus.eventWindow
                 // A committed query leaves on the first Escape. The next one reaches the inspector.
                 if LibrarySearchFocus.escapeClearsQuery(
                     query: store.searchText,
-                    fieldFocused: window != nil,
+                    fieldFocused: LibrarySearchFocus.searchFieldIsFirstResponder(in: window),
                     isComposing: LibrarySearchFocus.isComposing(in: window)
                 ) {
                     store.searchText = ""

@@ -4,6 +4,9 @@ import SwiftUI
 /// Library search focus shared by the Edit menu, the history field, and Escape.
 @MainActor
 enum LibrarySearchFocus {
+    /// The window whose Escape is being handled. Set only for the duration of that callback.
+    static var eventWindow: NSWindow?
+
     static let fieldIdentifier = "clipflow.library-search"
     static let menuTitle = "查找"
     static let menuKeyEquivalent = "f"
@@ -69,6 +72,27 @@ enum LibrarySearchFocus {
         if window.firstResponder === field { return true }
         if let editor = field.currentEditor(), window.firstResponder === editor { return true }
         return false
+    }
+
+    /// Starts editing even when the process cannot become active. `makeFirstResponder`
+    /// makes a normal window key; headless runners need the field editor installed directly.
+    @discardableResult
+    static func claimEditing(_ field: NSTextField, in window: NSWindow) -> Bool {
+        if window.firstResponder === field || field.currentEditor() === window.firstResponder {
+            return true
+        }
+        if window.canBecomeKey, !window.isKeyWindow {
+            window.makeKeyAndOrderFront(nil)
+        }
+        if window.makeFirstResponder(field),
+           window.firstResponder === field || field.currentEditor() === window.firstResponder {
+            return true
+        }
+        guard let cell = field.cell, let editor = window.fieldEditor(true, for: field) as? NSTextView else {
+            return false
+        }
+        cell.edit(withFrame: field.bounds, in: field, editor: editor, delegate: field, event: nil)
+        return field.currentEditor() === editor && (window.firstResponder === editor || window.firstResponder === field)
     }
 
     static func isComposing(in window: NSWindow?) -> Bool {
@@ -177,7 +201,7 @@ final class LibrarySearchFieldAnchorView: NSView {
         }
         guard coordinator.requestID != 0, coordinator.appliedID != coordinator.requestID else { return }
         guard coordinator.canClaim else { return }
-        guard let window, window.isKeyWindow, window.isVisible else {
+        guard let window, window.isVisible else {
             retry(coordinator)
             return
         }
@@ -190,8 +214,7 @@ final class LibrarySearchFieldAnchorView: NSView {
             retry(coordinator)
             return
         }
-        let alreadyEditing = window.firstResponder === field || field.currentEditor() === window.firstResponder
-        guard alreadyEditing || window.makeFirstResponder(field) else {
+        guard LibrarySearchFocus.claimEditing(field, in: window) else {
             retry(coordinator)
             return
         }

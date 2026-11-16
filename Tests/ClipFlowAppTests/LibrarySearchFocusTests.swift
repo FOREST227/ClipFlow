@@ -44,6 +44,20 @@ final class LibrarySearchFocusTests: XCTestCase {
         XCTAssertEqual(model.requestID, 2)
     }
 
+    func testClaimEditingWorksWhenTheWindowCannotBecomeKey() {
+        let window = RefusesKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 80),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let field = NSTextField(frame: NSRect(x: 20, y: 20, width: 200, height: 24))
+        window.contentView?.addSubview(field)
+        window.orderFront(nil)
+        XCTAssertFalse(window.canBecomeKey)
+        LibrarySearchFocus.mark(field)
+        XCTAssertTrue(LibrarySearchFocus.claimEditing(field, in: window))
+        XCTAssertTrue(LibrarySearchFocus.searchFieldIsFirstResponder(in: window))
+    }
+
     func testNearestTextFieldStaysOnTheSearchRow() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 240),
             styleMask: [.borderless], backing: .buffered, defer: false)
@@ -138,6 +152,8 @@ final class LibrarySearchFocusTests: XCTestCase {
         XCTAssertTrue(escape.handleEscape(try key(53, characters: "\u{1b}", in: window)),
             "The next Escape dismisses the preview")
 
+        store.searchText = "beta"
+        waitUntil { store.searchText == "beta" }
         focusSearchField(in: window)
         let composer = try XCTUnwrap(window.firstResponder as? NSTextView)
         let selected = store.selectedItemID
@@ -146,7 +162,6 @@ final class LibrarySearchFocusTests: XCTestCase {
         XCTAssertTrue(LibrarySearchFocus.isComposing(in: window))
         XCTAssertFalse(keys.handle(try key(125, in: window)), "Arrow keys stay with the input method")
         XCTAssertEqual(store.selectedItemID, selected)
-        store.searchText = "beta"
         XCTAssertFalse(escape.handleEscape(try key(53, characters: "\u{1b}", in: window)),
             "Escape cancels composition before it clears the query")
         XCTAssertEqual(store.searchText, "beta")
@@ -220,5 +235,10 @@ final class LibrarySearchFocusTests: XCTestCase {
         }
         return ClipFlowStore(storageDirectory: directory, defaults: defaults)
     }
+}
+
+private final class RefusesKeyWindow: NSWindow {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
 }
 

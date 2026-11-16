@@ -178,8 +178,9 @@ struct SettingsView: View {
                 }
             }
             SettingsListGroup(title: "启动与运行") {
-                SettingsListRow(title: "暂停监听", detail: "暂停记录新内容，已有历史仍可使用") {
-                    settingsToggle("暂停监听", isOn: $store.capturePaused)
+                SettingsListRow(title: SharedSettingsCopy.recordClipboard, detail: SharedSettingsCopy.recordClipboardDetail) {
+                    settingsToggle(SharedSettingsCopy.recordClipboard,
+                        isOn: SharedSettingsCopy.recording(isPaused: $store.capturePaused))
                 }
                 Divider().padding(.horizontal, 12)
                 SettingsListRow(title: "开机自动启动", detail: store.launchAtLoginDetail) {
@@ -203,12 +204,12 @@ struct SettingsView: View {
     private var privacySettings: some View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsListGroup(title: "敏感内容") {
-                SettingsListRow(title: "自动保护疑似敏感内容", detail: "识别验证码、令牌等内容并应用隐私策略") {
-                    settingsToggle("自动保护疑似敏感内容", isOn: $store.autoProtectSecrets)
+                SettingsListRow(title: SharedSettingsCopy.protectSecrets, detail: SharedSettingsCopy.protectSecretsDetail) {
+                    settingsToggle(SharedSettingsCopy.protectSecrets, isOn: $store.autoProtectSecrets)
                 }
                 Divider().padding(.horizontal, 12)
-                SettingsListRow(title: "5 分钟后自动删除", detail: "按复制时间计算，置顶也会过期") {
-                    settingsToggle("5 分钟后自动删除", isOn: $store.sensitiveAutoExpireEnabled)
+                SettingsListRow(title: SharedSettingsCopy.expireSecrets, detail: SharedSettingsCopy.expireSecretsDetail) {
+                    settingsToggle(SharedSettingsCopy.expireSecrets, isOn: $store.sensitiveAutoExpireEnabled)
                 }
             }
             Text("关闭自动删除后，敏感内容仍遮罩显示、仅本地保存。重新开启会清理已超时记录。")
@@ -253,8 +254,8 @@ struct SettingsView: View {
     private var syncSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsListGroup(title: "文稿目录同步") {
-                SettingsListRow(title: "同步普通历史", detail: "将普通文本、图片和常用片段镜像到“文稿/ClipFlow”") {
-                    settingsToggle("同步普通历史", isOn: Binding(get: { store.iCloudSyncEnabled }, set: { store.setICloudSyncEnabled($0) }))
+                SettingsListRow(title: SharedSettingsCopy.syncPlainHistory, detail: "将普通文本、图片和常用片段镜像到“文稿/ClipFlow”") {
+                    settingsToggle(SharedSettingsCopy.syncPlainHistory, isOn: Binding(get: { store.iCloudSyncEnabled }, set: { store.setICloudSyncEnabled($0) }))
                 }
                 Divider().padding(.horizontal, 12)
                 SettingsListRow(title: "同步状态") {
@@ -317,96 +318,35 @@ private struct SettingsListRow<Control: View>: View {
 private struct HistoryLimitControl: View {
     let selection: Int
     let onSelect: (Int) -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
-    @Namespace private var highlight
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(HistoryRetention.choices, id: \.self) { limit in
-                Button {
-                    guard selection != limit else { return }
-                    onSelect(limit)
-                } label: {
-                    Text("\(limit)")
-                        .font(.system(size: 11, weight: selection == limit ? .semibold : .medium))
-                        .lineLimit(1)
-                        .foregroundStyle(selection == limit
-                            ? ClipCategory.all.labelColor(for: colorScheme)
-                            : ClipFlowPalette.secondaryText(for: colorScheme))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background {
-                            if selection == limit {
-                                RoundedRectangle(cornerRadius: 7)
-                                    .fill(ClipCategory.all.tint.opacity(0.13))
-                                    .matchedGeometryEffect(id: "history-limit", in: highlight)
-                            }
-                        }
-                        .contentShape(RoundedRectangle(cornerRadius: 7))
-                }
-                .buttonStyle(.plain)
-                .help("保留 \(limit) 条")
-                .accessibilityLabel("\(limit) 条")
-                .accessibilityIdentifier("history-limit-\(limit)")
-                .accessibilityAddTraits(selection == limit ? [.isSelected] : [])
-            }
-        }
-        .padding(3)
-        .frame(width: 232, height: 32)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.09), lineWidth: 1))
-        .animation(reduceMotion ? nil : ClipFlowMotion.fade, value: selection)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("历史保留条数")
+        ClipFlowPillPicker(
+            options: HistoryRetention.choices,
+            selection: Binding(get: { selection }, set: { onSelect($0) }),
+            accessibilityTitle: "历史保留条数",
+            width: 232,
+            title: { "\($0)" },
+            help: { "保留 \($0) 条" },
+            optionAccessibilityLabel: { "\($0) 条" },
+            accessibilityIdentifier: { "history-limit-\($0)" }
+        )
     }
 }
 
 private struct AppearanceModeControl: View {
     @Binding var selection: ClipFlowAppearance
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
-    @Namespace private var highlight
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(ClipFlowAppearance.allCases) { mode in
-                Button {
-                    guard selection != mode else { return }
-                    selection = mode
-                } label: {
-                    HStack(spacing: 4) {
-                        if mode != .system {
-                            Image(systemName: mode.icon).font(.system(size: 10, weight: .medium))
-                        }
-                        Text(mode.title).font(.system(size: 11, weight: selection == mode ? .semibold : .medium))
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(selection == mode
-                        ? ClipCategory.all.labelColor(for: colorScheme)
-                        : ClipFlowPalette.secondaryText(for: colorScheme))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background {
-                        if selection == mode {
-                            RoundedRectangle(cornerRadius: 7)
-                                .fill(ClipCategory.all.tint.opacity(0.13))
-                                .matchedGeometryEffect(id: "appearance", in: highlight)
-                        }
-                    }
-                    .contentShape(RoundedRectangle(cornerRadius: 7))
-                }
-                .buttonStyle(.plain)
-                .help(mode.title)
-                .accessibilityLabel(mode.title)
-                .accessibilityAddTraits(selection == mode ? [.isSelected] : [])
-            }
-        }
-        .padding(3)
-        .frame(width: 216, height: 32)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.09), lineWidth: 1))
-        .animation(reduceMotion ? nil : ClipFlowMotion.fade, value: selection)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("外观模式")
+        ClipFlowPillPicker(
+            options: Array(ClipFlowAppearance.allCases),
+            selection: $selection,
+            accessibilityTitle: "外观模式",
+            width: 216,
+            title: \.title,
+            icon: { $0 == .system ? nil : $0.icon },
+            help: \.title,
+            optionAccessibilityLabel: \.title
+        )
     }
 }
 

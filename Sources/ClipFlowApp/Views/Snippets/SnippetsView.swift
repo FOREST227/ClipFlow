@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SensitiveSnippetConfirmation: ViewModifier {
@@ -183,14 +184,17 @@ struct SnippetsView: View {
     }
 
     private func snippetList(palette: ClipFlowPalette) -> some View {
-        List(selection: $selectedID) {
+        List {
             ForEach(rows) { snippet in
                 SnippetRow(snippet: snippet, palette: palette, canReorder: !searching,
+                    isSelected: selectedID == snippet.id,
+                    onSelect: { selectedID = snippet.id },
                     onEdit: { editor = .editing(snippet) },
                     onMoveUp: { store.moveSnippet(id: snippet.id, by: -1) },
                     onMoveDown: { store.moveSnippet(id: snippet.id, by: 1) },
                     onDelete: { pendingDelete = snippet })
                     .tag(snippet.id)
+                    .snippetListRowChrome()
             }
             .onMove { offsets, destination in
                 guard !searching else { return }
@@ -199,6 +203,7 @@ struct SnippetsView: View {
         }
         .listStyle(.plain)
         .scrollContentBackgroundHiddenCompat()
+        .background(SnippetListHighlightDisabler())
         .accessibilityLabel("常用片段列表")
     }
 
@@ -254,6 +259,8 @@ private struct SnippetRow: View {
     let snippet: SavedSnippet
     let palette: ClipFlowPalette
     let canReorder: Bool
+    let isSelected: Bool
+    let onSelect: () -> Void
     let onEdit: () -> Void
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
@@ -267,13 +274,6 @@ private struct SnippetRow: View {
                     Text(snippet.title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
-                    Text("片段")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(ClipCategory.code.labelColor(for: colorScheme))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule(style: .continuous).fill(ClipCategory.code.tint.opacity(0.18)))
-                        .accessibilityLabel("片段")
                     if let category = snippet.category {
                         Text(category)
                             .font(.system(size: 10, weight: .medium))
@@ -293,7 +293,10 @@ private struct SnippetRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .contentShape(Rectangle())
-            .onTapGesture(perform: onEdit)
+            .onTapGesture {
+                onSelect()
+                onEdit()
+            }
             .accessibilityAddTraits(.isButton)
             .accessibilityHint("编辑片段")
 
@@ -314,9 +317,12 @@ private struct SnippetRow: View {
             .fixedSize()
             .accessibilityLabel("\(snippet.title)的操作")
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(CardSelectionChrome(isSelected: isSelected, tint: ClipCategory.all.tint, palette: palette))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(SnippetLibrary.accessibilityLabel(for: snippet))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityAction(named: "编辑", onEdit)
         .accessibilityAction(named: "上移") { if canReorder { onMoveUp() } }
         .accessibilityAction(named: "下移") { if canReorder { onMoveDown() } }
@@ -401,6 +407,47 @@ struct SnippetEditorSheet: View {
                     in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous)
                     .strokeBorder(palette.border, lineWidth: 1))
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder func snippetListRowChrome() -> some View {
+        if #available(macOS 13, *) {
+            self.listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        } else {
+            self.listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                .listRowBackground(Color.clear)
+        }
+    }
+}
+
+/// The plain list's full-row highlight is not the history card. Turn that highlight off.
+private struct SnippetListHighlightDisabler: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Disabler() }
+    func updateNSView(_ nsView: NSView, context: Context) { (nsView as? Disabler)?.clearSelectionHighlight() }
+
+    final class Disabler: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            clearSelectionHighlight()
+        }
+        override func layout() {
+            super.layout()
+            clearSelectionHighlight()
+        }
+        func clearSelectionHighlight() {
+            var cursor: NSView? = self
+            while let view = cursor {
+                if let table = view as? NSTableView {
+                    table.selectionHighlightStyle = .none
+                    table.focusRingType = .none
+                    return
+                }
+                cursor = view.superview
+            }
         }
     }
 }

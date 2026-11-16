@@ -26,18 +26,31 @@ final class LibraryCardLayoutTests: XCTestCase {
     func testQuickPasteUsesSmallerMatchingGrid() {
         XCTAssertEqual(QuickPasteCardLayout.height(for: .text), 64)
         XCTAssertEqual(QuickPasteCardLayout.height(for: .link), 64)
-        XCTAssertEqual(QuickPasteCardLayout.height(for: .image), 136)
+        XCTAssertEqual(QuickPasteCardLayout.height(for: .image), QuickPasteCardLayout.imageHeight)
         XCTAssertEqual(QuickPasteCardLayout.height(for: .code), 136)
         XCTAssertEqual(QuickPasteCardLayout.height(for: .secret), 64)
         XCTAssertEqual(QuickPasteCardLayout.expandedHeight,
             2 * QuickPasteCardLayout.compactHeight + QuickPasteCardLayout.spacing)
+        XCTAssertLessThan(QuickPasteCardLayout.height(for: .image), QuickPasteCardLayout.height(for: .code))
     }
 
-    func testTwoCompactCardsAndGapEqualOneExpandedCard() {
-        XCTAssertEqual(LibraryCardLayout.height(for: .image), 2 * LibraryCardLayout.height(for: .text) + LibraryCardLayout.spacing)
-        XCTAssertEqual(LibraryCardLayout.height(for: .code), LibraryCardLayout.height(for: .image))
+    func testImageRowsFitTheThumbnailInsteadOfASecondRow() {
+        XCTAssertEqual(LibraryCardLayout.height(for: .image),
+            LibraryCardLayout.contentPadding * 2 + LibraryCardLayout.metadataHeight
+            + LibraryCardLayout.blockSpacing + LibraryImageThumbnail.height)
+        XCTAssertEqual(LibraryCardLayout.height(for: .code), LibraryCardLayout.expandedHeight)
+        XCTAssertLessThan(LibraryCardLayout.height(for: .image), LibraryCardLayout.height(for: .code))
         XCTAssertEqual(LibraryCardLayout.height(for: .link), LibraryCardLayout.height(for: .text))
         XCTAssertEqual(LibraryCardLayout.height(for: .secret), LibraryCardLayout.height(for: .text))
+        XCTAssertEqual(QuickPasteCardLayout.imageHeight,
+            QuickPasteCardLayout.verticalPadding * 2 + QuickPasteCardLayout.metadataHeight
+            + QuickPasteCardLayout.contentSpacing + LibraryImageThumbnail.height
+            + QuickPasteCardLayout.imageCaptionGap + QuickPasteCardLayout.imageCaptionHeight)
+    }
+
+    func testTwoCompactCardsAndGapEqualOneCodeCard() {
+        XCTAssertEqual(LibraryCardLayout.height(for: .code),
+            2 * LibraryCardLayout.height(for: .text) + LibraryCardLayout.spacing)
     }
     func testImageShapeKeepsNearSquaresTogether() {
         XCTAssertEqual(LibraryImageShape.resolve(width: 1200, height: 1000), .square)

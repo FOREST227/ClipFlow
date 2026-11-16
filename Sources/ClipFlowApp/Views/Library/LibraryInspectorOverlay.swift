@@ -1,6 +1,25 @@
 import AppKit
 import SwiftUI
 
+private enum MarkdownDisplay: String, CaseIterable, Hashable {
+    case source
+    case preview
+
+    var title: String {
+        switch self {
+        case .source: "源码"
+        case .preview: "预览"
+        }
+    }
+
+    var accessibilityIdentifier: String {
+        switch self {
+        case .source: "markdown-source"
+        case .preview: "markdown-preview"
+        }
+    }
+}
+
 struct LibraryInspectorOverlay: View {
     let item: ClipboardItem
     @ObservedObject var store: ClipFlowStore
@@ -61,7 +80,7 @@ struct LibraryInspectorOverlay: View {
         return min(maxHeight, drawerHeaderHeight + max(64, ceil(bounds.height) + 24) + drawerFooterHeight + 24)
     }
     private var drawerBodyHeight: CGFloat { max(64, drawerHeight - drawerHeaderHeight - drawerFooterHeight - 24) }
-    private var previewHeight: CGFloat { item.isImage ? max(64, drawerBodyHeight - 24) : drawerBodyHeight }
+    private var previewHeight: CGFloat { drawerBodyHeight }
 
     var body: some View {
         // Build rich content and measure text once per content/state change, not per animation tick.
@@ -188,40 +207,37 @@ struct LibraryInspectorOverlay: View {
 
     @ViewBuilder private var drawerPreview: some View {
             if item.isImage {
-                let shape = LibraryImageShape.resolve(width: item.imageWidth, height: item.imageHeight)
-                let columnWidth = max(120, contentWidth - 40)
-                let pixelWidth = max(1, item.imageWidth ?? Double(columnWidth))
-                let pixelHeight = max(1, item.imageHeight ?? Double(columnWidth))
-                let naturalHeight = columnWidth * pixelHeight / pixelWidth
-                let cap = DetailImageLayout.previewHeight(shape: shape, availableHeight: drawerHeight, expandedInfo: showsInfo)
-                let imageHeight = min(previewHeight, max(64, min(cap, naturalHeight)))
-                VStack(alignment: .leading, spacing: ClipFlowLayout.space8) {
+                let imageHeight = max(64, previewHeight)
+                Group {
                     if (!item.isSensitive || store.isRevealed(item)), let url = store.imageURL(for: item) {
-                        ZoomableDetailImage(url: url)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: imageHeight, alignment: .top)
+                        ZoomableDetailImage(url: url, fillsHeight: true)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .clipShape(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
                     } else {
                         ClipThumbnailView(store: store, item: item, height: imageHeight,
                             cornerRadius: ClipFlowLayout.rowRadius,
-                            showsDimensionLabel: false, contentMode: .fit, insetPreview: true)
-                    }
-                    if let dimensions = item.imageDimensionText {
-                        Text(dimensions).font(.system(size: 10))
-                            .foregroundStyle(ClipFlowPalette.secondaryText(for: textColorScheme))
+                            showsDimensionLabel: false, contentMode: .fit, insetPreview: false)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .padding(.bottom, ClipFlowLayout.space8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .frame(height: imageHeight)
             } else if item.kind == .code || markdownAvailable {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         if markdownAvailable {
-                            Picker("显示方式", selection: $showsMarkdownPreview) {
-                                Text("源码").tag(false)
-                                Text("预览").tag(true)
-                            }
-                            .pickerStyle(.segmented).labelsHidden().frame(width: 110)
+                            ClipFlowPillPicker(
+                                options: MarkdownDisplay.allCases,
+                                selection: Binding(
+                                    get: { showsMarkdownPreview ? MarkdownDisplay.preview : .source },
+                                    set: { showsMarkdownPreview = $0 == .preview }
+                                ),
+                                accessibilityTitle: "显示方式",
+                                width: 148,
+                                height: 28,
+                                title: \.title,
+                                optionAccessibilityLabel: \.title,
+                                accessibilityIdentifier: \.accessibilityIdentifier
+                            )
                         }
                         Spacer(minLength: 4)
                         if !showsMarkdownPreview {

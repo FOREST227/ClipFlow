@@ -5,7 +5,7 @@
   <p>一款轻量的原生 macOS 剪贴板工具，集中管理文本、代码、链接、图片和常用片段。</p>
   <p>
     <a href="https://github.com/FOREST227/ClipFlow/releases/latest">下载最新版</a>
-    · <a href="docs/releases/v0.1.6.md">v0.1.6 更新说明</a>
+    · <a href="docs/releases/v0.1.7.md">v0.1.7 更新说明</a>
     · <a href="https://github.com/FOREST227/ClipFlow/issues">反馈问题</a>
   </p>
   <p>macOS 12+ · Apple 芯片 / Intel / 通用版本 · 中文界面 · 本地保存</p>
@@ -29,14 +29,14 @@
 
 ## 界面一览
 
-以下由当前 **v0.1.6 的真实应用组件**重新生成，全部使用演示数据，不包含个人剪贴历史。图片外部的白色留白仅用于文档展示。
+以下界面与 v0.1.6 相同，截图仍由当时的真实应用组件生成，全部使用演示数据，不包含个人剪贴历史。图片外部的白色留白仅用于文档展示。
 
 ### 快速粘贴与菜单栏
 
 快捷面板专注搜索、选中与粘贴，并可在历史和常用片段之间切换。底部提示收在一行，右上角用圆形按钮关闭。菜单栏专注运行状态和关键开关，记录开关写着「记录剪贴板」。两者分工明确，不重复堆放历史列表。
 
 <p align="center">
-  <img src="docs/images/v0.1.6/quick-paste.png" width="48%" align="middle" alt="v0.1.6 快速粘贴面板：历史与片段切换、一行底部提示、圆形关闭按钮和历史入口">
+  <img src="docs/images/v0.1.6/quick-paste.png" width="48%" align="middle" alt="快速粘贴面板：历史与片段切换、一行底部提示、圆形关闭按钮和历史入口">
   <img src="docs/images/v0.1.6/menu.png" width="48%" align="middle" alt="菜单栏面板：记录剪贴板、敏感内容保护、同步普通历史，以及历史和设置入口">
 </p>
 <p align="center">快速粘贴 · 菜单栏概览</p>
@@ -83,9 +83,9 @@
 
 | 你的 Mac | 安装包 |
 | --- | --- |
-| Apple 芯片 | [ClipFlow-v0.1.6-arm64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.6/ClipFlow-v0.1.6-arm64.dmg) |
-| Intel 处理器 | [ClipFlow-v0.1.6-x86_64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.6/ClipFlow-v0.1.6-x86_64.dmg) |
-| 两种架构通用，或不确定芯片类型 | [ClipFlow-v0.1.6-universal.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.6/ClipFlow-v0.1.6-universal.dmg) |
+| Apple 芯片 | [ClipFlow-v0.1.7-arm64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.7/ClipFlow-v0.1.7-arm64.dmg) |
+| Intel 处理器 | [ClipFlow-v0.1.7-x86_64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.7/ClipFlow-v0.1.7-x86_64.dmg) |
+| 两种架构通用，或不确定芯片类型 | [ClipFlow-v0.1.7-universal.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.7/ClipFlow-v0.1.7-universal.dmg) |
 
 1. 打开 .dmg，将 **ClipFlow** 拖入“应用程序”。
 2. 从“应用程序”启动，点击菜单栏中的 ClipFlow 图标。
@@ -145,7 +145,7 @@
 
 构建目标覆盖 macOS 12，但旧系统实机与 Intel 实机仍需要更多验证。遇到问题，欢迎 [提交 Issue](https://github.com/FOREST227/ClipFlow/issues)，附上 macOS 版本、芯片型号、应用版本及复现步骤。分享截图前请遮住私人剪贴内容。
 
-- [更新说明](docs/releases/v0.1.6.md)
+- [更新说明](docs/releases/v0.1.7.md)
 - [开发、测试与打包](docs/development.md)
 - [离线渲染组件与许可证](Sources/ClipFlowApp/Renderer/NOTICE.txt)
 

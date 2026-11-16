@@ -89,7 +89,15 @@ enum DetailTextDocument {
         }
         candidates.append(contentsOf: [mainResourceURL, anchorResourceURL, mainBundleURL].compactMap { $0 })
         if let executableURL {
-            candidates.append(executableURL.deletingLastPathComponent())
+            var directory = executableURL.deletingLastPathComponent()
+            // .xctest/Contents/MacOS/<executable> and the products directory beside that bundle.
+            for _ in 0..<4 {
+                candidates.append(directory)
+                directory = directory.deletingLastPathComponent()
+            }
+        }
+        if let mainBundleURL {
+            candidates.append(mainBundleURL.deletingLastPathComponent())
         }
         for candidate in candidates {
             if let root = swiftPMResourceRoot(at: candidate) {
@@ -102,17 +110,23 @@ enum DetailTextDocument {
     private static let resolvedModuleResourceRoot: URL? = moduleResourceRoot()
 
     private static func swiftPMResourceRoot(at candidate: URL) -> URL? {
-        let bundleURL = candidate.pathExtension.lowercased() == "bundle"
-            ? candidate
-            : candidate.appendingPathComponent(swiftPMBundleName + ".bundle", isDirectory: true)
-        guard let resourceURL = Bundle(url: bundleURL)?.resourceURL else { return nil }
-        var isDirectory: ObjCBool = false
-        let renderer = resourceURL.appendingPathComponent("Renderer", isDirectory: true)
-        guard FileManager.default.fileExists(atPath: renderer.path, isDirectory: &isDirectory),
-              isDirectory.boolValue else {
-            return nil
+        var bundleURLs = [candidate.appendingPathComponent(swiftPMBundleName + ".bundle")]
+        if candidate.pathExtension.lowercased() == "bundle" {
+            bundleURLs.append(candidate)
         }
-        return resourceURL
+        for bundleURL in bundleURLs {
+            guard let resourceURL = Bundle(url: bundleURL)?.resourceURL else { continue }
+            // Debug builds symlink Renderer into the bundle. fileExists reports
+            // that link as a non-directory on some macOS versions, so resolve it first.
+            let renderer = resourceURL.appendingPathComponent("Renderer").resolvingSymlinksInPath()
+            var isDirectory = ObjCBool(false)
+            guard FileManager.default.fileExists(atPath: renderer.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                continue
+            }
+            return resourceURL
+        }
+        return nil
     }
 
     static let scripts: String = {

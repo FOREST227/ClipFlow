@@ -174,6 +174,40 @@ final class DetailTextRendererTests: XCTestCase {
             "next-to-executable"
         )
 
+        let products = try temporaryDirectory()
+        _ = try writeSwiftPMBundle(in: products, script: "beside-xctest")
+        let xctest = products.appendingPathComponent("ClipFlowPackageTests.xctest")
+        let besideProduct = try XCTUnwrap(DetailTextDocument.moduleResourceRoot(
+            mainResourceURL: xctest.appendingPathComponent("Contents/Resources"),
+            mainBundleURL: xctest,
+            anchorResourceURL: xctest.appendingPathComponent("Contents/Resources"),
+            executableURL: xctest.appendingPathComponent("Contents/MacOS/ClipFlowPackageTests"),
+            environment: [:]
+        ))
+        XCTAssertEqual(
+            DetailTextDocument.load(name: "highlight.min.js", installedRoot: nil, moduleRoot: besideProduct),
+            "beside-xctest"
+        )
+
+        let symlinked = try temporaryDirectory()
+        let symlinkedBundle = try writeSwiftPMBundle(in: symlinked, script: "symlinked-renderer")
+        let resources = symlinkedBundle.appendingPathComponent("Contents/Resources")
+        let renderer = resources.appendingPathComponent("Renderer")
+        let relocated = symlinked.appendingPathComponent("relocated-renderer")
+        try FileManager.default.moveItem(at: renderer, to: relocated)
+        try FileManager.default.createSymbolicLink(at: renderer, withDestinationURL: relocated)
+        let symlinkedRoot = try XCTUnwrap(DetailTextDocument.moduleResourceRoot(
+            mainResourceURL: symlinked,
+            mainBundleURL: nil,
+            anchorResourceURL: nil,
+            executableURL: nil,
+            environment: [:]
+        ))
+        XCTAssertEqual(
+            DetailTextDocument.load(name: "highlight.min.js", installedRoot: nil, moduleRoot: symlinkedRoot),
+            "symlinked-renderer"
+        )
+
         let fromOverride = try XCTUnwrap(DetailTextDocument.moduleResourceRoot(
             mainResourceURL: nil,
             mainBundleURL: nil,

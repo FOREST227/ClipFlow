@@ -38,3 +38,8 @@ jobs:
           fi
           xcrun swift build
           xcrun swift test
+
+      - name: Package the app and verify renderer resources
+        env:
+          CLIPFLOW_ADHOC_SIGN: "1"
+        run: zsh scripts/build_app.sh

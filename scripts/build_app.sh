@@ -130,7 +130,88 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# The packaged app keeps renderer scripts in Contents/Resources/Renderer.
+# SwiftPM's generated Bundle accessor aborts when its .bundle is absent, so the
+# app target must not reference it, and the shipped binary must be able to build
+# plain-text, code, and markdown detail HTML from that Resources directory.
+verify_packaged_renderer() {
+  local app_dir="$1"
+  local binary="$app_dir/Contents/MacOS/$PRODUCT_NAME"
+  local renderer_dir="$app_dir/Contents/Resources/Renderer"
+  local file match=0
+
+  while IFS= read -r -d '' file; do
+    if grep -n -E 'Bundle\.module' "$file"; then
+      match=1
+    fi
+  done < <(find "$ROOT_DIR/Sources" -name '*.swift' -print0)
+  if (( match != 0 )); then
+    echo "The generated SwiftPM resource accessor aborts when its bundle is not in the app." >&2
+    exit 1
+  fi
+
+  if [[ ! -d "$renderer_dir" ]]; then
+    echo "Packaged renderer directory is missing: $renderer_dir" >&2
+    exit 1
+  fi
+  for name in highlight.min.js markdown-it.min.js lang-swift.js; do
+    if [[ ! -s "$renderer_dir/$name" ]]; then
+      echo "Packaged app is missing renderer resource: $name" >&2
+      exit 1
+    fi
+  done
+  if [[ ! -x "$binary" ]]; then
+    echo "Packaged executable is missing: $binary" >&2
+    exit 1
+  fi
+
+  local host_arch binary_archs
+  host_arch="$(uname -m)"
+  binary_archs="$(lipo -archs "$binary")"
+  if [[ " $binary_archs " != *" $host_arch "* ]]; then
+    echo "Skipping in-process renderer verification for [$binary_archs] on $host_arch; packaged resources are present."
+    return 0
+  fi
+
+  local output_file pid elapsed=0 verify_status output
+  output_file="$(mktemp)"
+  env -u PACKAGE_RESOURCE_BUNDLE_PATH -u PACKAGE_RESOURCE_BUNDLE_URL \
+    "$binary" --verify-renderer >"$output_file" 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( elapsed >= 150 )); then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      echo "Renderer verification timed out." >&2
+      cat "$output_file" >&2 || true
+      rm -f "$output_file"
+      exit 1
+    fi
+    sleep 0.2
+    elapsed=$((elapsed + 1))
+  done
+  set +e
+  wait "$pid"
+  verify_status=$?
+  set -e
+  output="$(<"$output_file")"
+  rm -f "$output_file"
+  printf '%s\n' "$output"
+  if (( verify_status != 0 )); then
+    echo "Renderer verification failed with status $verify_status." >&2
+    exit 1
+  fi
+  case "$output" in
+    *"Renderer resources verified"*) ;;
+    *)
+      echo "Renderer verification did not report success." >&2
+      exit 1
+      ;;
+  esac
+}
+
 zsh "$ROOT_DIR/scripts/sign_app.sh" "$APP_DIR"
+verify_packaged_renderer "$APP_DIR"
 
 echo "Built app bundle at:"
 echo "$APP_DIR"

@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import SwiftUI
 import Combine
 
@@ -6,6 +7,15 @@ import Combine
 struct ClipFlowApp {
     @MainActor
     static func main() {
+        if CommandLine.arguments.dropFirst().contains("--verify-renderer") {
+            if let error = DetailTextDocument.rendererVerificationError() {
+                let message = error + "\n"
+                message.withCString { _ = fputs($0, stderr) }
+                exit(EXIT_FAILURE)
+            }
+            print("Renderer resources verified for plain text, code, and markdown.")
+            exit(EXIT_SUCCESS)
+        }
         let application = NSApplication.shared
         let delegate = ClipFlowAppDelegate()
         application.setActivationPolicy(.accessory)

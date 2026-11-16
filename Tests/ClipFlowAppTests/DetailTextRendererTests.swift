@@ -98,7 +98,154 @@ final class DetailTextRendererTests: XCTestCase {
 
     func testBundledRendererResourceLoads() {
         let source = DetailTextDocument.resource("highlight.min.js")
-        XCTAssertFalse(source.isEmpty)
+        XCTAssertFalse(source.isEmpty, DetailTextDocument.resourceSearchDescription())
+        XCTAssertNil(DetailTextDocument.rendererVerificationError())
+    }
+
+    func testMissingSwiftPMBundleReturnsNilInsteadOfTrapping() throws {
+        let missing = try temporaryDirectory()
+        XCTAssertNil(DetailTextDocument.moduleResourceRoot(
+            mainResourceURL: missing,
+            mainBundleURL: missing,
+            anchorResourceURL: missing,
+            executableURL: missing.appendingPathComponent("ClipFlowApp"),
+            environment: [:]
+        ))
+    }
+
+    func testInstalledRendererLayoutLoadsWithoutSwiftPMBundle() throws {
+        let resources = try temporaryDirectory()
+        let renderer = resources.appendingPathComponent("Renderer", isDirectory: true)
+        try FileManager.default.createDirectory(at: renderer, withIntermediateDirectories: true)
+        try "/*! Highlight.js packaged */".write(
+            to: renderer.appendingPathComponent("highlight.min.js"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let executable = resources.appendingPathComponent("Contents/MacOS/ClipFlowApp")
+        XCTAssertNil(DetailTextDocument.moduleResourceRoot(
+            mainResourceURL: resources,
+            mainBundleURL: resources,
+            anchorResourceURL: resources,
+            executableURL: executable,
+            environment: ["PACKAGE_RESOURCE_BUNDLE_PATH": resources.path]
+        ))
+        XCTAssertEqual(
+            DetailTextDocument.load(
+                name: "highlight.min.js",
+                installedRoot: resources,
+                moduleRoot: DetailTextDocument.moduleResourceRoot(
+                    mainResourceURL: resources,
+                    mainBundleURL: resources,
+                    anchorResourceURL: resources,
+                    executableURL: executable,
+                    environment: [:]
+                )
+            ),
+            "/*! Highlight.js packaged */"
+        )
+    }
+
+    func testModuleResourceRootFindsBundleWithoutTrapping() throws {
+        let directory = try temporaryDirectory()
+        let bundle = try writeSwiftPMBundle(in: directory, script: "next-to-executable")
+        let executable = directory.appendingPathComponent("ClipFlowApp")
+        let besideExecutable = try XCTUnwrap(DetailTextDocument.moduleResourceRoot(
+            mainResourceURL: nil,
+            mainBundleURL: nil,
+            anchorResourceURL: nil,
+            executableURL: executable,
+            environment: [:]
+        ))
+        XCTAssertEqual(
+            DetailTextDocument.load(name: "highlight.min.js", installedRoot: nil, moduleRoot: besideExecutable),
+            "next-to-executable"
+        )
+
+        let fromResources = try XCTUnwrap(DetailTextDocument.moduleResourceRoot(
+            mainResourceURL: directory,
+            mainBundleURL: nil,
+            anchorResourceURL: nil,
+            executableURL: nil,
+            environment: [:]
+        ))
+        XCTAssertEqual(
+            DetailTextDocument.load(name: "highlight.min.js", installedRoot: nil, moduleRoot: fromResources),
+            "next-to-executable"
+        )
+
+        let products = try temporaryDirectory()
+        _ = try writeSwiftPMBundle(in: products, script: "beside-xctest")
+        let xctest = products.appendingPathComponent("ClipFlowPackageTests.xctest")
+        let besideProduct = try XCTUnwrap(DetailTextDocument.moduleResourceRoot(
+            mainResourceURL: xctest.appendingPathComponent("Contents/Resources"),
+            mainBundleURL: xctest,
+            anchorResourceURL: xctest.appendingPathComponent("Contents/Resources"),
+            executableURL: xctest.appendingPathComponent("Contents/MacOS/ClipFlowPackageTests"),
+            environment: [:]
+        ))
+        XCTAssertEqual(
+            DetailTextDocument.load(name: "highlight.min.js", installedRoot: nil, moduleRoot: besideProduct),
+            "beside-xctest"
+        )
+
+        let symlinked = try temporaryDirectory()
+        let symlinkedBundle = try writeSwiftPMBundle(in: symlinked, script: "symlinked-renderer")
+        let resources = symlinkedBundle.appendingPathComponent("Contents/Resources")
+        let renderer = resources.appendingPathComponent("Renderer")
+        let relocated = symlinked.appendingPathComponent("relocated-renderer")
+        try FileManager.default.moveItem(at: renderer, to: relocated)
+        try FileManager.default.createSymbolicLink(at: renderer, withDestinationURL: relocated)
+        let symlinkedRoot = try XCTUnwrap(DetailTextDocument.moduleResourceRoot(
+            mainResourceURL: symlinked,
+            mainBundleURL: nil,
+            anchorResourceURL: nil,
+            executableURL: nil,
+            environment: [:]
+        ))
+        XCTAssertEqual(
+            DetailTextDocument.load(name: "highlight.min.js", installedRoot: nil, moduleRoot: symlinkedRoot),
+            "symlinked-renderer"
+        )
+
+        let fromOverride = try XCTUnwrap(DetailTextDocument.moduleResourceRoot(
+            mainResourceURL: nil,
+            mainBundleURL: nil,
+            anchorResourceURL: nil,
+            executableURL: nil,
+            environment: ["PACKAGE_RESOURCE_BUNDLE_PATH": bundle.path]
+        ))
+        XCTAssertEqual(
+            DetailTextDocument.load(name: "highlight.min.js", installedRoot: nil, moduleRoot: fromOverride),
+            "next-to-executable"
+        )
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clipflow-renderer-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    private func writeSwiftPMBundle(in directory: URL, script: String) throws -> URL {
+        let bundle = directory.appendingPathComponent(DetailTextDocument.swiftPMBundleName + ".bundle", isDirectory: true)
+        let contents = bundle.appendingPathComponent("Contents", isDirectory: true)
+        let renderer = contents.appendingPathComponent("Resources/Renderer", isDirectory: true)
+        try FileManager.default.createDirectory(at: renderer, withIntermediateDirectories: true)
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+          <key>CFBundleIdentifier</key><string>test.clipflow.resources</string>
+          <key>CFBundleName</key><string>\(DetailTextDocument.swiftPMBundleName)</string>
+          <key>CFBundlePackageType</key><string>BNDL</string>
+        </dict></plist>
+        """
+        try plist.write(to: contents.appendingPathComponent("Info.plist"), atomically: true, encoding: .utf8)
+        try script.write(to: renderer.appendingPathComponent("highlight.min.js"), atomically: true, encoding: .utf8)
+        return bundle
     }
 
     func testSourceEscapingAndMarkdownDetection() async throws {

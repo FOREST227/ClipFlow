@@ -27,11 +27,37 @@ enum DetailTextFormat {
     }
 }
 
+/// Anchor for `Bundle(for:)`. The generated SwiftPM resource accessor is not
+/// used: it aborts when `ClipFlow_ClipFlowApp.bundle` is missing, and the
+/// packaged app ships `Contents/Resources/Renderer` instead of that bundle.
+private final class RendererBundleAnchor: NSObject {}
+
 enum DetailTextDocument {
     private static let logger = Logger(subsystem: "com.clipflow.app", category: "renderer")
+    static let swiftPMBundleName = "ClipFlow_ClipFlowApp"
+    static let scriptNames = ["highlight.min.js", "markdown-it.min.js"] +
+        ["powershell", "swift", "objectivec", "kotlin", "dart", "scala", "perl", "r",
+         "dockerfile", "makefile", "shell", "diff", "lua"].map { "lang-\($0).js" }
+
+    static func resourceSearchDescription() -> String {
+        let anchor = Bundle(for: RendererBundleAnchor.self)
+        return [
+            "main.resource=\(Bundle.main.resourceURL?.path ?? "nil")",
+            "main.bundle=\(Bundle.main.bundleURL.path)",
+            "main.exec=\(Bundle.main.executableURL?.path ?? "nil")",
+            "anchor.resource=\(anchor.resourceURL?.path ?? "nil")",
+            "anchor.bundle=\(anchor.bundleURL.path)",
+            "module=\(moduleResourceRoot()?.path ?? "nil")",
+        ].joined(separator: "\n")
+    }
 
     static func resource(_ name: String) -> String {
-        load(name: name, installedRoot: Bundle.main.resourceURL, moduleRoot: Bundle.module.resourceURL)
+        if let installedRoot = Bundle.main.resourceURL,
+           let value = read(name, from: installedRoot),
+           !value.isEmpty {
+            return value
+        }
+        return load(name: name, installedRoot: nil, moduleRoot: resolvedModuleResourceRoot)
     }
 
     /// Reads a packaged renderer script. A missing bundle or file is logged and replaced
@@ -61,11 +87,100 @@ enum DetailTextDocument {
         let url = root.appendingPathComponent("Renderer").appendingPathComponent(name)
         return try? String(contentsOf: url, encoding: .utf8)
     }
+
+    /// Directories SwiftPM searches for the resource bundle, without the generated
+    /// accessor's fatal error. Nil means the bundle is not installed.
+    static func moduleResourceRoot(
+        mainResourceURL: URL? = Bundle.main.resourceURL,
+        mainBundleURL: URL? = Bundle.main.bundleURL,
+        anchorResourceURL: URL? = Bundle(for: RendererBundleAnchor.self).resourceURL,
+        executableURL: URL? = Bundle.main.executableURL,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        var candidates: [URL] = []
+        if let override = environment["PACKAGE_RESOURCE_BUNDLE_PATH"] ?? environment["PACKAGE_RESOURCE_BUNDLE_URL"] {
+            candidates.append(URL(fileURLWithPath: override))
+        }
+        appendAncestors(of: mainResourceURL, levels: 6, to: &candidates)
+        appendAncestors(of: anchorResourceURL, levels: 6, to: &candidates)
+        appendAncestors(of: mainBundleURL, levels: 3, to: &candidates)
+        appendAncestors(of: executableURL?.deletingLastPathComponent(), levels: 6, to: &candidates)
+        var seen = Set<String>()
+        for candidate in candidates {
+            let path = candidate.standardizedFileURL.path
+            guard seen.insert(path).inserted, shouldSearch(path) else { continue }
+            if let root = swiftPMResourceRoot(at: candidate) {
+                return root
+            }
+        }
+        return nil
+    }
+
+    private static let resolvedModuleResourceRoot: URL? = moduleResourceRoot()
+    private static let skippedSearchRoots: Set<String> = [
+        "/", "/usr", "/bin", "/sbin", "/opt", "/Applications", "/Library", "/System", "/private", "/var", "/Users",
+    ]
+
+    private static func appendAncestors(of url: URL?, levels: Int, to candidates: inout [URL]) {
+        guard var directory = url else { return }
+        for _ in 0..<levels {
+            candidates.append(directory)
+            let parent = directory.deletingLastPathComponent()
+            if parent.path == directory.path { break }
+            directory = parent
+        }
+    }
+
+    private static func shouldSearch(_ path: String) -> Bool {
+        !skippedSearchRoots.contains(path)
+    }
+
+    /// A bundle matches when `Renderer/highlight.min.js` can be read. Symlinks are
+    /// followed by the read, which directory probes on some macOS versions are not.
+    private static func swiftPMResourceRoot(at candidate: URL) -> URL? {
+        if candidate.pathExtension.lowercased() == "bundle", let root = rendererRoot(inBundle: candidate) {
+            return root
+        }
+        let named = candidate.appendingPathComponent(swiftPMBundleName + ".bundle")
+        if let root = rendererRoot(inBundle: named) {
+            return root
+        }
+        guard shouldSearch(candidate.standardizedFileURL.path),
+              let children = try? FileManager.default.contentsOfDirectory(
+                at: candidate,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+              ) else {
+            return nil
+        }
+        for child in children where child.pathExtension.lowercased() == "bundle" && child != named {
+            if let root = rendererRoot(inBundle: child) {
+                return root
+            }
+        }
+        return nil
+    }
+
+    private static func rendererRoot(inBundle bundleURL: URL) -> URL? {
+        let roots = [
+            bundleURL.appendingPathComponent("Contents/Resources"),
+            bundleURL,
+        ]
+        for root in roots {
+            if let source = read("highlight.min.js", from: root), !source.isEmpty {
+                return root
+            }
+        }
+        if let resourceURL = Bundle(url: bundleURL)?.resourceURL,
+           let source = read("highlight.min.js", from: resourceURL),
+           !source.isEmpty {
+            return resourceURL
+        }
+        return nil
+    }
+
     static let scripts: String = {
-        let names = ["highlight.min.js", "markdown-it.min.js"] +
-            ["powershell", "swift", "objectivec", "kotlin", "dart", "scala", "perl", "r",
-             "dockerfile", "makefile", "shell", "diff", "lua"].map { "lang-\($0).js" }
-        return names.map(resource).joined(separator: "\n").replacingOccurrences(of: "</script", with: "<\\/script")
+        scriptNames.map(resource).joined(separator: "\n").replacingOccurrences(of: "</script", with: "<\\/script")
     }()
 
     static func html(text: String, markdown: Bool, language: String, dark: Bool) -> String {
@@ -121,6 +236,34 @@ enum DetailTextDocument {
         }
         </script></body></html>
         """
+    }
+
+    /// Exercises the detail-view HTML path. A missing script is an error here so
+    /// packaging can fail; the live preview still degrades to plain text.
+    static func rendererVerificationError() -> String? {
+        let missing = scriptNames.filter { resource($0).isEmpty }
+        if !missing.isEmpty {
+            return "Renderer resources missing (\(missing.joined(separator: ", "))). Detail preview would fall back to plain text."
+        }
+        let samples: [(text: String, markdown: Bool, language: String, dark: Bool)] = [
+            ("plain clipboard text", false, "plaintext", false),
+            ("let value = 1", false, "swift", true),
+            ("# 标题\n\n一段说明", true, "自动识别", false)
+        ]
+        for sample in samples {
+            let page = html(text: sample.text, markdown: sample.markdown, language: sample.language, dark: sample.dark)
+            let payload = Data(sample.text.utf8).base64EncodedString()
+            if !page.contains(payload) {
+                return "Detail HTML omitted the \(sample.language) clipboard text."
+            }
+            if !page.contains("Highlight.js") || !page.contains("markdown-it") {
+                return "Detail HTML for \(sample.language) did not include the packaged renderer scripts."
+            }
+            if sample.language == "swift", !page.contains("grammar compiled for Highlight.js") {
+                return "Detail HTML did not include the Swift highlighter."
+            }
+        }
+        return nil
     }
 }
 

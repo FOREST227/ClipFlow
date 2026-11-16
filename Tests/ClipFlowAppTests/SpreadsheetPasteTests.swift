@@ -255,11 +255,13 @@ final class SpreadsheetPasteTests: XCTestCase {
 
         let destination = pasteboard()
         XCTAssertTrue(PasteService(store: reloaded, pasteboard: destination).restore(saved, to: destination))
-        let restoredTypes = (destination.types ?? []).map(\.rawValue)
-        XCTAssertEqual(restoredTypes.filter { intended.contains($0) }, intended)
-        for record in records {
+        let replayed = SpreadsheetReplay.pasteRecords(from: stored).filter { !$0.type.hasPrefix("dyn.") }
+        for record in replayed {
             let type = NSPasteboard.PasteboardType(record.type)
             XCTAssertEqual(destination.data(forType: type), record.data, record.type)
+        }
+        for dropped in ["public.tiff", "Embed Source", "ObjectLink", "Link Source", "com.adobe.pdf", "Apple PDF pasteboard type"] {
+            XCTAssertNil(destination.data(forType: NSPasteboard.PasteboardType(dropped)), dropped)
         }
         XCTAssertEqual(destination.string(forType: .string), tsv)
         XCTAssertEqual(destination.string(forType: .html), tableHTML)
@@ -276,9 +278,11 @@ final class SpreadsheetPasteTests: XCTestCase {
         XCTAssertEqual(clipStore.items.map(\.id), [item.id])
         XCTAssertEqual(clipStore.items.first?.capturedAt, capturedAt)
         XCTAssertEqual(clipStore.items.first?.extraTypes, stored)
-        for record in records {
+        for record in SpreadsheetReplay.pasteRecords(from: stored) where !record.type.hasPrefix("dyn.") {
             XCTAssertEqual(source.data(forType: NSPasteboard.PasteboardType(record.type)), record.data, record.type)
         }
+        XCTAssertNil(source.data(forType: NSPasteboard.PasteboardType("public.tiff")))
+        XCTAssertNil(source.data(forType: NSPasteboard.PasteboardType("Embed Source")))
 
         XCTAssertTrue(pasting.copyOriginalToClipboard(item))
         XCTAssertEqual(clipStore.items.first?.capturedAt, capturedAt)
@@ -433,5 +437,128 @@ final class SpreadsheetPasteTests: XCTestCase {
         let restored = try XCTUnwrap(reloaded.items.first { $0.privacy == .vault })
         XCTAssertEqual(restored.fullText, secret)
         XCTAssertEqual(restored.extraTypes, extra)
+    }
+
+    func testReplayOrderPrefersXMLAndHTMLAndDropsPictureAndOLE() throws {
+        let html = """
+        <html><head><style>
+        td { mso-number-format:General; }
+        .xl65 { mso-number-format:"\\@"; }
+        .xl66 { mso-number-format:"yyyy\\\\-mm\\\\-dd"; }
+        .xl67 { mso-number-format:"hh\\:mm"; }
+        .xl68 { mso-number-format:"0.00"; }
+        </style></head><body><table>
+        <tr>
+        <td class=xl65>00123</td>
+        <td class=xl66>2026-11-16</td>
+        <td class=xl67>09:30</td>
+        <td class=xl68>42</td>
+        </tr></table></body></html>
+        """
+        let xml = """
+        <?xml version="1.0"?>
+        <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+        <Styles>
+        <Style ss:ID="sText"><NumberFormat ss:Format="@"/></Style>
+        <Style ss:ID="sDate"><NumberFormat ss:Format="yyyy-mm-dd"/></Style>
+        <Style ss:ID="sTime"><NumberFormat ss:Format="hh:mm"/></Style>
+        <Style ss:ID="sNum"><NumberFormat ss:Format="0.00"/></Style>
+        </Styles>
+        <Worksheet ss:Name="Sheet1"><Table>
+        <Row>
+        <Cell ss:StyleID="sText"><Data ss:Type="String">00123</Data></Cell>
+        <Cell ss:StyleID="sDate"><Data ss:Type="DateTime">2026-11-16T00:00:00.000</Data></Cell>
+        <Cell ss:StyleID="sTime"><Data ss:Type="DateTime">1899-12-31T09:30:00.000</Data></Cell>
+        <Cell ss:StyleID="sNum"><Data ss:Type="Number">42</Data></Cell>
+        </Row>
+        </Table></Worksheet></Workbook>
+        """
+        let entries = [
+            ClipboardPasteboardType(type: "public.utf8-plain-text", data: Data("00123\t2026-11-16\t09:30\t42".utf8)),
+            ClipboardPasteboardType(type: "public.html", data: Data(html.utf8)),
+            ClipboardPasteboardType(type: "public.tiff", data: Data([0x4D, 0x4D, 0x00, 0x2A])),
+            ClipboardPasteboardType(type: "com.microsoft.Embed-Source", data: Data([0xD0, 0xCF, 0x11, 0xE0])),
+            ClipboardPasteboardType(type: "com.microsoft.DataObject", data: Data(repeating: 0x11, count: 16)),
+            ClipboardPasteboardType(type: "com.microsoft.Link", data: Data("Excel./tmp/book.xlsx".utf8)),
+            ClipboardPasteboardType(type: "com.microsoft.ole.source.1.0x1", data: Data([0x01])),
+            ClipboardPasteboardType(type: "XML Spreadsheet", data: Data(xml.utf8)),
+            ClipboardPasteboardType(type: "Biff8", data: Data("biff".utf8))
+        ]
+        let replayed = SpreadsheetReplay.pasteRecords(from: entries).map(\.type)
+        XCTAssertEqual(replayed, [
+            "XML Spreadsheet",
+            "Biff8",
+            "public.html",
+            "public.utf8-plain-text"
+        ])
+        XCTAssertTrue(SpreadsheetReplay.isExcluded("com.microsoft.Embed-Source"))
+        XCTAssertTrue(SpreadsheetReplay.isExcluded("com.microsoft.DataObject"))
+        XCTAssertTrue(SpreadsheetReplay.isExcluded("public.tiff"))
+        XCTAssertTrue(ClipboardPasteboardKinds.isSpreadsheetNative("com.microsoft.Embed-Source"))
+        XCTAssertTrue(ClipboardPasteboardKinds.isSpreadsheetNative("com.microsoft.ole.source.1.0x1"))
+
+        let fromXML = SpreadsheetReplay.cells(in: entries)
+        XCTAssertEqual(fromXML.map(\.kind), [.text, .date, .time, .number])
+        XCTAssertEqual(fromXML.map(\.numberFormat), ["@", "yyyy-mm-dd", "hh:mm", "0.00"])
+        XCTAssertEqual(fromXML.map(\.text), ["00123", "2026-11-16", "09:30", "42"])
+        XCTAssertEqual(fromXML.map(\.column), [0, 1, 2, 3])
+
+        let htmlOnly = entries.filter { $0.type != "XML Spreadsheet" }
+        let fromHTML = SpreadsheetReplay.cells(in: htmlOnly)
+        XCTAssertEqual(fromHTML.map(\.kind), [.text, .date, .time, .number])
+        XCTAssertEqual(fromHTML.map(\.numberFormat), ["@", "yyyy-mm-dd", "hh:mm", "0.00"])
+        XCTAssertEqual(fromHTML.map(\.text), ["00123", "2026-11-16", "09:30", "42"])
+
+        let script = try XCTUnwrap(SpreadsheetReplay.formatScript(for: fromHTML))
+        XCTAssertTrue(script.contains("number format of targetCell to \"@\""))
+        XCTAssertTrue(script.contains("set value of targetCell to \"00123\""))
+        XCTAssertTrue(script.contains("number format of targetCell to \"yyyy-mm-dd\""))
+        XCTAssertTrue(script.contains("number format of targetCell to \"hh:mm\""))
+        XCTAssertTrue(script.contains("number format of targetCell to \"0.00\""))
+        XCTAssertFalse(script.contains("set value of targetCell to \"2026-11-16\""))
+        XCTAssertEqual(SpreadsheetFormatParser.normalizedFormat("Fixed"), "0.00")
+    }
+
+    func testExcelImageFollowUpIsIgnoredAndANewCopyIsNot() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let preview = Data("preview-tiff".utf8)
+        func context(
+            bundle: String = "com.microsoft.Excel",
+            hasText: Bool = false,
+            images: [Data] = [Data("other-render".utf8)],
+            previousBundle: String? = "com.microsoft.Excel",
+            age: TimeInterval = 30,
+            previews: [Data] = [preview],
+            suppressing: Bool = false
+        ) -> SpreadsheetImageFollowUp.Context {
+            SpreadsheetImageFollowUp.Context(
+                sourceBundleID: bundle,
+                hasMeaningfulText: hasText,
+                imagePayloads: images,
+                previousBundleID: previousBundle,
+                previousIsSpreadsheetText: previousBundle != nil,
+                previousCapturedAt: now.addingTimeInterval(-age),
+                previousPreviewPayloads: previews,
+                now: now,
+                suppressingOwnRewrite: suppressing
+            )
+        }
+
+        XCTAssertTrue(SpreadsheetImageFollowUp.shouldIgnore(context()))
+        XCTAssertTrue(SpreadsheetImageFollowUp.shouldIgnore(context(images: [preview], previews: [preview])))
+        XCTAssertFalse(SpreadsheetImageFollowUp.shouldIgnore(context(hasText: true, images: [preview])))
+        XCTAssertFalse(SpreadsheetImageFollowUp.shouldIgnore(context(age: SpreadsheetImageFollowUp.recentInterval + 5)))
+        XCTAssertTrue(SpreadsheetImageFollowUp.shouldIgnore(context(age: 10_000, suppressing: true)))
+        XCTAssertFalse(SpreadsheetImageFollowUp.shouldIgnore(context(bundle: "com.apple.Preview")))
+        XCTAssertFalse(SpreadsheetImageFollowUp.shouldIgnore(context(previousBundle: "com.apple.Notes")))
+        XCTAssertTrue(SpreadsheetImageFollowUp.shouldIgnore(context(
+            bundle: "com.apple.iWork.Numbers",
+            previousBundle: "com.apple.iWork.Numbers"
+        )))
+        XCTAssertTrue(SpreadsheetImageFollowUp.shouldIgnore(context(
+            bundle: "com.kingsoft.wpsoffice.mac",
+            previousBundle: "com.kingsoft.wpsoffice.mac",
+            age: 90
+        )))
     }
 }

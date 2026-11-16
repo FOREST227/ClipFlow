@@ -16,6 +16,8 @@ final class ClipboardMonitor {
     var encodeImage: @Sendable (ClipboardImageEncoder.Source) -> EncodedClipboardImage? = { source in
         ClipboardImageEncoder.encode(source)
     }
+    /// Excel replaces a cell copy with a TIFF after ClipFlow writes the cell flavors back.
+    private var spreadsheetPreviewSuppressedUntil = Date.distantPast
 
     init(store: ClipFlowStore, pasteboard: NSPasteboard = .general) {
         self.store = store
@@ -40,6 +42,12 @@ final class ClipboardMonitor {
         captureGeneration += 1
         captureInFlight = false
         lastChangeCount = pasteboard.changeCount
+    }
+
+    /// The pasteboard write is ours. Also ignore the preview image Excel publishes afterwards.
+    func noteSpreadsheetPasteboardWrite() {
+        spreadsheetPreviewSuppressedUntil = now().addingTimeInterval(SpreadsheetImageFollowUp.recentInterval)
+        ignoreCurrentPasteboardUpdate()
     }
 
     func poll(sourceApplication: NSRunningApplication? = NSWorkspace.shared.frontmostApplication) {
@@ -77,9 +85,21 @@ final class ClipboardMonitor {
             lastChangeCount = changeCount
             return
         }
-        guard pasteboard.changeCount == changeCount else { return }
-
         let sourceApp = sourceApplication?.localizedName ?? "未知应用"
+        if pasteboard.changeCount != changeCount {
+            // Excel finishes the preview and swaps the board for a TIFF while the rich flavors are being read.
+            if case .text(let text) = choice, boardIsPreviewImageOnly() {
+                lastChangeCount = pasteboard.changeCount
+                store.ingestCopiedText(
+                    text,
+                    sourceApp: sourceApp,
+                    sourceBundleID: sourceBundleID,
+                    richContent: ClipboardRepresentations.capture(reading)
+                )
+            }
+            return
+        }
+
         switch choice {
         case .text(let text):
             let richContent = ClipboardRepresentations.capture(reading)
@@ -92,12 +112,47 @@ final class ClipboardMonitor {
                 richContent: richContent
             )
         case .image(let source):
+            if shouldIgnoreSpreadsheetImage(reading, sourceBundleID: sourceBundleID) {
+                lastChangeCount = changeCount
+                return
+            }
             startImageCapture(
                 source: source,
                 changeCount: changeCount,
                 sourceApp: sourceApp,
                 sourceBundleID: sourceBundleID
             )
+        }
+    }
+
+    private func shouldIgnoreSpreadsheetImage(_ reading: ClipboardPasteboardReading, sourceBundleID: String?) -> Bool {
+        let previous = store.items.first { SpreadsheetImageFollowUp.isSpreadsheetTextItem($0) }
+        let previews = previous?.extraTypes?.filter { ClipboardPasteboardKinds.isPreviewImage($0.type) }.map(\.data) ?? []
+        let images = reading.entries.filter { ClipboardPasteboardKinds.isPreviewImage($0.type) }.map(\.data)
+        let hasText = reading.entries.contains { entry in
+            guard ClipboardPasteboardKinds.isStringType(entry.type) || ClipboardPasteboardKinds.tabSeparatedTypes.contains(entry.type) else {
+                return false
+            }
+            return ClipboardCaptureDecision.decodeText(entry.data).map(ClipboardCapture.isMeaningful) ?? false
+        }
+        return SpreadsheetImageFollowUp.shouldIgnore(SpreadsheetImageFollowUp.Context(
+            sourceBundleID: sourceBundleID,
+            hasMeaningfulText: hasText,
+            imagePayloads: images,
+            previousBundleID: previous?.sourceBundleID,
+            previousIsSpreadsheetText: previous != nil,
+            previousCapturedAt: previous?.captureTimestamp,
+            previousPreviewPayloads: previews,
+            now: now(),
+            suppressingOwnRewrite: now() < spreadsheetPreviewSuppressedUntil
+        ))
+    }
+
+    private func boardIsPreviewImageOnly() -> Bool {
+        let names = (pasteboard.types ?? []).map(\.rawValue)
+        guard !names.isEmpty else { return false }
+        return names.allSatisfy { type in
+            ClipboardPasteboardKinds.isPreviewImage(type) || ClipboardPasteboardKinds.isPDF(type)
         }
     }
 

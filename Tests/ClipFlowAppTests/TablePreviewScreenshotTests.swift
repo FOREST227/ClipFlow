@@ -59,14 +59,18 @@ final class TablePreviewScreenshotTests: XCTestCase {
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
                 .write(to: output.appendingPathComponent(name + ".png"))
         }
-        func export<V: View>(_ view: V, name: String, width: CGFloat) throws {
+        func export<V: View>(_ view: V, name: String, width: CGFloat, scheme: ColorScheme = .light) throws {
             let host = NSHostingController(rootView: view
                 .environment(\.locale, Locale(identifier: "zh-Hans"))
-                .preferredColorScheme(.light))
+                .environment(\.colorScheme, scheme)
+                .preferredColorScheme(scheme))
             let window = NSWindow(contentViewController: host)
             window.isReleasedWhenClosed = false
             window.setContentSize(NSSize(width: width, height: 720))
-            window.appearance = NSAppearance(named: .aqua)
+            window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+            window.backgroundColor = scheme == .dark
+                ? NSColor(srgbRed: 0.11, green: 0.12, blue: 0.15, alpha: 1)
+                : NSColor(srgbRed: 0.97, green: 0.965, blue: 0.955, alpha: 1)
             window.makeKeyAndOrderFront(nil)
             defer { window.close() }
             RunLoop.main.run(until: Date().addingTimeInterval(0.9))
@@ -87,6 +91,36 @@ final class TablePreviewScreenshotTests: XCTestCase {
         }
 
         let detailWidth: CGFloat = 460
+        for scheme in [ColorScheme.light, ColorScheme.dark] {
+            let name = scheme == .dark ? "dark" : "light"
+            let cardPalette = ClipFlowPalette.resolve(for: scheme)
+            try export(
+                LibraryInspectorOverlay(
+                    item: table,
+                    store: store,
+                    palette: cardPalette,
+                    maxHeight: 620,
+                    contentWidth: detailWidth,
+                    onClose: {}
+                ),
+                name: "table-detail-\(name)",
+                width: detailWidth,
+                scheme: scheme
+            )
+            try export(
+                LibraryInspectorOverlay(
+                    item: prose,
+                    store: store,
+                    palette: cardPalette,
+                    maxHeight: 420,
+                    contentWidth: detailWidth,
+                    onClose: {}
+                ),
+                name: "text-detail-\(name)",
+                width: detailWidth,
+                scheme: scheme
+            )
+        }
         try export(
             LibraryInspectorOverlay(
                 item: table,

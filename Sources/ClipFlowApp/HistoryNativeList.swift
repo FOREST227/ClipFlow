@@ -9,7 +9,7 @@ enum HistoryRowGeometry {
         var frames: [CGRect] = []
         var y: CGFloat = 0
         for (index, item) in items.enumerated() {
-            let height = LibraryCardLayout.height(for: item.kind)
+            let height = LibraryCardLayout.height(for: item)
             frames.append(CGRect(x: 0, y: y, width: max(1, width), height: height))
             y += height
             if index + 1 < items.count { y += LibraryCardLayout.spacing }
@@ -191,12 +191,12 @@ final class HistoryRowDocument: NSView {
         renderedReveal[item.id] = revealed
         let id = item.id
         row.identifier = NSUserInterfaceItemIdentifier(id.uuidString)
-        row.lockedHeight = LibraryCardLayout.height(for: item.kind)
+        row.lockedHeight = LibraryCardLayout.height(for: item)
         row.pinActionTitle = item.pinned ? "取消置顶" : "置顶"
         let snippet = store.displaySnippet(for: item)
         let summary = ClipboardCardSummary.plainFirstLine(of: store.displayFullText(for: item))
-        let spoken = summary.isEmpty ? snippet : summary
-        row.accessibilitySummary = "\(item.sourceApp)，\(item.kind.label)，\(spoken)，\(item.timeLabel)"
+        let spoken = SpreadsheetPreview.spokenSummary(for: item) ?? (summary.isEmpty ? snippet : summary)
+        row.accessibilitySummary = "\(item.sourceApp)，\(SpreadsheetPreview.typeLabel(for: item))，\(spoken)，\(item.timeLabel)"
         let inspect = InspectorSourceAnchor.callback(for: row,
             fallback: { [weak self] in self?.inspect(id) },
             anchored: { [weak self] source in self?.inspect(id, source: source) })

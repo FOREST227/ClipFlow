@@ -165,11 +165,12 @@ struct ClipFlowPalette {
         colorScheme == .dark ? Color(red: 1.0, green: 0.74, blue: 0.45) : pausedStatus
     }
 
+    /// Same stops as the elevated library glass. The detail card is not a separate blue shell.
     static func detailShellColors(for colorScheme: ColorScheme) -> (top: Color, bottom: Color) {
         if colorScheme == .dark {
             return (Color(red: 0.17, green: 0.19, blue: 0.23), Color(red: 0.14, green: 0.16, blue: 0.20))
         }
-        return (Color(red: 0.96, green: 0.975, blue: 0.99), Color(red: 0.91, green: 0.935, blue: 0.97))
+        return (Color.white.opacity(0.98), Color.white.opacity(0.96))
     }
 
     /// Cover lip samples the shell gradient instead of a third hardcoded gray.

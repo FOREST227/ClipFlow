@@ -43,6 +43,11 @@ enum LibraryCardLayout {
         default: compactHeight
         }
     }
+
+    static func height(for item: ClipboardItem) -> CGFloat {
+        if SpreadsheetPreview.usesExpandedListRow(item) { return expandedHeight }
+        return height(for: item.kind)
+    }
 }
 
 /// Tall-image details use the available pane height while keeping actions visible.
@@ -73,5 +78,10 @@ enum QuickPasteCardLayout {
         case .code: expandedHeight
         default: compactHeight
         }
+    }
+
+    static func height(for item: ClipboardItem) -> CGFloat {
+        if SpreadsheetPreview.usesExpandedListRow(item) { return expandedHeight }
+        return height(for: item.kind)
     }
 }

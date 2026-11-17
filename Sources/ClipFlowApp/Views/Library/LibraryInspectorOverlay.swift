@@ -42,6 +42,18 @@ struct LibraryInspectorOverlay: View {
     private var showsSpreadsheetText: Bool {
         SpreadsheetClipboard.hasTabularData(item) || item.labels.contains("表格")
     }
+    private var tableGrid: SpreadsheetPreviewGrid? {
+        guard !item.isSensitive || store.isRevealed(item) else { return nil }
+        return SpreadsheetPreview.grid(for: item)
+    }
+    private var showsTableGrid: Bool {
+        guard let tableGrid else { return false }
+        return tableGrid.rows.count > 1 || tableGrid.columnCount > 1
+    }
+    private var heading: String {
+        if item.isSensitive && !store.isRevealed(item) { return "受保护的敏感内容" }
+        return SpreadsheetPreview.title(for: item)
+    }
     private var markdownAvailable: Bool {
         (!item.isSensitive || store.isRevealed(item)) && DetailTextFormat.isMarkdown(store.displayFullText(for: item))
     }
@@ -79,6 +91,7 @@ struct LibraryInspectorOverlay: View {
     }
     private var drawerHeight: CGFloat {
         if item.isImage || item.kind == .code || markdownAvailable { return maxHeight }
+        if showsTableGrid, let tableGrid { return tableDrawerHeight(for: tableGrid) }
         let font = NSFont.systemFont(ofSize: 13)
         let bounds = (store.displayFullText(for: item) as NSString).boundingRect(
             with: CGSize(width: max(160, contentWidth - 64), height: .greatestFiniteMagnitude),
@@ -87,6 +100,14 @@ struct LibraryInspectorOverlay: View {
     }
     private var drawerBodyHeight: CGFloat { max(64, drawerHeight - drawerHeaderHeight - drawerFooterHeight - 24) }
     private var previewHeight: CGFloat { drawerBodyHeight }
+
+    /// A short sheet stays about as tall as its rows. A long sheet stops at the pane and scrolls.
+    private func tableDrawerHeight(for grid: SpreadsheetPreviewGrid) -> CGFloat {
+        let caption: CGFloat = grid.overflowCaption == nil ? 0 : 26
+        let gridBlock = CGFloat(grid.rows.count) * 34 + 20 + caption
+        let natural = drawerHeaderHeight + gridBlock + drawerFooterHeight + 24
+        return min(maxHeight, max(240, natural))
+    }
 
     var body: some View {
         // Build rich content and measure text once per content/state change, not per animation tick.
@@ -153,12 +174,15 @@ struct LibraryInspectorOverlay: View {
                         Color.clear.preference(key: InspectorFooterHeightKey.self, value: proxy.size.height + ClipFlowLayout.space16)
                     })
                     .opacity(frame.contentOpacity)
-                    .allowsHitTesting(frame.contentOpacity >= 0.99)
-                    .accessibilityHidden(frame.contentOpacity < 0.99)
+                    .allowsHitTesting(frame.contentOpacity > 0.8)
+                    .accessibilityHidden(frame.contentOpacity <= 0.8)
                     .frame(width: max(1, contentWidth - 24), alignment: .topLeading)
                     .offset(x: drawer.shellRect.minX + 12, y: drawer.coverTop + 16)
                 }
                 .frame(width: contentWidth, height: height, alignment: .topLeading)
+                // Flatten text into the cover before masking. Without this, button titles
+                // stay in a second layer and the live window shows empty pills.
+                .compositingGroup()
                 .mask(InspectorDrawerCoverShape(lipDepth: drawer.lipDepth).path(in: coverRect))
                 .opacity(coverOpacity)
             }
@@ -186,10 +210,10 @@ struct LibraryInspectorOverlay: View {
             HStack(alignment: .top, spacing: ClipFlowLayout.space12) {
                 VStack(alignment: .leading, spacing: ClipFlowLayout.space4) {
                     HStack(spacing: ClipFlowLayout.space8) {
-                        Text(item.isSensitive && !store.isRevealed(item) ? "受保护的敏感内容" : item.title)
+                        Text(heading)
                             .font(.system(size: 16, weight: .semibold))
                             .lineLimit(1)
-                        Text(item.kind.label)
+                        Text(SpreadsheetPreview.typeLabel(for: item))
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(item.kind.labelColor(for: textColorScheme))
                             .padding(.horizontal, ClipFlowLayout.space8)
@@ -227,6 +251,14 @@ struct LibraryInspectorOverlay: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .frame(height: imageHeight)
+            } else if let grid = tableGrid, showsTableGrid {
+                SpreadsheetGridView(grid: grid, style: .detail)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(height: previewHeight)
+                    .padding(.bottom, ClipFlowLayout.space8)
+                    .background(palette.rowFill,
+                        in: RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
             } else if item.kind == .code || markdownAvailable {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -272,116 +304,135 @@ struct LibraryInspectorOverlay: View {
                 }
                 .frame(height: previewHeight)
                 .padding(.bottom, ClipFlowLayout.space8)
-                .background(textColorScheme == .dark ? palette.inputFill : Color.white,
+                .background(palette.rowFill,
                     in: RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
             }
 
     }
 
+    private var offersExcelInsert: Bool {
+        ExcelInsertOffer.shouldOffer(item: item, bundleIDs: ExcelInsertContext.currentBundleIDs())
+    }
+
+    private var primaryCommands: [InspectorCommand] {
+        InspectorCommands.bar(
+            pinned: item.pinned,
+            canSaveSnippet: SnippetLibrary.canSave(item),
+            showsReveal: item.privacy != .standard,
+            revealed: store.isRevealed(item)
+        )
+    }
+
     private var drawerActions: some View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    Button("复制") {
-                        let copied = ClipFlowRuntime.shared.copyToClipboard(item)
-                        copyFeedback = copied ? "已复制到剪贴板" : store.lastCaptureStatus
-                    }
-                    .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
-                    Button("粘贴") {
-                        if let onPasteAction { onPasteAction() }
-                        else { ClipFlowRuntime.shared.paste(item); onClose() }
-                    }
-                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
-                        .background(InspectorFrameReader(name: "ClipFlowInspector.paste"))
-                    Button { store.togglePin(item.id) } label: {
-                        Image(systemName: item.pinned ? "pin.fill" : "pin").frame(width: 14)
-                    }
-                    .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
-                    .help(item.pinned ? "取消置顶" : "置顶条目")
-                    .accessibilityLabel(item.pinned ? "取消置顶" : "置顶条目")
-                    if SnippetLibrary.canSave(item) {
-                        Button { store.requestSaveSnippet(fromItemID: item.id) } label: {
-                            Image(systemName: "text.badge.plus").frame(width: 14)
+                    ForEach(primaryCommands, id: \.id) { command in
+                        if command.id == .more {
+                            detailMenu
+                        } else {
+                            commandButton(command)
+                                .background {
+                                    if command.id == .paste {
+                                        InspectorFrameReader(name: "ClipFlowInspector.paste")
+                                    }
+                                }
                         }
-                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
-                        .help("存为片段")
-                        .accessibilityLabel("存为片段")
-                    }
-                    if item.privacy != .standard {
-                        Button(store.isRevealed(item) ? "隐藏" : "显示") { store.toggleReveal(item.id) }
-                            .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
                     }
                     Spacer(minLength: 0)
-                    Menu {
-                        if let url = item.primaryURL {
-                            Button("访问链接") { NSWorkspace.shared.open(url) }
-                        }
-                        if SnippetLibrary.canSave(item) {
-                            Button("存为片段") { store.requestSaveSnippet(fromItemID: item.id) }
-                        }
-                        if SpreadsheetClipboard.hasOriginalTypes(item) {
-                            Button(SpreadsheetClipboard.copyOnlyTitle) {
-                                let copied = ClipFlowRuntime.shared.copyOriginalToClipboard(item)
-                                copyFeedback = copied ? "已放回剪贴板，未粘贴" : store.lastCaptureStatus
-                            }
-                        }
-                        if ExcelInsertOffer.shouldOffer(item: item, bundleIDs: ExcelInsertContext.currentBundleIDs()) {
-                            Button(SpreadsheetShift.down.menuTitle) {
-                                ClipFlowRuntime.shared.insertIntoExcel(item, shift: .down)
-                                onClose()
-                            }
-                            Button(SpreadsheetShift.right.menuTitle) {
-                                ClipFlowRuntime.shared.insertIntoExcel(item, shift: .right)
-                                onClose()
-                            }
-                        }
-                        Button("删除条目", role: .destructive) { store.delete(item.id); onClose() }
-                    } label: { Image(systemName: "ellipsis").frame(width: 24, height: 28) }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .accessibilityLabel("更多操作")
                 }
-                if SpreadsheetClipboard.hasOriginalTypes(item) {
-                    Button(SpreadsheetClipboard.copyOnlyTitle) {
-                        let copied = ClipFlowRuntime.shared.copyOriginalToClipboard(item)
-                        copyFeedback = copied ? "已放回剪贴板，未粘贴" : store.lastCaptureStatus
-                    }
-                    .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
-                    .help("把原始表格数据放回剪贴板，不自动粘贴。可接着在 Excel 里用选择性粘贴或「插入复制的单元格」。")
+                let sheet = InspectorCommands.spreadsheet(
+                    hasOriginalTypes: SpreadsheetClipboard.hasOriginalTypes(item),
+                    offersExcelInsert: offersExcelInsert
+                )
+                if !sheet.isEmpty {
+                    commandRow(sheet)
                 }
-                if ExcelInsertOffer.shouldOffer(item: item, bundleIDs: ExcelInsertContext.currentBundleIDs()) {
-                    HStack(spacing: 8) {
-                        Button(SpreadsheetShift.down.menuTitle) {
-                            ClipFlowRuntime.shared.insertIntoExcel(item, shift: .down)
-                            onClose()
-                        }
-                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
-                        .help("在 Excel 当前单元格处插入同样大小的区域并下移原有单元格，再粘贴原格式。")
-                        Button("右移单元格") {
-                            ClipFlowRuntime.shared.insertIntoExcel(item, shift: .right)
-                            onClose()
-                        }
-                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
-                        .help("在 Excel 当前单元格处插入同样大小的区域并向右移开原有单元格，再粘贴原格式。")
-                        Spacer(minLength: 0)
-                    }
-                }
-                if PlainTextPaste.hasRichText(item) {
-                    HStack(spacing: 8) {
-                        Button(PlainTextPaste.copyTitle) {
-                            let copied = ClipFlowRuntime.shared.copyPlainText(item)
-                            copyFeedback = copied ? "已复制纯文本到剪贴板" : store.lastCaptureStatus
-                        }
-                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
-                        .help("只复制原来的文字，不带格式")
-                        Button(PlainTextPaste.pasteTitle) {
-                            if let onPastePlainAction { onPastePlainAction() }
-                            else { ClipFlowRuntime.shared.pastePlainText(item); onClose() }
-                        }
-                        .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
-                        .help("只粘贴原来的文字，不带格式")
-                        Spacer(minLength: 0)
-                    }
+                let plain = InspectorCommands.plainText(hasRichText: PlainTextPaste.hasRichText(item))
+                if !plain.isEmpty {
+                    commandRow(plain)
                 }
             }
+    }
+
+    private func commandRow(_ commands: [InspectorCommand]) -> some View {
+        HStack(spacing: 8) {
+            ForEach(commands, id: \.id) { commandButton($0) }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func commandButton(_ command: InspectorCommand) -> some View {
+        InspectorCommandButton(
+            command: command,
+            fill: command.isPrimary ? palette.primaryButtonFill : palette.rowFill,
+            foreground: command.isPrimary ? .white : Color.primary,
+            border: command.isPrimary ? .clear : palette.rowBorder,
+            action: { perform(command) }
+        )
+    }
+
+    private var detailMenu: some View {
+        Menu {
+            if let url = item.primaryURL {
+                Button("访问链接") { NSWorkspace.shared.open(url) }
+            }
+            if SnippetLibrary.canSave(item) {
+                Button("存为片段") { store.requestSaveSnippet(fromItemID: item.id) }
+            }
+            if SpreadsheetClipboard.hasOriginalTypes(item) {
+                Button(SpreadsheetClipboard.copyOnlyTitle) { perform(.init(id: .copyOriginal, title: SpreadsheetClipboard.copyOnlyTitle, symbol: "doc.on.clipboard", accessibilityLabel: SpreadsheetClipboard.copyOnlyTitle)) }
+            }
+            if offersExcelInsert {
+                Button(SpreadsheetShift.down.menuTitle) { perform(.init(id: .insertDown, title: SpreadsheetShift.down.menuTitle, symbol: "arrow.down", accessibilityLabel: SpreadsheetShift.down.menuTitle)) }
+                Button(SpreadsheetShift.right.menuTitle) { perform(.init(id: .insertRight, title: "右移单元格", symbol: "arrow.right", accessibilityLabel: SpreadsheetShift.right.menuTitle)) }
+            }
+            Button("删除条目", role: .destructive) { store.delete(item.id); onClose() }
+        } label: {
+            InspectorCommandFace(
+                command: InspectorCommand(id: .more, title: "", symbol: "ellipsis", accessibilityLabel: "更多操作"),
+                fill: palette.rowFill,
+                foreground: Color.primary,
+                border: palette.rowBorder
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("更多操作")
+    }
+
+    private func perform(_ command: InspectorCommand) {
+        switch command.id {
+        case .copy:
+            let copied = ClipFlowRuntime.shared.copyToClipboard(item)
+            copyFeedback = copied ? "已复制到剪贴板" : store.lastCaptureStatus
+        case .paste:
+            if let onPasteAction { onPasteAction() }
+            else { ClipFlowRuntime.shared.paste(item); onClose() }
+        case .pin:
+            store.togglePin(item.id)
+        case .saveSnippet:
+            store.requestSaveSnippet(fromItemID: item.id)
+        case .reveal:
+            store.toggleReveal(item.id)
+        case .copyOriginal:
+            let copied = ClipFlowRuntime.shared.copyOriginalToClipboard(item)
+            copyFeedback = copied ? "已放回剪贴板，未粘贴" : store.lastCaptureStatus
+        case .insertDown:
+            ClipFlowRuntime.shared.insertIntoExcel(item, shift: .down)
+            onClose()
+        case .insertRight:
+            ClipFlowRuntime.shared.insertIntoExcel(item, shift: .right)
+            onClose()
+        case .copyPlain:
+            let copied = ClipFlowRuntime.shared.copyPlainText(item)
+            copyFeedback = copied ? "已复制纯文本到剪贴板" : store.lastCaptureStatus
+        case .pastePlain:
+            if let onPastePlainAction { onPastePlainAction() }
+            else { ClipFlowRuntime.shared.pastePlainText(item); onClose() }
+        case .more:
+            break
+        }
     }
 
     private var drawerInfo: some View {

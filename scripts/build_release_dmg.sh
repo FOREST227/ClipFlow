@@ -6,8 +6,8 @@ set -euo pipefail
 # build_release_dmg.sh — Build arm64, x86_64, and universal DMGs.
 #
 # Usage:
-#   ./scripts/build_release_dmg.sh v0.2.1
-#   ./scripts/build_release_dmg.sh            # uses CLIPFLOW_VERSION or v0.2.1
+#   ./scripts/build_release_dmg.sh v0.2.2
+#   ./scripts/build_release_dmg.sh            # uses CLIPFLOW_VERSION or v0.2.2
 #
 # Produces:
 #   dist/release/ClipFlow-<tag>-arm64.dmg
@@ -22,12 +22,12 @@ RELEASE_DIR="$DIST_DIR/release"
 APP_NAME="ClipFlow"
 PRODUCT_NAME="ClipFlowApp"
 
-RAW_VERSION="${1:-${CLIPFLOW_VERSION:-v0.2.1}}"
+RAW_VERSION="${1:-${CLIPFLOW_VERSION:-v0.2.2}}"
 TAG_NAME="${RAW_VERSION#refs/tags/}"
 BUNDLE_VERSION="${TAG_NAME#v}"
-# v0.2.0 pinned CFBundleVersion at 30, one above v0.1.9's pinned build of 29.
+# v0.2.1 pinned CFBundleVersion at 31, one above v0.2.0's pinned build of 30.
 # Keep the next build in this script so a release does not depend on GITHUB_RUN_NUMBER.
-BUILD_NUMBER="${CLIPFLOW_BUILD_NUMBER:-31}"
+BUILD_NUMBER="${CLIPFLOW_BUILD_NUMBER:-32}"
 
 if [[ -z "$TAG_NAME" ]]; then
   echo "Missing release version or tag name." >&2

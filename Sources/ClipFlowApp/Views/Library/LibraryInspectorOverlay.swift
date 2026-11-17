@@ -314,91 +314,80 @@ struct LibraryInspectorOverlay: View {
         ExcelInsertOffer.shouldOffer(item: item, bundleIDs: ExcelInsertContext.currentBundleIDs())
     }
 
-    private var primaryCommands: [InspectorCommand] {
-        InspectorCommands.bar(
+    private var actionSet: InspectorActionSet {
+        InspectorCommands.actions(
             pinned: item.pinned,
             canSaveSnippet: SnippetLibrary.canSave(item),
             showsReveal: item.privacy != .standard,
-            revealed: store.isRevealed(item)
+            revealed: store.isRevealed(item),
+            hasRichText: PlainTextPaste.hasRichText(item),
+            hasOriginalTypes: SpreadsheetClipboard.hasOriginalTypes(item),
+            offersExcelInsert: offersExcelInsert
         )
     }
 
     private var drawerActions: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    ForEach(primaryCommands, id: \.id) { command in
-                        if command.id == .more {
-                            detailMenu
-                        } else {
-                            commandButton(command)
-                                .background {
-                                    if command.id == .paste {
-                                        InspectorFrameReader(name: "ClipFlowInspector.paste")
-                                    }
-                                }
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
-                let sheet = InspectorCommands.spreadsheet(
-                    hasOriginalTypes: SpreadsheetClipboard.hasOriginalTypes(item),
-                    offersExcelInsert: offersExcelInsert
-                )
-                if !sheet.isEmpty {
-                    commandRow(sheet)
-                }
-                let plain = InspectorCommands.plainText(hasRichText: PlainTextPaste.hasRichText(item))
-                if !plain.isEmpty {
-                    commandRow(plain)
-                }
-            }
-    }
-
-    private func commandRow(_ commands: [InspectorCommand]) -> some View {
-        HStack(spacing: 8) {
-            ForEach(commands, id: \.id) { commandButton($0) }
-            Spacer(minLength: 0)
+        let set = actionSet
+        return InspectorActionFlow(commands: set.commands, iconClusterCount: set.iconClusterCount) { command in
+            commandButton(command, action: command.id == .more ? { showOverflowMenu() } : nil)
+                .background(InspectorFrameReader(name: InspectorAnchor.action(command.id)))
         }
+        .background(InspectorFrameReader(name: InspectorAnchor.actions))
     }
 
-    private func commandButton(_ command: InspectorCommand) -> some View {
+    private func commandButton(_ command: InspectorCommand, action: (() -> Void)? = nil) -> some View {
         InspectorCommandButton(
             command: command,
             fill: command.isPrimary ? palette.primaryButtonFill : palette.rowFill,
             foreground: command.isPrimary ? .white : Color.primary,
             border: command.isPrimary ? .clear : palette.rowBorder,
-            action: { perform(command) }
+            action: {
+                if let action { action() } else { perform(command) }
+            }
         )
     }
 
-    private var detailMenu: some View {
-        Menu {
-            if let url = item.primaryURL {
-                Button("访问链接") { NSWorkspace.shared.open(url) }
-            }
-            if SnippetLibrary.canSave(item) {
-                Button("存为片段") { store.requestSaveSnippet(fromItemID: item.id) }
-            }
-            if SpreadsheetClipboard.hasOriginalTypes(item) {
-                Button(SpreadsheetClipboard.copyOnlyTitle) { perform(.init(id: .copyOriginal, title: SpreadsheetClipboard.copyOnlyTitle, symbol: "doc.on.clipboard", accessibilityLabel: SpreadsheetClipboard.copyOnlyTitle)) }
-            }
-            if offersExcelInsert {
-                Button(SpreadsheetShift.down.menuTitle) { perform(.init(id: .insertDown, title: SpreadsheetShift.down.menuTitle, symbol: "arrow.down", accessibilityLabel: SpreadsheetShift.down.menuTitle)) }
-                Button(SpreadsheetShift.right.menuTitle) { perform(.init(id: .insertRight, title: "右移单元格", symbol: "arrow.right", accessibilityLabel: SpreadsheetShift.right.menuTitle)) }
-            }
-            Button("删除条目", role: .destructive) { store.delete(item.id); onClose() }
-        } label: {
-            InspectorCommandFace(
-                command: InspectorCommand(id: .more, title: "", symbol: "ellipsis", accessibilityLabel: "更多操作"),
-                fill: palette.rowFill,
-                foreground: Color.primary,
-                border: palette.rowBorder
-            )
+    private func showOverflowMenu() {
+        let entries = InspectorCommands.overflowMenu(
+            pinned: item.pinned,
+            canSaveSnippet: SnippetLibrary.canSave(item),
+            hasRichText: PlainTextPaste.hasRichText(item),
+            canOpenURL: item.primaryURL != nil,
+            canRevealInFinder: InspectorCommands.canRevealInFinder(item),
+            hasOriginalTypes: SpreadsheetClipboard.hasOriginalTypes(item),
+            offersExcelInsert: offersExcelInsert
+        )
+        InspectorOverflowMenu.present(entries: entries) { action in
+            performOverflow(action)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("更多操作")
+    }
+
+    private func performOverflow(_ action: InspectorOverflowAction) {
+        switch action.id {
+        case .copyPlain:
+            perform(.init(id: .copyPlain, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
+        case .pastePlain:
+            perform(.init(id: .pastePlain, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
+        case .pin:
+            store.togglePin(item.id)
+        case .saveSnippet:
+            store.requestSaveSnippet(fromItemID: item.id)
+        case .openURL:
+            if let url = item.primaryURL { NSWorkspace.shared.open(url) }
+        case .revealInFinder:
+            if let url = InspectorCommands.finderURL(for: item) {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        case .copyOriginal:
+            perform(.init(id: .copyOriginal, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
+        case .insertDown:
+            perform(.init(id: .insertDown, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
+        case .insertRight:
+            perform(.init(id: .insertRight, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
+        case .delete:
+            store.delete(item.id)
+            onClose()
+        }
     }
 
     private func perform(_ command: InspectorCommand) {

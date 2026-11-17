@@ -142,7 +142,7 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
     }
     func numberOfRows(in tableView: NSTableView) -> Int { items.count }
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        QuickPasteCardLayout.height(for: items[row].kind) + (row + 1 < items.count ? QuickPasteCardLayout.spacing : 0)
+        QuickPasteCardLayout.height(for: items[row]) + (row + 1 < items.count ? QuickPasteCardLayout.spacing : 0)
     }
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { ClearRowView() }
@@ -158,7 +158,7 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
     private func configure(_ cell: QuickPasteTableCell, item: ClipboardItem, index: Int) {
         guard let store, let selection else { return }
         let identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
-        cell.cardHeight = QuickPasteCardLayout.height(for: item.kind)
+        cell.cardHeight = QuickPasteCardLayout.height(for: item)
         cell.row.identifier = identifier
         cell.row.interactionEnabled = inputEnabled
         cell.row.update(itemID: item.id,

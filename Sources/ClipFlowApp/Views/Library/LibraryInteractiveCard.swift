@@ -27,10 +27,10 @@ struct LibraryInteractiveCard: NSViewRepresentable {
         view.identifier = NSUserInterfaceItemIdentifier(id.uuidString)
         let inspect = InspectorSourceAnchor.callback(for: view, fallback: onInspect, anchored: onInspectFrom)
         let summary = ClipboardCardSummary.plainFirstLine(of: store.displayFullText(for: item))
-        let spoken = summary.isEmpty ? displayedSnippet : summary
-        view.accessibilitySummary = "\(item.sourceApp)，\(item.kind.label)，\(spoken)，\(item.timeLabel)"
+        let spoken = SpreadsheetPreview.spokenSummary(for: item) ?? (summary.isEmpty ? displayedSnippet : summary)
+        view.accessibilitySummary = "\(item.sourceApp)，\(SpreadsheetPreview.typeLabel(for: item))，\(spoken)，\(item.timeLabel)"
         view.pinActionTitle = item.pinned ? "取消置顶" : "置顶"
-        view.lockedHeight = LibraryCardLayout.height(for: item.kind)
+        view.lockedHeight = LibraryCardLayout.height(for: item)
         view.update(
             rootView: AnyView(
                 ClipboardCard(

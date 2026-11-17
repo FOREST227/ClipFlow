@@ -153,11 +153,17 @@ struct ClipboardCard: View {
     @ViewState private var isSelected = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: item.kind == .image || item.kind == .code
+        VStack(alignment: .leading, spacing: item.kind == .image || item.kind == .code || showsTableGrid
             ? LibraryCardLayout.blockSpacing : ClipFlowLayout.space4) {
             metadata
             if item.isImage {
                 imageContent
+            } else if let grid = tableGrid, showsTableGrid {
+                SpreadsheetGridView(grid: grid, style: .inline)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(6)
+                    .background(item.kind.tint.opacity(0.045), in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
+                tags
             } else if item.kind == .code {
                 Text(String(store.displayFullText(for: item).prefix(1200)))
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
@@ -179,7 +185,7 @@ struct ClipboardCard: View {
         .padding(.trailing, ClipFlowLayout.space12)
         .padding(.vertical, LibraryCardLayout.contentPadding)
         .frame(maxWidth: .infinity)
-        .frame(height: LibraryCardLayout.height(for: item.kind), alignment: .top)
+        .frame(height: LibraryCardLayout.height(for: item), alignment: .top)
         .onReceive(store.historySelection.$itemID.map { $0 == item.id }.removeDuplicates()) {
             if isSelected != $0 { isSelected = $0 }
         }
@@ -191,7 +197,7 @@ struct ClipboardCard: View {
     private var metadata: some View {
         HStack(spacing: 6) {
             Text(item.sourceApp).lineLimit(1)
-            Text(item.kind.label)
+            Text(SpreadsheetPreview.typeLabel(for: item))
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(item.kind.labelColor(for: colorScheme))
                 .padding(.horizontal, 6).padding(.vertical, 2)
@@ -239,6 +245,16 @@ struct ClipboardCard: View {
     private var summaryLine: String {
         let line = ClipboardCardSummary.plainFirstLine(of: store.displayFullText(for: item))
         return line.isEmpty ? displayedSnippet : line
+    }
+
+    private var tableGrid: SpreadsheetPreviewGrid? {
+        guard store.isRevealed(item) else { return nil }
+        return SpreadsheetPreview.grid(for: item)
+    }
+
+    private var showsTableGrid: Bool {
+        guard let tableGrid else { return false }
+        return tableGrid.rows.count > 1 || tableGrid.columnCount > 1
     }
 }
 

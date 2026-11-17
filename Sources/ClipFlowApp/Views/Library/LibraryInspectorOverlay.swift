@@ -42,6 +42,18 @@ struct LibraryInspectorOverlay: View {
     private var showsSpreadsheetText: Bool {
         SpreadsheetClipboard.hasTabularData(item) || item.labels.contains("表格")
     }
+    private var tableGrid: SpreadsheetPreviewGrid? {
+        guard !item.isSensitive || store.isRevealed(item) else { return nil }
+        return SpreadsheetPreview.grid(for: item)
+    }
+    private var showsTableGrid: Bool {
+        guard let tableGrid else { return false }
+        return tableGrid.rows.count > 1 || tableGrid.columnCount > 1
+    }
+    private var heading: String {
+        if item.isSensitive && !store.isRevealed(item) { return "受保护的敏感内容" }
+        return SpreadsheetPreview.title(for: item)
+    }
     private var markdownAvailable: Bool {
         (!item.isSensitive || store.isRevealed(item)) && DetailTextFormat.isMarkdown(store.displayFullText(for: item))
     }
@@ -79,6 +91,7 @@ struct LibraryInspectorOverlay: View {
     }
     private var drawerHeight: CGFloat {
         if item.isImage || item.kind == .code || markdownAvailable { return maxHeight }
+        if showsTableGrid, let tableGrid { return tableDrawerHeight(for: tableGrid) }
         let font = NSFont.systemFont(ofSize: 13)
         let bounds = (store.displayFullText(for: item) as NSString).boundingRect(
             with: CGSize(width: max(160, contentWidth - 64), height: .greatestFiniteMagnitude),
@@ -87,6 +100,14 @@ struct LibraryInspectorOverlay: View {
     }
     private var drawerBodyHeight: CGFloat { max(64, drawerHeight - drawerHeaderHeight - drawerFooterHeight - 24) }
     private var previewHeight: CGFloat { drawerBodyHeight }
+
+    /// A short sheet stays about as tall as its rows. A long sheet stops at the pane and scrolls.
+    private func tableDrawerHeight(for grid: SpreadsheetPreviewGrid) -> CGFloat {
+        let caption: CGFloat = grid.overflowCaption == nil ? 0 : 26
+        let gridBlock = CGFloat(grid.rows.count) * 34 + 20 + caption
+        let natural = drawerHeaderHeight + gridBlock + drawerFooterHeight + 24
+        return min(maxHeight, max(240, natural))
+    }
 
     var body: some View {
         // Build rich content and measure text once per content/state change, not per animation tick.
@@ -186,10 +207,10 @@ struct LibraryInspectorOverlay: View {
             HStack(alignment: .top, spacing: ClipFlowLayout.space12) {
                 VStack(alignment: .leading, spacing: ClipFlowLayout.space4) {
                     HStack(spacing: ClipFlowLayout.space8) {
-                        Text(item.isSensitive && !store.isRevealed(item) ? "受保护的敏感内容" : item.title)
+                        Text(heading)
                             .font(.system(size: 16, weight: .semibold))
                             .lineLimit(1)
-                        Text(item.kind.label)
+                        Text(SpreadsheetPreview.typeLabel(for: item))
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(item.kind.labelColor(for: textColorScheme))
                             .padding(.horizontal, ClipFlowLayout.space8)
@@ -227,6 +248,14 @@ struct LibraryInspectorOverlay: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .frame(height: imageHeight)
+            } else if let grid = tableGrid, showsTableGrid {
+                SpreadsheetGridView(grid: grid, style: .detail)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(height: previewHeight)
+                    .padding(.bottom, ClipFlowLayout.space8)
+                    .background(textColorScheme == .dark ? palette.inputFill : Color.white,
+                        in: RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
             } else if item.kind == .code || markdownAvailable {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {

@@ -9,10 +9,10 @@ struct HUDRow: View {
     var shortcutIndex: Int? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: item.isImage || item.kind == .code ? 6 : 4) {
+        VStack(alignment: .leading, spacing: item.isImage || item.kind == .code || showsTableGrid ? 6 : 4) {
             HStack(spacing: 5) {
                 Image(systemName: iconName).foregroundStyle(item.kind.labelColor(for: colorScheme))
-                Text(item.kind.label).foregroundStyle(item.kind.labelColor(for: colorScheme)).fixedSize()
+                Text(SpreadsheetPreview.typeLabel(for: item)).foregroundStyle(item.kind.labelColor(for: colorScheme)).fixedSize()
                 Text(item.sourceApp).lineLimit(1)
                 if item.pinned { Image(systemName: "pin.fill").foregroundStyle(ClipCategory.pinned.tint) }
                 if item.isSensitive { Image(systemName: "lock.fill").foregroundStyle(item.privacy.color) }
@@ -32,6 +32,11 @@ struct HUDRow: View {
 
             if item.isImage {
                 imageContent
+            } else if let grid = tableGrid, showsTableGrid {
+                SpreadsheetGridView(grid: grid, style: .inline)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(6)
+                    .background(tint.opacity(0.045), in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
             } else if item.kind == .code {
                 Text(String(store.displayFullText(for: item).prefix(1000)))
                     .font(.system(size: 11, design: .monospaced))
@@ -49,7 +54,7 @@ struct HUDRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
-        .frame(height: QuickPasteCardLayout.height(for: item.kind), alignment: .top)
+        .frame(height: QuickPasteCardLayout.height(for: item), alignment: .top)
 
     }
 
@@ -80,5 +85,15 @@ struct HUDRow: View {
         item.kind.tint
     }
 
-    private var iconName: String { item.kind.symbolName }
+    private var iconName: String { SpreadsheetPreview.symbolName(for: item) }
+
+    private var tableGrid: SpreadsheetPreviewGrid? {
+        guard store.isRevealed(item) else { return nil }
+        return SpreadsheetPreview.grid(for: item)
+    }
+
+    private var showsTableGrid: Bool {
+        guard let tableGrid else { return false }
+        return tableGrid.rows.count > 1 || tableGrid.columnCount > 1
+    }
 }

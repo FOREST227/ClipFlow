@@ -157,7 +157,12 @@ final class PasteService {
                 }
                 monitor?.noteSpreadsheetPasteboardWrite()
                 if ExcelAppleScript.run(SpreadsheetReplay.pasteScript) == .inserted {
-                    let formats = SpreadsheetReplay.cells(in: item.extraTypes ?? [], htmlData: item.htmlData)
+                    let formats = SpreadsheetReplay.cells(
+                        in: item.extraTypes ?? [],
+                        htmlData: item.htmlData,
+                        rows: grid.rows,
+                        columns: grid.columns
+                    )
                     if let script = SpreadsheetReplay.formatScript(for: formats) {
                         _ = ExcelAppleScript.run(script)
                     }

@@ -24,7 +24,9 @@ struct SpreadsheetCellFormat: Equatable, Sendable {
 /// After the copy session ends, Mac Excel no longer honors `com.microsoft.ole.source.<pid>` (it has no bytes).
 /// Replaying `Embed-Source` / `DataObject` / link flavors asks Excel to embed or link an object, and a
 /// TIFF-only board pastes a picture. HTML that carries `mso-number-format` pastes real cells: text stays
-/// text, and dates keep a date format instead of General. XML Spreadsheet and Biff, when present, go first.
+/// text, and dates keep a date format instead of General. Mac Excel's HTML often marks text-stored dates and
+/// numbers as General and leaves the real cell type in the embedded workbook, so formats are read from that
+/// package without putting it back on the pasteboard. XML Spreadsheet and Biff, when present, go first.
 enum SpreadsheetReplay {
     /// XML Spreadsheet, then Biff / Excel cell payloads, then HTML, RTF, and plain text.
     static func pasteRecords(from entries: [ClipboardPasteboardType]) -> [ClipboardPasteboardType] {
@@ -58,9 +60,19 @@ enum SpreadsheetReplay {
         aliases(of: type).contains(where: isExcludedName)
     }
 
-    static func cells(in entries: [ClipboardPasteboardType], htmlData: Data? = nil) -> [SpreadsheetCellFormat] {
+    /// `rows` and `columns` are the copied block. An embedded workbook usually holds the whole sheet, so the
+    /// package parser keeps only the selection of this size.
+    static func cells(
+        in entries: [ClipboardPasteboardType],
+        htmlData: Data? = nil,
+        rows: Int? = nil,
+        columns: Int? = nil
+    ) -> [SpreadsheetCellFormat] {
         if let xml = entries.first(where: { isXMLSpreadsheet($0.type) }),
            let parsed = SpreadsheetFormatParser.parseXML(xml.data), !parsed.isEmpty {
+            return parsed
+        }
+        if let parsed = packageCells(in: entries, rows: rows, columns: columns), !parsed.isEmpty {
             return parsed
         }
         let html = htmlText(in: entries) ?? htmlData.flatMap { ClipboardCaptureDecision.decodeText($0) }
@@ -90,15 +102,46 @@ enum SpreadsheetReplay {
 
     private static func formatStatement(_ cell: SpreadsheetCellFormat) -> String? {
         guard cell.row >= 0, cell.column >= 0 else { return nil }
-        let format = appleScriptLiteral(cell.numberFormat)
-        var lines = [
-            "    set targetCell to get offset anchorCell row offset \(cell.row) column offset \(cell.column)",
-            "    set number format of targetCell to \(format)"
-        ]
+        let target = "    set targetCell to get offset anchorCell row offset \(cell.row) column offset \(cell.column)"
+        // A General cell parses "2025-11-01" and "5026.70505" as values. Text has to be written while the
+        // format is @, and only then can the original format be put back. Doing it the other way stores a serial.
         if cell.kind == .text {
-            lines.append("    set value of targetCell to \(appleScriptLiteral(cell.text))")
+            var lines = [
+                target,
+                "    set number format of targetCell to \"@\"",
+                "    set value of targetCell to \(appleScriptLiteral(cell.text))"
+            ]
+            if cell.numberFormat != "@" {
+                lines.append("    set number format of targetCell to \(appleScriptLiteral(cell.numberFormat))")
+            }
+            return lines.joined(separator: "\n")
         }
-        return lines.joined(separator: "\n")
+        return [
+            target,
+            "    set number format of targetCell to \(appleScriptLiteral(cell.numberFormat))"
+        ].joined(separator: "\n")
+    }
+
+    /// Embedded workbook inside an OLE package. It is not pasted; Excel would embed an object.
+    private static func packageCells(
+        in entries: [ClipboardPasteboardType],
+        rows: Int?,
+        columns: Int?
+    ) -> [SpreadsheetCellFormat]? {
+        for entry in entries where isEmbeddedWorkbook(entry.type) && !entry.data.isEmpty {
+            if let parsed = SpreadsheetPackageParser.parse(entry.data, rows: rows, columns: columns), !parsed.isEmpty {
+                return parsed
+            }
+        }
+        return nil
+    }
+
+    private static func isEmbeddedWorkbook(_ type: String) -> Bool {
+        let compact = type.lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ".", with: "")
+        return compact.contains("embedsource")
     }
 
     static func appleScriptLiteral(_ text: String) -> String {

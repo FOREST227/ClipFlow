@@ -348,29 +348,42 @@ struct LibraryInspectorOverlay: View {
     }
 
     private func showOverflowMenu() {
-        let actions = InspectorCommands.overflowActions(
-            canOpenURL: item.primaryURL != nil,
+        let entries = InspectorCommands.overflowMenu(
+            pinned: item.pinned,
             canSaveSnippet: SnippetLibrary.canSave(item),
+            hasRichText: PlainTextPaste.hasRichText(item),
+            canOpenURL: item.primaryURL != nil,
+            canRevealInFinder: InspectorCommands.canRevealInFinder(item),
             hasOriginalTypes: SpreadsheetClipboard.hasOriginalTypes(item),
             offersExcelInsert: offersExcelInsert
         )
-        InspectorOverflowMenu.popUp(actions: actions) { action in
+        InspectorOverflowMenu.present(entries: entries) { action in
             performOverflow(action)
         }
     }
 
     private func performOverflow(_ action: InspectorOverflowAction) {
-        switch action {
-        case .openURL:
-            if let url = item.primaryURL { NSWorkspace.shared.open(url) }
+        switch action.id {
+        case .copyPlain:
+            perform(.init(id: .copyPlain, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
+        case .pastePlain:
+            perform(.init(id: .pastePlain, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
+        case .pin:
+            store.togglePin(item.id)
         case .saveSnippet:
             store.requestSaveSnippet(fromItemID: item.id)
+        case .openURL:
+            if let url = item.primaryURL { NSWorkspace.shared.open(url) }
+        case .revealInFinder:
+            if let url = InspectorCommands.finderURL(for: item) {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
         case .copyOriginal:
-            perform(.init(id: .copyOriginal, title: SpreadsheetClipboard.copyOnlyTitle, symbol: "doc.on.clipboard", accessibilityLabel: SpreadsheetClipboard.copyOnlyTitle))
+            perform(.init(id: .copyOriginal, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
         case .insertDown:
-            perform(.init(id: .insertDown, title: SpreadsheetShift.down.menuTitle, symbol: "arrow.down", accessibilityLabel: SpreadsheetShift.down.menuTitle))
+            perform(.init(id: .insertDown, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
         case .insertRight:
-            perform(.init(id: .insertRight, title: "右移单元格", symbol: "arrow.right", accessibilityLabel: SpreadsheetShift.right.menuTitle))
+            perform(.init(id: .insertRight, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
         case .delete:
             store.delete(item.id)
             onClose()

@@ -180,6 +180,8 @@ final class InspectorActionLayoutTests: XCTestCase {
         }
         let heights = frames.map(\.1.height)
         XCTAssertLessThanOrEqual((heights.max() ?? 0) - (heights.min() ?? 0), 1.5, "\(fixture.name) 按钮高度不一致 \(heights)")
+        let midYs = frames.map(\.1.midY)
+        XCTAssertEqual(midYs.max() ?? 0, midYs.min() ?? 0, accuracy: 2, "\(fixture.name) 在 \(contentWidth) 应排成一行")
         let ordered = frames.sorted { lhs, rhs in
             if abs(lhs.1.midY - rhs.1.midY) > 2 { return lhs.1.midY < rhs.1.midY }
             return lhs.1.minX < rhs.1.minX
@@ -207,8 +209,7 @@ final class InspectorActionLayoutTests: XCTestCase {
         let button = try XCTUnwrap(InspectorViewLocator.view(named: InspectorAnchor.action(.more), in: window))
         let buttonScreen = window.convertToScreen(button.convert(button.bounds, to: nil))
         let cardScreen = window.convertToScreen(card.convert(card.bounds, to: nil))
-        let menu = InspectorOverflowMenu.makeMenu(actions: overflowActions(for: item)) { _ in }
-        let menuSize = InspectorOverflowMenu.size(of: menu)
+        let menuSize = InspectorOverflowMenu.size(for: overflowEntries(for: item))
         let origin = InspectorMenuAnchor.topLeft(menuSize: menuSize, button: buttonScreen, card: cardScreen)
         let placed = CGRect(x: origin.x, y: origin.y - menuSize.height, width: menuSize.width, height: menuSize.height)
         XCTAssertLessThanOrEqual(placed.maxX, cardScreen.maxX - InspectorActionMetrics.menuInset + 1)
@@ -220,52 +221,66 @@ final class InspectorActionLayoutTests: XCTestCase {
     }
 
     private func captureMenu(for item: ClipboardItem, in window: NSWindow, to url: URL) throws {
-        let before = Self.windowIDs()
-        var captured: NSBitmapImageRep?
-        var captureError: String?
-        let cardView = InspectorViewLocator.view(named: InspectorAnchor.card, in: window)
-        let cardScreen = cardView.flatMap { view in
-            view.window?.convertToScreen(view.convert(view.bounds, to: nil))
-        } ?? .zero
+        let cardView = try XCTUnwrap(InspectorViewLocator.view(named: InspectorAnchor.card, in: window))
+        let cardScreen = window.convertToScreen(cardView.convert(cardView.bounds, to: nil))
         let savedMouse = NSEvent.mouseLocation
         Self.warpMouse(toAppKit: CGPoint(x: 24, y: 24))
-        defer { Self.warpMouse(toAppKit: savedMouse) }
-        InspectorOverflowMenu.popUp(actions: overflowActions(for: item), willPresent: { menu in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                let info = Self.windowInfo().filter { entry in
-                    guard let number = entry[kCGWindowNumber as String] as? UInt32 else { return false }
-                    let owned = (entry[kCGWindowOwnerPID as String] as? Int32) == Int32(ProcessInfo.processInfo.processIdentifier)
-                    return owned && (number == CGWindowID(window.windowNumber) || !before.contains(number))
-                }
-                let menus = info.filter { ($0[kCGWindowNumber as String] as? UInt32) != CGWindowID(window.windowNumber) }
-                if menus.isEmpty {
-                    captureError = "没有出现溢出菜单窗口"
-                }
-                let cardQuartz = Self.quartzRect(cardScreen)
-                for entry in menus {
-                    guard let menuBounds = Self.bounds(of: entry) else { continue }
-                    let inside = menuBounds.minX >= cardQuartz.minX - 2
-                        && menuBounds.maxX <= cardQuartz.maxX + 2
-                        && menuBounds.minY >= cardQuartz.minY - 2
-                        && menuBounds.maxY <= cardQuartz.maxY + 2
-                    if !inside {
-                        captureError = "菜单越过卡片 menu \(menuBounds) card \(cardQuartz)"
-                    }
-                }
-                if let image = Self.composite(info, host: CGWindowID(window.windowNumber)) {
-                    captured = NSBitmapImageRep(cgImage: image)
-                } else if captureError == nil {
-                    captureError = "菜单窗口没有生成图像"
-                }
-                menu.cancelTracking()
-            }
-        }) { _ in }
-        if let captured {
-            try XCTUnwrap(captured.representation(using: .png, properties: [:])).write(to: url)
+        defer {
+            Self.warpMouse(toAppKit: savedMouse)
+            InspectorOverflowMenu.dismiss()
         }
-        if let captureError {
-            XCTFail(captureError)
-        }
+        window.makeKeyAndOrderFront(nil)
+        let panel = try XCTUnwrap(InspectorOverflowMenu.present(entries: overflowEntries(for: item), in: window) { _ in })
+        pump(0.2)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertLessThanOrEqual(panel.frame.maxX, cardScreen.maxX - InspectorActionMetrics.menuInset + 1)
+        XCTAssertGreaterThanOrEqual(panel.frame.minX, cardScreen.minX + InspectorActionMetrics.menuInset - 1)
+        XCTAssertLessThanOrEqual(panel.frame.maxY, cardScreen.maxY - InspectorActionMetrics.menuInset + 1)
+        XCTAssertGreaterThanOrEqual(panel.frame.minY, cardScreen.minY + InspectorActionMetrics.menuInset - 1)
+        let content = try XCTUnwrap(window.contentView)
+        let host = try bitmap(of: content)
+        let menu = try transparentBitmap(of: try XCTUnwrap(panel.contentView))
+        let contentScreen = window.convertToScreen(content.convert(content.bounds, to: nil))
+        let union = contentScreen.union(panel.frame)
+        let image = NSImage(size: union.size)
+        image.lockFocus()
+        host.draw(in: NSRect(
+            x: contentScreen.minX - union.minX, y: contentScreen.minY - union.minY,
+            width: contentScreen.width, height: contentScreen.height))
+        let menuRect = NSRect(
+            x: panel.frame.minX - union.minX, y: panel.frame.minY - union.minY,
+            width: panel.frame.width, height: panel.frame.height)
+        NSBezierPath(roundedRect: menuRect, xRadius: 12, yRadius: 12).addClip()
+        menu.draw(in: menuRect)
+        image.unlockFocus()
+        let rep = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation)))
+        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: url)
+    }
+
+    private func bitmap(of view: NSView) throws -> NSBitmapImageRep {
+        view.layoutSubtreeIfNeeded()
+        let image = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: image)
+        return image
+    }
+
+    private func transparentBitmap(of view: NSView) throws -> NSBitmapImageRep {
+        view.layoutSubtreeIfNeeded()
+        let scale = view.window?.backingScaleFactor ?? 2
+        let pixelsWide = max(1, Int((view.bounds.width * scale).rounded(.up)))
+        let pixelsHigh = max(1, Int((view.bounds.height * scale).rounded(.up)))
+        let image = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: pixelsWide, pixelsHigh: pixelsHigh,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        image.size = view.bounds.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: image)
+        NSColor.clear.setFill()
+        view.bounds.fill()
+        view.displayIgnoringOpacity(view.bounds, in: NSGraphicsContext.current!)
+        NSGraphicsContext.restoreGraphicsState()
+        return image
     }
 
     private func actionSet(for item: ClipboardItem) -> InspectorActionSet {
@@ -280,10 +295,13 @@ final class InspectorActionLayoutTests: XCTestCase {
         )
     }
 
-    private func overflowActions(for item: ClipboardItem) -> [InspectorOverflowAction] {
-        InspectorCommands.overflowActions(
-            canOpenURL: item.primaryURL != nil,
+    private func overflowEntries(for item: ClipboardItem) -> [InspectorOverflowEntry] {
+        InspectorCommands.overflowMenu(
+            pinned: item.pinned,
             canSaveSnippet: SnippetLibrary.canSave(item),
+            hasRichText: PlainTextPaste.hasRichText(item),
+            canOpenURL: item.primaryURL != nil,
+            canRevealInFinder: InspectorCommands.canRevealInFinder(item),
             hasOriginalTypes: SpreadsheetClipboard.hasOriginalTypes(item),
             offersExcelInsert: ExcelInsertOffer.shouldOffer(item: item, bundleIDs: ExcelInsertContext.currentBundleIDs())
         )
@@ -309,63 +327,8 @@ final class InspectorActionLayoutTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
 
-    private static func windowIDs() -> Set<UInt32> {
-        Set(windowInfo().compactMap { $0[kCGWindowNumber as String] as? UInt32 })
-    }
-
-    private static func windowInfo() -> [[String: Any]] {
-        CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-    }
-
-    private static func bounds(of entry: [String: Any]) -> CGRect? {
-        guard let raw = entry[kCGWindowBounds as String] as? [String: CGFloat] else { return nil }
-        return CGRect(x: raw["X"] ?? 0, y: raw["Y"] ?? 0, width: raw["Width"] ?? 0, height: raw["Height"] ?? 0)
-    }
-
     private static func warpMouse(toAppKit point: CGPoint) {
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         CGWarpMouseCursorPosition(CGPoint(x: point.x, y: primaryHeight - point.y))
-    }
-
-    private static func quartzRect(_ rect: CGRect) -> CGRect {
-        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
-        return CGRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
-    }
-
-    private static func composite(_ info: [[String: Any]], host: CGWindowID) -> CGImage? {
-        let windows: [(CGWindowID, CGRect)] = info.compactMap { entry in
-            guard let number = entry[kCGWindowNumber as String] as? UInt32, let bounds = bounds(of: entry), bounds.width > 2 else {
-                return nil
-            }
-            return (number, bounds)
-        }.sorted { lhs, rhs in
-            if (lhs.0 == host) != (rhs.0 == host) { return lhs.0 == host }
-            return lhs.1.width * lhs.1.height > rhs.1.width * rhs.1.height
-        }
-        guard !windows.isEmpty else { return nil }
-        let union = windows.reduce(CGRect.null) { $0.union($1.1) }
-        guard union.width > 2, union.height > 2 else { return nil }
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
-        let pixels = NSSize(width: union.width * scale, height: union.height * scale)
-        guard let context = CGContext(
-            data: nil, width: Int(pixels.width), height: Int(pixels.height),
-            bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-        context.setFillColor(CGColor(red: 0.90, green: 0.92, blue: 0.94, alpha: 1))
-        context.fill(CGRect(origin: .zero, size: pixels))
-        context.interpolationQuality = .high
-        for (id, bounds) in windows {
-            guard let image = CGWindowListCreateImage(.null, .optionIncludingWindow, id, [.boundsIgnoreFraming, .bestResolution]) else {
-                continue
-            }
-            let dest = CGRect(
-                x: (bounds.minX - union.minX) * scale,
-                y: (union.maxY - bounds.maxY) * scale,
-                width: bounds.width * scale,
-                height: bounds.height * scale)
-            context.draw(image, in: dest)
-        }
-        return context.makeImage()
     }
 }

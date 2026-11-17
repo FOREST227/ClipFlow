@@ -51,31 +51,34 @@ extension InspectorCommand.ID {
 /// Detail-card actions in reading order, plus how many trailing commands are the icon cluster.
 struct InspectorActionSet: Equatable, Sendable {
     var commands: [InspectorCommand]
-    /// Pin, save, reveal, and overflow stay on one line when that line fits.
+    /// Trailing commands that stay together when a row wraps.
     var iconClusterCount: Int
 }
 
-/// One row in the overflow menu. The visible controls already cover the frequent actions.
-enum InspectorOverflowAction: Equatable, Sendable {
-    case openURL
+enum InspectorOverflowActionID: String, Equatable, Sendable {
+    case copyPlain
+    case pastePlain
+    case pin
     case saveSnippet
+    case openURL
+    case revealInFinder
     case copyOriginal
     case insertDown
     case insertRight
     case delete
+}
 
-    var title: String {
-        switch self {
-        case .openURL: "访问链接"
-        case .saveSnippet: "存为片段"
-        case .copyOriginal: SpreadsheetClipboard.copyOnlyTitle
-        case .insertDown: SpreadsheetShift.down.menuTitle
-        case .insertRight: SpreadsheetShift.right.menuTitle
-        case .delete: "删除条目"
-        }
-    }
+struct InspectorOverflowAction: Equatable, Sendable {
+    var id: InspectorOverflowActionID
+    var title: String
+    var symbol: String
+    var shortcut: String?
+    var isDestructive: Bool = false
+}
 
-    var isDestructive: Bool { self == .delete }
+enum InspectorOverflowEntry: Equatable, Sendable {
+    case action(InspectorOverflowAction)
+    case separator
 }
 
 enum InspectorCommands {
@@ -91,7 +94,7 @@ enum InspectorCommands {
         ).commands
     }
 
-    /// Paste and copy, then secondary text actions, then the icon cluster.
+    /// The face of the card: paste, copy, reveal for protected items, and overflow.
     static func actions(
         pinned: Bool,
         canSaveSnippet: Bool,
@@ -101,59 +104,83 @@ enum InspectorCommands {
         hasOriginalTypes: Bool,
         offersExcelInsert: Bool
     ) -> InspectorActionSet {
-        let primary = [
+        _ = (pinned, canSaveSnippet, hasRichText, hasOriginalTypes, offersExcelInsert)
+        var commands = [
             InspectorCommand(id: .paste, title: "粘贴", symbol: "arrow.down.doc", accessibilityLabel: "粘贴", isPrimary: true),
             InspectorCommand(id: .copy, title: "复制", symbol: "doc.on.doc", accessibilityLabel: "复制")
         ]
-        var icons = [
-            InspectorCommand(
-                id: .pin,
-                title: "",
-                symbol: pinned ? "pin.fill" : "pin",
-                accessibilityLabel: pinned ? "取消置顶" : "置顶条目",
-                help: pinned ? "取消置顶" : "置顶条目"
-            )
-        ]
-        if canSaveSnippet {
-            icons.append(InspectorCommand(
-                id: .saveSnippet,
-                title: "",
-                symbol: "plus.square.on.square",
-                accessibilityLabel: "存为片段",
-                help: "存为片段"
-            ))
-        }
         if showsReveal {
-            icons.append(InspectorCommand(
+            commands.append(InspectorCommand(
                 id: .reveal,
-                title: "",
+                title: revealed ? "隐藏" : "显示",
                 symbol: revealed ? "eye.slash" : "eye",
                 accessibilityLabel: revealed ? "隐藏" : "显示",
                 help: revealed ? "隐藏" : "显示"
             ))
         }
-        icons.append(InspectorCommand(id: .more, title: "", symbol: "ellipsis", accessibilityLabel: "更多操作", help: "更多操作"))
-        let secondary = spreadsheet(hasOriginalTypes: hasOriginalTypes, offersExcelInsert: offersExcelInsert)
-            + plainText(hasRichText: hasRichText)
-        return InspectorActionSet(commands: primary + secondary + icons, iconClusterCount: icons.count)
+        commands.append(InspectorCommand(id: .more, title: "", symbol: "ellipsis", accessibilityLabel: "更多操作", help: "更多操作"))
+        return InspectorActionSet(commands: commands, iconClusterCount: 0)
     }
 
-    static func overflowActions(
-        canOpenURL: Bool,
+    /// Secondary and kind-specific actions. Delete stays last, under a divider.
+    static func overflowMenu(
+        pinned: Bool,
         canSaveSnippet: Bool,
+        hasRichText: Bool,
+        canOpenURL: Bool,
+        canRevealInFinder: Bool,
         hasOriginalTypes: Bool,
         offersExcelInsert: Bool
-    ) -> [InspectorOverflowAction] {
-        var actions: [InspectorOverflowAction] = []
-        if canOpenURL { actions.append(.openURL) }
-        if canSaveSnippet { actions.append(.saveSnippet) }
-        if hasOriginalTypes { actions.append(.copyOriginal) }
-        if offersExcelInsert {
-            actions.append(.insertDown)
-            actions.append(.insertRight)
+    ) -> [InspectorOverflowEntry] {
+        var entries: [InspectorOverflowEntry] = []
+        if hasRichText {
+            entries.append(.action(InspectorOverflowAction(
+                id: .copyPlain, title: PlainTextPaste.copyTitle, symbol: "doc.text", shortcut: nil)))
+            entries.append(.action(InspectorOverflowAction(
+                id: .pastePlain,
+                title: PlainTextPaste.pasteTitle,
+                symbol: "arrow.down.doc",
+                shortcut: ShortcutGlyphLayout.plainText(for: PlainTextPaste.quickPasteShortcut))))
         }
-        actions.append(.delete)
-        return actions
+        entries.append(.action(InspectorOverflowAction(
+            id: .pin,
+            title: pinned ? "取消置顶" : "置顶",
+            symbol: pinned ? "pin.slash" : "pin",
+            shortcut: nil)))
+        if canSaveSnippet {
+            entries.append(.action(InspectorOverflowAction(
+                id: .saveSnippet, title: "存为片段", symbol: "plus.square.on.square", shortcut: nil)))
+        }
+        if canOpenURL {
+            entries.append(.action(InspectorOverflowAction(
+                id: .openURL, title: "访问链接", symbol: "safari", shortcut: nil)))
+        }
+        if canRevealInFinder {
+            entries.append(.action(InspectorOverflowAction(
+                id: .revealInFinder, title: "在访达中显示", symbol: "folder", shortcut: nil)))
+        }
+        if hasOriginalTypes {
+            entries.append(.action(InspectorOverflowAction(
+                id: .copyOriginal, title: SpreadsheetClipboard.copyOnlyTitle, symbol: "doc.on.clipboard", shortcut: nil)))
+        }
+        if offersExcelInsert {
+            entries.append(.action(InspectorOverflowAction(
+                id: .insertDown, title: SpreadsheetShift.down.menuTitle, symbol: "arrow.down", shortcut: nil)))
+            entries.append(.action(InspectorOverflowAction(
+                id: .insertRight, title: SpreadsheetShift.right.menuTitle, symbol: "arrow.right", shortcut: nil)))
+        }
+        entries.append(.separator)
+        entries.append(.action(InspectorOverflowAction(
+            id: .delete, title: "删除条目", symbol: "trash", shortcut: nil, isDestructive: true)))
+        return entries
+    }
+
+    static func canRevealInFinder(_ item: ClipboardItem) -> Bool {
+        item.fileURLs?.contains { URL(string: $0)?.isFileURL == true } == true
+    }
+
+    static func finderURL(for item: ClipboardItem) -> URL? {
+        item.fileURLs?.compactMap { URL(string: $0) }.first { $0.isFileURL }
     }
 
     static func spreadsheet(hasOriginalTypes: Bool, offersExcelInsert: Bool) -> [InspectorCommand] {

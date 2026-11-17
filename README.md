@@ -5,7 +5,7 @@
   <p>一款轻量的原生 macOS 剪贴板工具，集中管理文本、代码、链接、图片和常用片段。</p>
   <p>
     <a href="https://github.com/FOREST227/ClipFlow/releases/latest">下载最新版</a>
-    · <a href="docs/releases/v0.1.9.md">v0.1.9 更新说明</a>
+    · <a href="docs/releases/v0.2.0.md">v0.2.0 更新说明</a>
     · <a href="https://github.com/FOREST227/ClipFlow/issues">反馈问题</a>
   </p>
   <p>macOS 12+ · Apple 芯片 / Intel / 通用版本 · 中文界面 · 本地保存</p>
@@ -25,11 +25,11 @@
 - **图片不只是一张缩略图**：详情按可用高度铺满，支持滚轮与双指捏合缩放、拖动查看局部；向外捏合仍能看到整张图，双击恢复完整显示。尺寸写在标题里，预览上不再重复一遍。
 - **状态与隐私，清楚可控**：菜单栏和设置共用开关名称。打开「记录剪贴板」才会记下新内容；可排除应用、自动保护疑似敏感内容、5 分钟后删除敏感内容，并单独控制「同步普通历史」。
 
-> 代码高亮与 Markdown 预览离线可用，不会执行复制的代码。复制、粘贴保留原始文本及其缩进、换行，并在再次粘贴或复制回剪贴板时恢复当时的富文本、HTML 和文件链接。从 Excel、Numbers 或 WPS 复制的单元格会按表格保存。Excel 随后只留下预览图时，不会再记成另一条图片；粘贴回去仍是带格式的单元格，文本格式的数字保持文本，日期和时间保持原格式。带有富文本或 HTML 的记录，可以改为「粘贴为纯文本」或「复制为纯文本」，只留下原来的文字。已经是纯文本的记录、只有文件链接的复制，以及图片，不提供这两项。分类和语法识别仍可能有误，可通过语言选择调整显示。
+> 代码高亮与 Markdown 预览离线可用，不会执行复制的代码。复制、粘贴保留原始文本及其缩进、换行，并在再次粘贴或复制回剪贴板时恢复当时的富文本、HTML 和文件链接。从 Excel、Numbers 或 WPS 复制的单元格会按表格保存，并在详情、历史列表和快速粘贴里显示成网格。普通文本仍按文本显示。Excel 随后只留下预览图时，不会再记成另一条图片；粘贴回去仍是带格式的单元格，文本格式的数字保持文本，日期和时间保持原格式。带有富文本或 HTML 的记录，可以改为「粘贴为纯文本」或「复制为纯文本」，只留下原来的文字。已经是纯文本的记录、只有文件链接的复制，以及图片，不提供这两项。分类和语法识别仍可能有误，可通过语言选择调整显示。
 
 ## 界面一览
 
-以下主窗口与 v0.1.6 相同，截图仍由当时的真实应用组件生成。表格操作在右键菜单和详情里，这些图没有展示。全部使用演示数据，不包含个人剪贴历史。图片外部的白色留白仅用于文档展示。
+以下主窗口与 v0.1.6 相同，截图仍由当时的真实应用组件生成。表格网格，以及右键菜单和详情里的表格操作，这些图没有展示。全部使用演示数据，不包含个人剪贴历史。图片外部的白色留白仅用于文档展示。
 
 ### 快速粘贴与菜单栏
 
@@ -83,9 +83,9 @@
 
 | 你的 Mac | 安装包 |
 | --- | --- |
-| Apple 芯片 | [ClipFlow-v0.1.9-arm64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.9/ClipFlow-v0.1.9-arm64.dmg) |
-| Intel 处理器 | [ClipFlow-v0.1.9-x86_64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.9/ClipFlow-v0.1.9-x86_64.dmg) |
-| 两种架构通用，或不确定芯片类型 | [ClipFlow-v0.1.9-universal.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.1.9/ClipFlow-v0.1.9-universal.dmg) |
+| Apple 芯片 | [ClipFlow-v0.2.0-arm64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.2.0/ClipFlow-v0.2.0-arm64.dmg) |
+| Intel 处理器 | [ClipFlow-v0.2.0-x86_64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.2.0/ClipFlow-v0.2.0-x86_64.dmg) |
+| 两种架构通用，或不确定芯片类型 | [ClipFlow-v0.2.0-universal.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.2.0/ClipFlow-v0.2.0-universal.dmg) |
 
 1. 打开 .dmg，将 **ClipFlow** 拖入“应用程序”。
 2. 从“应用程序”启动，点击菜单栏中的 ClipFlow 图标。
@@ -145,7 +145,7 @@
 
 构建目标覆盖 macOS 12，但旧系统实机与 Intel 实机仍需要更多验证。遇到问题，欢迎 [提交 Issue](https://github.com/FOREST227/ClipFlow/issues)，附上 macOS 版本、芯片型号、应用版本及复现步骤。分享截图前请遮住私人剪贴内容。
 
-- [更新说明](docs/releases/v0.1.9.md)
+- [更新说明](docs/releases/v0.2.0.md)
 - [开发、测试与打包](docs/development.md)
 - [离线渲染组件与许可证](Sources/ClipFlowApp/Renderer/NOTICE.txt)
 

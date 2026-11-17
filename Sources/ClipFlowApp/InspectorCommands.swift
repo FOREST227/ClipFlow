@@ -30,11 +30,82 @@ struct InspectorCommand: Equatable, Sendable {
     }
 }
 
+extension InspectorCommand.ID {
+    var anchor: String {
+        switch self {
+        case .copy: "copy"
+        case .paste: "paste"
+        case .pin: "pin"
+        case .saveSnippet: "save-snippet"
+        case .reveal: "reveal"
+        case .more: "more"
+        case .copyOriginal: "copy-original"
+        case .insertDown: "insert-down"
+        case .insertRight: "insert-right"
+        case .copyPlain: "copy-plain"
+        case .pastePlain: "paste-plain"
+        }
+    }
+}
+
+/// Detail-card actions in reading order, plus how many trailing commands are the icon cluster.
+struct InspectorActionSet: Equatable, Sendable {
+    var commands: [InspectorCommand]
+    /// Pin, save, reveal, and overflow stay on one line when that line fits.
+    var iconClusterCount: Int
+}
+
+/// One row in the overflow menu. The visible controls already cover the frequent actions.
+enum InspectorOverflowAction: Equatable, Sendable {
+    case openURL
+    case saveSnippet
+    case copyOriginal
+    case insertDown
+    case insertRight
+    case delete
+
+    var title: String {
+        switch self {
+        case .openURL: "访问链接"
+        case .saveSnippet: "存为片段"
+        case .copyOriginal: SpreadsheetClipboard.copyOnlyTitle
+        case .insertDown: SpreadsheetShift.down.menuTitle
+        case .insertRight: SpreadsheetShift.right.menuTitle
+        case .delete: "删除条目"
+        }
+    }
+
+    var isDestructive: Bool { self == .delete }
+}
+
 enum InspectorCommands {
     static func bar(pinned: Bool, canSaveSnippet: Bool, showsReveal: Bool, revealed: Bool) -> [InspectorCommand] {
-        var commands = [
-            InspectorCommand(id: .copy, title: "复制", symbol: "doc.on.doc", accessibilityLabel: "复制"),
+        actions(
+            pinned: pinned,
+            canSaveSnippet: canSaveSnippet,
+            showsReveal: showsReveal,
+            revealed: revealed,
+            hasRichText: false,
+            hasOriginalTypes: false,
+            offersExcelInsert: false
+        ).commands
+    }
+
+    /// Paste and copy, then secondary text actions, then the icon cluster.
+    static func actions(
+        pinned: Bool,
+        canSaveSnippet: Bool,
+        showsReveal: Bool,
+        revealed: Bool,
+        hasRichText: Bool,
+        hasOriginalTypes: Bool,
+        offersExcelInsert: Bool
+    ) -> InspectorActionSet {
+        let primary = [
             InspectorCommand(id: .paste, title: "粘贴", symbol: "arrow.down.doc", accessibilityLabel: "粘贴", isPrimary: true),
+            InspectorCommand(id: .copy, title: "复制", symbol: "doc.on.doc", accessibilityLabel: "复制")
+        ]
+        var icons = [
             InspectorCommand(
                 id: .pin,
                 title: "",
@@ -44,7 +115,7 @@ enum InspectorCommands {
             )
         ]
         if canSaveSnippet {
-            commands.append(InspectorCommand(
+            icons.append(InspectorCommand(
                 id: .saveSnippet,
                 title: "",
                 symbol: "plus.square.on.square",
@@ -53,15 +124,36 @@ enum InspectorCommands {
             ))
         }
         if showsReveal {
-            commands.append(InspectorCommand(
+            icons.append(InspectorCommand(
                 id: .reveal,
-                title: revealed ? "隐藏" : "显示",
+                title: "",
                 symbol: revealed ? "eye.slash" : "eye",
-                accessibilityLabel: revealed ? "隐藏" : "显示"
+                accessibilityLabel: revealed ? "隐藏" : "显示",
+                help: revealed ? "隐藏" : "显示"
             ))
         }
-        commands.append(InspectorCommand(id: .more, title: "", symbol: "ellipsis", accessibilityLabel: "更多操作", help: "更多操作"))
-        return commands
+        icons.append(InspectorCommand(id: .more, title: "", symbol: "ellipsis", accessibilityLabel: "更多操作", help: "更多操作"))
+        let secondary = spreadsheet(hasOriginalTypes: hasOriginalTypes, offersExcelInsert: offersExcelInsert)
+            + plainText(hasRichText: hasRichText)
+        return InspectorActionSet(commands: primary + secondary + icons, iconClusterCount: icons.count)
+    }
+
+    static func overflowActions(
+        canOpenURL: Bool,
+        canSaveSnippet: Bool,
+        hasOriginalTypes: Bool,
+        offersExcelInsert: Bool
+    ) -> [InspectorOverflowAction] {
+        var actions: [InspectorOverflowAction] = []
+        if canOpenURL { actions.append(.openURL) }
+        if canSaveSnippet { actions.append(.saveSnippet) }
+        if hasOriginalTypes { actions.append(.copyOriginal) }
+        if offersExcelInsert {
+            actions.append(.insertDown)
+            actions.append(.insertRight)
+        }
+        actions.append(.delete)
+        return actions
     }
 
     static func spreadsheet(hasOriginalTypes: Bool, offersExcelInsert: Bool) -> [InspectorCommand] {
@@ -132,11 +224,12 @@ struct InspectorCommandFace: View {
                 Text(command.title)
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
+                    .truncationMode(.tail)
             }
         }
         .foregroundStyle(foreground)
         .padding(.horizontal, command.title.isEmpty ? 10 : 12)
-        .frame(minWidth: 32, minHeight: ClipFlowLayout.controlHeight)
+        .frame(minWidth: 32, minHeight: ClipFlowLayout.controlHeight, maxHeight: ClipFlowLayout.controlHeight)
         .background(fill, in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous)
@@ -159,7 +252,6 @@ struct InspectorCommandButton: View {
             InspectorCommandFace(command: command, fill: fill, foreground: foreground, border: border)
         }
         .buttonStyle(.plain)
-        .fixedSize(horizontal: true, vertical: true)
         .help(command.help ?? command.accessibilityLabel)
         .accessibilityLabel(command.accessibilityLabel)
     }

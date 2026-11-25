@@ -172,14 +172,6 @@ final class DocumentationScreenshotTests: XCTestCase {
             size: NSSize(width: QuickPastePanelLayout.floatingCarouselWidth + 24,
                          height: QuickPastePanelLayout.floatingCarouselHeight + 24),
             name: "quick-paste-fan")
-        let quickPasteChrome: CGFloat = 12
-        let quickPasteSize = NSSize(
-            width: QuickPastePanelLayout.panelWidth + quickPasteChrome * 2,
-            height: QuickPastePanelLayout.panelHeight + quickPasteChrome * 2)
-        try export(QuickPastePanelView(store: store, preferredTargetName: "Xcode",
-            onPaste: { _ in }, onOpenLibrary: {}, onClose: {})
-                .padding(quickPasteChrome).background(backdrop),
-            size: quickPasteSize, name: "quick-paste")
         // NSPopover's compositor-owned edge is not included by cacheDisplay.
         // Supply its rounded presentation frame around the unmodified app content.
         let menuHeight = ceil(NSHostingController(rootView: MenuBarView(store: store)

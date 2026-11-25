@@ -296,7 +296,6 @@ struct QuickPasteFanDeckView: View {
     let onInspect: (ClipboardItem) -> Void
     let onOpenLibrary: () -> Void
     let onToggleSearch: () -> Void
-    var onSwitchToList: (() -> Void)? = nil
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -602,16 +601,6 @@ struct QuickPasteFanDeckView: View {
 
             if items.count > 1 {
                 floatingPagerPill
-            }
-
-            if let onSwitchToList {
-                FloatingDockIconButton(
-                    systemName: "text.quote",
-                    isActive: false,
-                    accessibilityLabel: "常用片段与列表",
-                    helpText: "常用片段与列表视图 (⌃→)",
-                    action: onSwitchToList
-                )
             }
 
             FloatingDockIconButton(

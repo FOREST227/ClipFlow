@@ -3,9 +3,7 @@ import SwiftUI
 struct QuickPastePanelHeader: View {
     let preferredTargetName: String?
     let palette: ClipFlowPalette
-    var onSwitchToFan: (() -> Void)? = nil
     let onClose: () -> Void
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack {
@@ -22,25 +20,6 @@ struct QuickPastePanelHeader: View {
             }
 
             Spacer()
-
-            if let onSwitchToFan {
-                Button(action: onSwitchToFan) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "rectangle.on.rectangle.angled")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("轮播")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
-                    .padding(.horizontal, 8)
-                    .frame(height: 22)
-                    .background(palette.secondaryButtonFill, in: Capsule(style: .continuous))
-                    .overlay(Capsule(style: .continuous).strokeBorder(palette.border, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .help("切换到扇形叠卡轮播")
-                .accessibilityLabel("切换到扇形叠卡轮播")
-            }
 
             Button(action: onClose) {
                 Image(systemName: "xmark")

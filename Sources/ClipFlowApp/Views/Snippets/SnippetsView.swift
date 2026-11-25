@@ -334,7 +334,8 @@ private struct SnippetRow: View {
             .fixedSize()
             .accessibilityLabel("\(snippet.title)的操作")
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, 22)
+        .padding(.trailing, 12)
         .padding(.vertical, 10)
         .background(CardSelectionChrome(isSelected: isSelected, tint: ClipCategory.all.tint, palette: palette))
         .accessibilityElement(children: .contain)

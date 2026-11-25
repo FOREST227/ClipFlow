@@ -7,7 +7,9 @@ struct FolioHeaderBar: View {
     let palette: ClipFlowPalette
     var reservesTrafficLights = false
     var showsInlineCategoryStrip = false
+    var isBlocked = false
     var onToggleEdgeDock: (() -> Void)? = nil
+    var onSearchFocusRequested: (() -> Void)? = nil
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -22,18 +24,22 @@ struct FolioHeaderBar: View {
         searchFocus: LibrarySearchFocusModel? = nil,
         reservesTrafficLights: Bool = false,
         showsInlineCategoryStrip: Bool = false,
-        onToggleEdgeDock: (() -> Void)? = nil
+        isBlocked: Bool = false,
+        onToggleEdgeDock: (() -> Void)? = nil,
+        onSearchFocusRequested: (() -> Void)? = nil
     ) {
         self.store = store
         self.palette = palette
         self.searchFocus = searchFocus ?? .inactive
         self.reservesTrafficLights = reservesTrafficLights
         self.showsInlineCategoryStrip = showsInlineCategoryStrip
+        self.isBlocked = isBlocked
         self.onToggleEdgeDock = onToggleEdgeDock
+        self.onSearchFocusRequested = onSearchFocusRequested
     }
 
     private var canClaimSearchFocus: Bool {
-        isEnabled && store.startupPermissionReport == nil
+        isEnabled && !isBlocked && store.startupPermissionReport == nil
     }
 
     var body: some View {
@@ -139,7 +145,10 @@ struct FolioHeaderBar: View {
             }
         }
         .onAppear(perform: claimRequestedFocus)
-        .onChangeBackward(of: searchFocus.requestID) { claimRequestedFocus() }
+        .onChangeBackward(of: searchFocus.requestID) {
+            onSearchFocusRequested?()
+            claimRequestedFocus()
+        }
         .onChangeBackward(of: canClaimSearchFocus) {
             if canClaimSearchFocus {
                 claimRequestedFocus()

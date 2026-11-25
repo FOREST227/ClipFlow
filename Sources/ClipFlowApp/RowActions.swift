@@ -328,6 +328,9 @@ final class ListKeyCommandView: NSView {
         // With Full Keyboard Access, Space activates the focused control.
         if command == .toggleDetails, editor == nil, window.firstResponder !== window,
            NSApp.isFullKeyboardAccessEnabled { return false }
+        let previous = LibrarySearchFocus.eventWindow
+        LibrarySearchFocus.eventWindow = window
+        defer { LibrarySearchFocus.eventWindow = previous }
         return onCommand(command)
     }
 

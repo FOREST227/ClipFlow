@@ -64,6 +64,11 @@ final class ClipFlowRuntime: NSObject {
         pasteService.paste(item, preferredTarget: lastExternalApp)
     }
 
+    func pasteNextFromStack() {
+        guard let next = store.pasteStack.popNext(from: store.items) else { return }
+        paste(next)
+    }
+
     func pastePlainText(_ item: ClipboardItem) {
         hudController.hide()
         pasteService.paste(item, preferredTarget: lastExternalApp, plainText: true)

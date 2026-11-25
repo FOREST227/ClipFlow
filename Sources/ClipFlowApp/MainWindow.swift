@@ -101,6 +101,8 @@ final class SettingsDraft: ObservableObject {
 final class MainWindowNavigation: ObservableObject {
     @Published private(set) var page: MainWindowPage
     @Published private(set) var loadedPages: Set<MainWindowPage>
+    @Published var isEdgeDocked = false
+    @Published var onToggleEdgeDock: (() -> Void)?
     let settingsDraft: SettingsDraft
     let searchFocus = LibrarySearchFocusModel()
     /// Used to present the editor on first appearance. Nil in normal use.
@@ -139,7 +141,6 @@ final class MainWindowNavigation: ObservableObject {
         settingsDraft.section = category
         select(.settings)
     }
-
 }
 
 @MainActor
@@ -148,7 +149,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let store: ClipFlowStore
     var controlsFollowSystem = false
     var isPositioningControls = false
+    private var undockedFrame: NSRect?
+    private(set) var edgePeekPanel: NSPanel?
     static let titlebarHeight = NSWindow.frameRect(forContentRect: .zero, styleMask: .titled).height
+    static let edgePeekVisibleWidth: CGFloat = 24
+    static let edgePeekHeight: CGFloat = 136
 
     init(store: ClipFlowStore, locale: Locale, initialPage: MainWindowPage = .history) {
         self.store = store
@@ -163,26 +168,31 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.isMovableByWindowBackground = true
         window.identifier = NSUserInterfaceItemIdentifier("ClipFlowMainWindow")
         window.setContentSize(NSSize(width: ClipFlowLayout.libraryWidth, height: ClipFlowLayout.libraryHeight))
-        window.contentMinSize = NSSize(width: ClipFlowLayout.libraryWidth, height: ClipFlowLayout.libraryMinHeight)
+        window.contentMinSize = NSSize(width: ClipFlowLayout.libraryMinWidth, height: ClipFlowLayout.libraryMinHeight)
         window.contentMaxSize = NSSize(width: ClipFlowLayout.libraryMaxWidth, height: .greatestFiniteMagnitude)
         window.center()
         window.isReleasedWhenClosed = false
         window.isRestorable = false
-        // Reuse the history window position; do not restore a second settings window.
-        window.setFrameAutosaveName("ClipFlowLibraryWindow")
+        window.setFrameAutosaveName("ClipFlowFolioWindow")
         let restored = window.contentRect(forFrameRect: window.frame).size
         window.setContentSize(NSSize(
-            width: min(max(restored.width, ClipFlowLayout.libraryWidth), ClipFlowLayout.libraryMaxWidth),
+            width: min(max(restored.width, ClipFlowLayout.libraryMinWidth), ClipFlowLayout.libraryMaxWidth),
             height: max(ClipFlowLayout.libraryMinHeight, restored.height)))
         super.init(window: window)
         window.delegate = self
         window.collectionBehavior.insert(.fullScreenPrimary)
+        navigation.onToggleEdgeDock = { [weak self] in
+            self?.toggleEdgeDock()
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func show(page: MainWindowPage) {
+        if navigation.isEdgeDocked {
+            setEdgeDocked(false, animated: true)
+        }
         navigation.select(page)
         guard let window else { return }
         window.makeFirstResponder(nil)
@@ -198,8 +208,99 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    func toggleEdgeDock() {
+        setEdgeDocked(!navigation.isEdgeDocked, animated: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+    }
+
+    func setEdgeDocked(_ docked: Bool, animated: Bool) {
+        guard let window, navigation.isEdgeDocked != docked else { return }
+        let screenFrame = (window.screen ?? NSScreen.main)?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+
+        if docked {
+            undockedFrame = window.frame
+            navigation.isEdgeDocked = true
+            let peekY = min(
+                max(window.frame.midY - Self.edgePeekHeight / 2, screenFrame.minY + 32),
+                screenFrame.maxY - Self.edgePeekHeight - 32
+            )
+            let peekFrame = NSRect(
+                x: screenFrame.maxX - Self.edgePeekVisibleWidth,
+                y: peekY,
+                width: Self.edgePeekVisibleWidth,
+                height: Self.edgePeekHeight
+            )
+            window.orderOut(nil)
+            showEdgePeekPanel(at: peekFrame, animated: animated)
+        } else {
+            hideEdgePeekPanel()
+            navigation.isEdgeDocked = false
+            let fallbackOrigin = NSPoint(
+                x: max(screenFrame.minX + 24, screenFrame.maxX - window.frame.width - 28),
+                y: window.frame.origin.y
+            )
+            let target = undockedFrame ?? NSRect(origin: fallbackOrigin, size: window.frame.size)
+            window.setFrame(target, display: true)
+            setTrafficLightsHidden(false)
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            scheduleWindowControlLayout()
+        }
+    }
+
+    private func showEdgePeekPanel(at frame: NSRect, animated: Bool) {
+        hideEdgePeekPanel()
+        let panel = NSPanel(
+            contentRect: frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = .floating
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.contentView = NSHostingView(
+            rootView: ScreenEdgePeekStrip(
+                store: store,
+                pasteStack: store.pasteStack
+            ) { [weak self] in
+                self?.setEdgeDocked(false, animated: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+            }
+        )
+        panel.setFrame(frame, display: true)
+        if animated { panel.alphaValue = 0 }
+        panel.orderFrontRegardless()
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.16
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+            }
+        }
+        edgePeekPanel = panel
+    }
+
+    private func hideEdgePeekPanel() {
+        guard let panel = edgePeekPanel else { return }
+        panel.orderOut(nil)
+        panel.close()
+        edgePeekPanel = nil
+    }
+
+    private func setTrafficLightsHidden(_ hidden: Bool) {
+        guard let window else { return }
+        for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(type)?.isHidden = hidden
+        }
+    }
+
     func windowWillClose(_ notification: Notification) {
         store.endShortcutRecording()
+        hideEdgePeekPanel()
+        navigation.isEdgeDocked = false
         window?.orderOut(nil)
     }
 }
@@ -212,33 +313,67 @@ private struct MainWindowView: View {
     let locale: Locale
 
     var body: some View {
-        HStack(spacing: 0) {
-            MainSidebarView(navigation: navigation, draft: navigation.settingsDraft)
-                .padding(.leading, WindowChrome.cardLeading)
-                .padding(.top, WindowChrome.cardTop)
-                .padding(.bottom, WindowChrome.cardBottom)
-                .ignoresSafeArea(.container, edges: .top)
-            ZStack {
-                if navigation.loadedPages.contains(.settings) {
-                    SettingsView(showsBackground: false, store: store, draft: navigation.settingsDraft)
+        ZStack(alignment: .leading) {
+            HStack(spacing: 0) {
+                // Concept 2: Protruding Morandi Stationery Spine Index Tabs
+                FolioSpineTabsView(store: store, navigation: navigation)
+                    .padding(.leading, 6)
+                    .ignoresSafeArea(.container, edges: .top)
+                    .zIndex(2)
+
+                // Inner Folio Sheet seamlessly fused with active spine tab
+                ZStack {
+                    if navigation.loadedPages.contains(.settings) {
+                        SettingsView(
+                            showsBackground: false,
+                            reservesTrafficLights: true,
+                            store: store,
+                            draft: navigation.settingsDraft,
+                            onSelectHistory: { navigation.select(.history) },
+                            onToggleEdgeDock: navigation.onToggleEdgeDock
+                        )
                         .modifier(PageMotion(isSelected: navigation.page == .settings,
-                            hiddenOffset: 12, reduceMotion: reduceMotion))
-                }
-                if navigation.loadedPages.contains(.history) {
-                    ContentView(showsBackground: false, showsPermissionOverlay: false, store: store)
+                            hiddenOffset: 10, reduceMotion: reduceMotion))
+                    }
+                    if navigation.loadedPages.contains(.history) {
+                        ContentView(
+                            showsBackground: false,
+                            showsPermissionOverlay: false,
+                            reservesTrafficLights: true,
+                            store: store,
+                            onToggleEdgeDock: navigation.onToggleEdgeDock
+                        )
                         .environment(\.librarySearchFocus, navigation.searchFocus)
                         .modifier(PageMotion(isSelected: navigation.page == .history,
-                            hiddenOffset: -12, reduceMotion: reduceMotion))
-                }
-                if navigation.loadedPages.contains(.snippets) {
-                    SnippetsView(store: store, initialEditor: navigation.initialSnippetEditor)
+                            hiddenOffset: -10, reduceMotion: reduceMotion))
+                    }
+                    if navigation.loadedPages.contains(.snippets) {
+                        SnippetsView(
+                            reservesTrafficLights: true,
+                            store: store,
+                            initialEditor: navigation.initialSnippetEditor,
+                            onToggleEdgeDock: navigation.onToggleEdgeDock
+                        )
                         .modifier(PageMotion(isSelected: navigation.page == .snippets,
-                            hiddenOffset: 12, reduceMotion: reduceMotion))
+                            hiddenOffset: 10, reduceMotion: reduceMotion))
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(FolioTheme.folioPage(for: colorScheme))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(FolioTheme.hairline(for: colorScheme), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.28 : 0.05), radius: 12, y: 4)
+                .padding(.top, 6)
+                .padding(.bottom, 8)
+                .padding(.trailing, 8)
+                .ignoresSafeArea(.container, edges: .top)
+                .zIndex(1)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // Do not clip the detail scrim to the safe-area content rectangle:
-            // it must extend behind the transparent titlebar above this pane.
         }
         .blur(radius: store.startupPermissionReport != nil ? ClipFlowMotion.backgroundDefocusRadius : 0)
         .allowsHitTesting(store.startupPermissionReport == nil)
@@ -252,10 +387,8 @@ private struct MainWindowView: View {
             .allowsHitTesting(false)
         }
         .background(WindowChromeAnchor())
-        .frame(minWidth: ClipFlowLayout.libraryWidth, idealWidth: ClipFlowLayout.libraryWidth,
+        .frame(minWidth: 0, idealWidth: ClipFlowLayout.libraryWidth,
             maxWidth: ClipFlowLayout.libraryMaxWidth,
-            // This frame is laid out below the transparent titlebar, whose inset the
-            // hosting view adds on top when it derives the window's minimum size.
             minHeight: ClipFlowLayout.libraryMinHeight - MainWindowController.titlebarHeight)
         .overlay {
             if let report = store.startupPermissionReport {
@@ -277,6 +410,57 @@ private struct MainWindowView: View {
     }
 }
 
+/// Sleek floating right-edge bookmark ear (`24×136pt`) shown when the Folio window is edge-docked.
+private struct ScreenEdgePeekStrip: View {
+    @ObservedObject var store: ClipFlowStore
+    @ObservedObject var pasteStack: PasteStackState
+    let onExpand: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Button(action: onExpand) {
+                VStack(spacing: 7) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: ClipFlowType.mono, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.92))
+                    if !pasteStack.queuedIDs.isEmpty {
+                        Text("\(pasteStack.queuedIDs.count)")
+                            .font(.system(size: ClipFlowType.mono, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white)
+                    }
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.white.opacity(0.55))
+                        .frame(width: 3, height: 32)
+                }
+                .frame(width: isHovered ? 24 : 20, height: 128)
+                .background(
+                    FolioSpineTabShape(radius: 9)
+                        .fill(FolioTheme.primaryAccent(for: colorScheme))
+                )
+                .overlay(
+                    FolioSpineTabOpenBorder(radius: 9)
+                        .stroke(Color.white.opacity(0.22), lineWidth: 1)
+                )
+                .contentShape(FolioSpineTabShape(radius: 9))
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering in
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
+                    isHovered = hovering
+                }
+            }
+            .help("点击展开 ClipFlow 活页夹（\(store.items.count) 条）")
+            .accessibilityLabel("展开 ClipFlow 活页夹")
+        }
+        .frame(width: MainWindowController.edgePeekVisibleWidth, height: MainWindowController.edgePeekHeight)
+        .background(Color.clear)
+    }
+}
+
 /// Keep page identity (and scroll position) stable while retargeting a short fade.
 private struct PageMotion: ViewModifier {
     let isSelected: Bool
@@ -291,70 +475,5 @@ private struct PageMotion: ViewModifier {
             .disabled(!isSelected)
             .accessibilityHidden(!isSelected)
             .animation(reduceMotion ? nil : (isSelected ? ClipFlowMotion.pageSwitch : ClipFlowMotion.pageExit), value: isSelected)
-    }
-}
-
-private struct MainSidebarView: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @ObservedObject var navigation: MainWindowNavigation
-    @ObservedObject var draft: SettingsDraft
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            navigationButton("剪贴历史", icon: "rectangle.stack", hint: "打开剪贴历史",
-                selected: navigation.page == .history) {
-                navigation.select(.history)
-            }
-            navigationButton("片段", icon: "text.quote", hint: "打开常用片段",
-                selected: navigation.page == .snippets) {
-                navigation.select(.snippets)
-            }
-            Spacer(minLength: 12)
-            Text("设置")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
-                .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
-                .padding(.horizontal, 10)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("设置")
-                .accessibilityAddTraits(.isHeader)
-            ForEach(SettingsCategory.allCases) { category in
-                navigationButton(category.rawValue, icon: category.icon,
-                    hint: "打开\(category.rawValue)设置",
-                    selected: navigation.page == .settings && draft.section == category) {
-                    navigation.selectSettings(category)
-                }
-            }
-        }
-        .padding(WindowChrome.cardPadding)
-        .frame(width: 128)
-        .frame(maxHeight: .infinity)
-        .background(CleanGlassBackground(cornerRadius: ClipFlowLayout.rowRadius))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("主导航")
-    }
-
-    private func navigationButton(_ title: String, icon: String, hint: String, selected: Bool,
-        action: @escaping () -> Void) -> some View {
-        Button {
-            NSApp.keyWindow?.makeFirstResponder(nil)
-            action()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: icon).font(.system(size: 13, weight: .medium)).frame(width: 18)
-                    .accessibilityHidden(true)
-                Text(title).font(.system(size: 12, weight: selected ? .semibold : .medium)).lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(selected ? Color.white : Color.primary.opacity(0.8))
-            .padding(.horizontal, 10).frame(height: 36)
-            .background(selected ? ClipCategory.all.solid : .clear,
-                in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityHint(hint)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }

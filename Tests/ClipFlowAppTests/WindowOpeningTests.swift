@@ -12,13 +12,15 @@ final class WindowOpeningTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
         let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        store.libraryViewMode = .list
         let controller = QuickPastePanelController(store: store, onPaste: { _ in }, onOpenLibrary: {})
         controller.show(anchorAt: NSPoint(x: 400, y: 400), preferredTarget: nil)
         defer { controller.hide() }
         let panel = try XCTUnwrap(NSApp.windows.compactMap { $0 as? QuickPastePanel }.first { $0.isVisible })
         XCTAssertFalse(panel.styleMask.contains(.nonactivatingPanel))
         XCTAssertTrue(panel.canBecomeKey)
-        XCTAssertTrue(panel.hasShadow)
+        // Shell-less floating carousel renders shadows per-card rather than on an opaque outer panel.
+        XCTAssertFalse(panel.hasShadow)
         XCTAssertNotNil(panel.contentView)
     }
 
@@ -32,6 +34,7 @@ final class WindowOpeningTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        store.libraryViewMode = .list
         for index in 0..<80 {
             store.ingestCopiedText("Opening test \(index)", sourceApp: "Test", sourceBundleID: nil)
         }

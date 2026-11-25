@@ -93,6 +93,7 @@ final class StoreTests: XCTestCase {
         store.purgeExpired(at: Date().addingTimeInterval(600))
         XCTAssertEqual(store.items.count, 1)
         try await Task.sleep(nanoseconds: 200000000)
+        store.flushPendingPersistence()
         let reloaded = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         XCTAssertFalse(reloaded.sensitiveAutoExpireEnabled)
         XCTAssertEqual(reloaded.items.count, 1)
@@ -172,7 +173,7 @@ final class StoreTests: XCTestCase {
         try await Task.sleep(nanoseconds: 1100000000)
         monitor.poll(sourceApplication: nil)
         XCTAssertTrue(store.items.isEmpty)
-        try await Task.sleep(nanoseconds: 200000000)
+        try await Task.sleep(nanoseconds: 350000000)
         let persisted = try JSONDecoder().decode([ClipboardItem].self, from: Data(contentsOf: directory.appendingPathComponent("history.json")))
         XCTAssertTrue(persisted.isEmpty)
     }

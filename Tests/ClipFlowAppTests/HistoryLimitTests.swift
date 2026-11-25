@@ -285,6 +285,7 @@ final class HistoryLimitStoreTests: XCTestCase {
         XCTAssertLessThan(saveMs, 150, "Saving 1000 rows stalled the main thread")
 
         store.searchText = ""
+        store.libraryViewMode = .list
         _ = NSApplication.shared
         let controller = MainWindowController(store: store, locale: Locale(identifier: "zh-Hans"))
         let window = try XCTUnwrap(controller.window)

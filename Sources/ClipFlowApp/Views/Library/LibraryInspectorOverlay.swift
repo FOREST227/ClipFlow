@@ -27,6 +27,7 @@ struct LibraryInspectorOverlay: View {
     let maxHeight: CGFloat
     var contentWidth: CGFloat = 438
     var compactShadow = false
+    var useBinderExtractMotion = false
     var onPasteAction: (() -> Void)? = nil
     var onPastePlainAction: (() -> Void)? = nil
     var sourceRectInWindow: CGRect? = nil
@@ -60,22 +61,36 @@ struct LibraryInspectorOverlay: View {
     @ViewState private var showsInfo = false
     @ViewState private var copyFeedback: String?
     @ViewState private var measuredFooterHeight: CGFloat = 0
+    @ViewState private var confirmsDelete = false
+
+    private var unifiedWellColor: Color {
+        textColorScheme == .dark
+            ? Color(red: 0.110, green: 0.122, blue: 0.153)
+            : Color(red: 0.965, green: 0.957, blue: 0.933)
+    }
+
+    private var unifiedWellNSColor: NSColor {
+        textColorScheme == .dark
+            ? NSColor(srgbRed: 0.110, green: 0.122, blue: 0.153, alpha: 1)
+            : NSColor(srgbRed: 0.965, green: 0.957, blue: 0.933, alpha: 1)
+    }
 
     // Explicit API: Swift 6.2 gives the synthesized memberwise initializer
     // private access because of the stored DynamicProperty preferences.
     init(item: ClipboardItem, store: ClipFlowStore, palette: ClipFlowPalette,
          maxHeight: CGFloat, contentWidth: CGFloat = 438, compactShadow: Bool = false,
+         useBinderExtractMotion: Bool = false,
          onPasteAction: (() -> Void)? = nil, onPastePlainAction: (() -> Void)? = nil,
          sourceRectInWindow: CGRect? = nil,
          motion: InspectorMotionProgress? = nil,
          preferMarkdownPreview: Bool = false, onClose: @escaping () -> Void) {
-        // Documentation screenshots open Markdown on 预览. The pill is not an AppKit control.
         self.item = item
         _store = ObservedObject(wrappedValue: store)
         self.palette = palette
         self.maxHeight = maxHeight
         self.contentWidth = contentWidth
         self.compactShadow = compactShadow
+        self.useBinderExtractMotion = useBinderExtractMotion
         self.onPasteAction = onPasteAction
         self.onPastePlainAction = onPastePlainAction
         self.sourceRectInWindow = sourceRectInWindow
@@ -126,15 +141,32 @@ struct LibraryInspectorOverlay: View {
             let drawer = InspectorDrawerLayout.resolve(progress: 1,
                 sourceRectInWindow: sourceRectInWindow, destinationRectInWindow: destination,
                 footerHeight: footerHeight, reduceMotion: true)
-            let transform = InspectorShellTransform.resolve(progress: frame.progress,
-                sourceRectInWindow: sourceRectInWindow, destinationRectInWindow: destination,
-                reduceMotion: reduceMotion)
+            let p = min(1, max(0, frame.progress))
+            let easeOut = 1 - pow(1 - p, 3)
+            let transform: InspectorShellTransform = useBinderExtractMotion
+                ? InspectorShellTransform(
+                    scaleX: reduceMotion ? 1 : (0.945 + 0.055 * easeOut),
+                    scaleY: reduceMotion ? 1 : (0.945 + 0.055 * easeOut),
+                    offset: CGSize(width: 0, height: reduceMotion ? 0 : 48 * (1 - easeOut))
+                )
+                : InspectorShellTransform.resolve(progress: frame.progress,
+                    sourceRectInWindow: sourceRectInWindow, destinationRectInWindow: destination,
+                    reduceMotion: reduceMotion)
             let coverRect = CGRect(x: drawer.shellRect.minX, y: drawer.coverTop,
                 width: drawer.shellRect.width, height: drawer.coverHeight)
-            let coverOpacity = reduceMotion ? frame.progress : min(1, frame.progress / 0.10)
+            let coverOpacity = useBinderExtractMotion
+                ? (reduceMotion ? p : min(1, p * 3.0))
+                : (reduceMotion ? frame.progress : min(1, frame.progress / 0.10))
+            let headerOpacity = useBinderExtractMotion ? coverOpacity : frame.chromeOpacity
+            let bodyOpacity = useBinderExtractMotion ? coverOpacity : frame.contentOpacity
+            let bodyOffsetY = useBinderExtractMotion ? 0 : frame.contentOffsetY
 
             return ZStack(alignment: .topLeading) {
                 DetailGlassBackground(cornerRadius: ClipFlowLayout.overlayRadius, compactShadow: compactShadow)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ClipFlowLayout.overlayRadius, style: .continuous)
+                            .strokeBorder(FolioTheme.primaryAccent(for: textColorScheme).opacity(0.45), lineWidth: 1.25)
+                    )
                     .frame(width: drawer.shellRect.width, height: drawer.shellRect.height)
                     .position(x: drawer.shellRect.midX, y: drawer.shellRect.midY)
                     .opacity(coverOpacity)
@@ -143,11 +175,11 @@ struct LibraryInspectorOverlay: View {
                     header
                         .padding(20)
                         .frame(width: contentWidth, alignment: .topLeading)
-                        .opacity(frame.chromeOpacity)
+                        .opacity(headerOpacity)
                     VStack(alignment: .leading, spacing: 8) { preview }
                         .frame(width: max(1, contentWidth - 40), height: bodyHeight, alignment: .top)
-                        .opacity(frame.contentOpacity)
-                        .offset(x: 20, y: drawerHeaderHeight + frame.contentOffsetY)
+                        .opacity(bodyOpacity)
+                        .offset(x: 20, y: drawerHeaderHeight + bodyOffsetY)
                 }
                 .frame(width: contentWidth, height: height, alignment: .topLeading)
                 .mask(Path(roundedRect: drawer.shellRect, cornerRadius: ClipFlowLayout.overlayRadius))
@@ -173,7 +205,7 @@ struct LibraryInspectorOverlay: View {
                     .background(GeometryReader { proxy in
                         Color.clear.preference(key: InspectorFooterHeightKey.self, value: proxy.size.height + ClipFlowLayout.space16)
                     })
-                    .opacity(frame.contentOpacity)
+                    .opacity(bodyOpacity)
                     .allowsHitTesting(frame.contentOpacity > 0.8)
                     .accessibilityHidden(frame.contentOpacity <= 0.8)
                     .frame(width: max(1, contentWidth - 24), alignment: .topLeading)
@@ -190,7 +222,7 @@ struct LibraryInspectorOverlay: View {
             .offset(x: transform.offset.width, y: transform.offset.height)
         }
         .frame(width: contentWidth, height: height, alignment: .topLeading)
-        .opacity(sourceRectInWindow == nil || destinationRectInWindow.width > 0 ? 1 : 0)
+        .opacity(useBinderExtractMotion || sourceRectInWindow == nil || destinationRectInWindow.width > 0 ? 1 : 0)
         .background(InspectorFrameReader { rect in
             // Ignore transforms that only move the visual shell; the layout frame is the destination.
             if destinationRectInWindow != rect { destinationRectInWindow = rect }
@@ -202,12 +234,23 @@ struct LibraryInspectorOverlay: View {
             }
         }
         .onChangeBackward(of: item.id) {
-            showsInfo = false; copyFeedback = nil; showsMarkdownPreview = false; codeLanguage = "自动识别"
+            showsInfo = false; copyFeedback = nil; showsMarkdownPreview = false; codeLanguage = "自动识别"; confirmsDelete = false
+        }
+        .confirmationDialog("删除这条剪贴卡片？", isPresented: $confirmsDelete, titleVisibility: .visible) {
+            Button("删除卡片", role: .destructive) {
+                store.delete(item.id)
+                onClose()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("「\(item.title)」将被永久移除，此操作不能撤销。")
         }
     }
 
     private var drawerHeader: some View {
             HStack(alignment: .top, spacing: ClipFlowLayout.space12) {
+                AppIconBadgeView(item: item, size: 28)
+                    .padding(.top, 2)
                 VStack(alignment: .leading, spacing: ClipFlowLayout.space4) {
                     HStack(spacing: ClipFlowLayout.space8) {
                         Text(heading)
@@ -236,29 +279,47 @@ struct LibraryInspectorOverlay: View {
     }
 
     @ViewBuilder private var drawerPreview: some View {
+            let displayText = item.isImage ? "" : store.displayFullText(for: item)
+            let preRendered: PreRenderedCode? = (!item.isImage && (!item.isSensitive || store.isRevealed(item)))
+                ? DetailTextPrewarmer.shared.cached(for: item, text: displayText, language: codeLanguage)
+                : nil
+
             if item.isImage {
-                let imageHeight = max(64, previewHeight)
+                let imageHeight = max(140, drawerBodyHeight - 8)
                 Group {
                     if (!item.isSensitive || store.isRevealed(item)), let url = store.imageURL(for: item) {
-                        ZoomableDetailImage(url: url, fillsHeight: true)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .clipShape(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
+                        ZoomableDetailImage(
+                            url: url,
+                            fillsHeight: false,
+                            placeholder: store.cachedImagePreview(for: item),
+                            canvasBackground: unifiedWellNSColor
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: imageHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
+                                .strokeBorder(FolioTheme.hairline(for: textColorScheme), lineWidth: 1)
+                        )
                     } else {
                         ClipThumbnailView(store: store, item: item, height: imageHeight,
                             cornerRadius: ClipFlowLayout.rowRadius,
-                            showsDimensionLabel: false, contentMode: .fit, insetPreview: false)
+                            showsDimensionLabel: false, contentMode: .fit, insetPreview: true)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .frame(height: imageHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else if let grid = tableGrid, showsTableGrid {
                 SpreadsheetGridView(grid: grid, style: .detail)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .frame(height: previewHeight)
                     .padding(.bottom, ClipFlowLayout.space8)
-                    .background(palette.rowFill,
+                    .background(unifiedWellColor,
                         in: RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
                     .clipShape(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
+                            .strokeBorder(FolioTheme.hairline(for: textColorScheme), lineWidth: 1)
+                    )
             } else if item.kind == .code || markdownAvailable {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -285,29 +346,51 @@ struct LibraryInspectorOverlay: View {
                             .labelsHidden().frame(maxWidth: 130)
                         }
                     }
-                    DetailTextRenderer(text: store.displayFullText(for: item),
-                        markdown: showsMarkdownPreview,
-                        language: markdownAvailable && item.kind != .code && codeLanguage == "自动识别" ? "markdown" : codeLanguage,
-                        dark: textColorScheme == .dark)
-                        .frame(height: max(64, previewHeight - 32))
-                        .clipShape(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
-                        .padding(.bottom, ClipFlowLayout.space8)
+                    let rendererHeight = max(64, previewHeight - 32)
+                    ZStack(alignment: .topLeading) {
+                        // Instant 0ms pre-rendered native underlay eliminates any WebView boot flash
+                        if let preRendered, showsMarkdownPreview, let blocks = preRendered.markdownBlocks, !blocks.isEmpty {
+                            NativeMarkdownDocumentView(blocks: blocks, dark: textColorScheme == .dark)
+                                .padding(14)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        } else if let preRendered {
+                            Text(textColorScheme == .dark ? preRendered.dark : preRendered.light)
+                                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                                .lineSpacing(4)
+                                .padding(14)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        }
+                        DetailTextRenderer(text: displayText,
+                            markdown: showsMarkdownPreview,
+                            language: markdownAvailable && item.kind != .code && codeLanguage == "自动识别" ? "markdown" : codeLanguage,
+                            dark: textColorScheme == .dark)
+                    }
+                    .frame(height: rendererHeight)
+                    .background(unifiedWellColor)
+                    .clipShape(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
+                            .strokeBorder(FolioTheme.hairline(for: textColorScheme), lineWidth: 1)
+                    )
+                    .padding(.bottom, ClipFlowLayout.space8)
                 }
             } else {
                 SoftEdgeScrollView(showsEdgeEffects: false) {
-                    Text(store.displayFullText(for: item))
+                    Text(displayText)
                         .font(.system(size: item.kind == .code ? 12 : 13, weight: .regular,
                             design: item.kind == .code || showsSpreadsheetText ? .monospaced : .default))
+                        .lineSpacing(4)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
+                        .padding(14)
                 }
                 .frame(height: previewHeight)
-                .padding(.bottom, ClipFlowLayout.space8)
-                .background(palette.rowFill,
-                    in: RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
+                .background(unifiedWellColor, in: RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
+                        .strokeBorder(FolioTheme.hairline(for: textColorScheme), lineWidth: 1)
+                )
             }
-
     }
 
     private var offersExcelInsert: Bool {
@@ -338,9 +421,9 @@ struct LibraryInspectorOverlay: View {
     private func commandButton(_ command: InspectorCommand, action: (() -> Void)? = nil) -> some View {
         InspectorCommandButton(
             command: command,
-            fill: command.isPrimary ? palette.primaryButtonFill : palette.rowFill,
+            fill: command.isPrimary ? FolioTheme.primaryAccent(for: textColorScheme) : palette.rowFill,
             foreground: command.isPrimary ? .white : Color.primary,
-            border: command.isPrimary ? .clear : palette.rowBorder,
+            border: command.isPrimary ? .clear : FolioTheme.hairline(for: textColorScheme),
             action: {
                 if let action { action() } else { perform(command) }
             }
@@ -438,6 +521,9 @@ struct LibraryInspectorOverlay: View {
 
     private var headerMetadata: String {
         var labels = [item.sourceApp, item.timeLabel]
+        if let dim = item.imageDimensionText, !labels.contains(dim) {
+            labels.append(dim)
+        }
         for label in item.labels where !label.isEmpty && !labels.contains(label) {
             labels.append(label)
         }

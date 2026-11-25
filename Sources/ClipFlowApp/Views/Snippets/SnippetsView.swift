@@ -44,8 +44,10 @@ struct SnippetEditorDraft: Identifiable, Equatable {
 }
 
 struct SnippetsView: View {
+    var reservesTrafficLights = false
     @ObservedObject var store: ClipFlowStore
     var initialEditor: SnippetEditorDraft?
+    var onToggleEdgeDock: (() -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
     @State private var editor: SnippetEditorDraft?
     @State private var selectedID: UUID?
@@ -58,28 +60,28 @@ struct SnippetsView: View {
 
     var body: some View {
         let palette = ClipFlowPalette.resolve(for: colorScheme)
-        LayoutSurface {
-            VStack(alignment: .leading, spacing: ClipFlowLayout.space12) {
-                header(palette: palette)
-                searchField(palette: palette)
-                Text(store.iCloudSyncEnabled
-                    ? "不会随历史条数清除，也不会自动过期。普通片段会写入文稿同步；从敏感记录保存的片段只留在本机。"
-                    : "不会随历史条数清除，也不会自动过期。开启文稿同步后，普通片段会一并同步；从敏感记录保存的片段只留在本机。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel("常用片段保留说明")
-                Divider()
-                if rows.isEmpty {
-                    emptyState
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    snippetList(palette: palette)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+        VStack(alignment: .leading, spacing: ClipFlowLayout.space12) {
+            header(palette: palette)
+            searchField(palette: palette)
+            Text(store.iCloudSyncEnabled
+                ? "不会随历史条数清除，也不会自动过期。普通片段会写入文稿同步；从敏感记录保存的片段只留在本机。"
+                : "不会随历史条数清除，也不会自动过期。开启文稿同步后，普通片段会一并同步；从敏感记录保存的片段只留在本机。")
+                .font(.system(size: 11))
+                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel("常用片段保留说明")
+            Divider()
+            if rows.isEmpty {
+                emptyState
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                snippetList(palette: palette)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(ClipFlowLayout.pageInset)
+        .padding(.horizontal, 16)
+        .padding(.top, reservesTrafficLights ? 8 : 14)
+        .padding(.bottom, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(item: $editor) { draft in
             SnippetEditorSheet(draft: draft, palette: palette) { editor = nil } onSave: { draft in
@@ -125,11 +127,16 @@ struct SnippetsView: View {
     }
 
     private func header(palette: ClipFlowPalette) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("常用片段").font(.system(size: 15, weight: .semibold))
-            Text("\(rows.count) 个")
-                .font(.system(size: 11))
-                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+        HStack(spacing: 10) {
+            if reservesTrafficLights {
+                Spacer().frame(width: 60)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("常用片段").font(.system(size: 14, weight: .semibold))
+                Text("\(rows.count) 个")
+                    .font(.system(size: 11))
+                    .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+            }
             Spacer(minLength: 8)
             Button {
                 editor = .creating()
@@ -140,6 +147,16 @@ struct SnippetsView: View {
             .buttonStyle(ClipFlowActionButtonStyle(fill: palette.primaryButtonFill, foreground: .white))
             .accessibilityLabel("新建片段")
             .accessibilityHint("填写标题和正文，保存后可反复粘贴")
+
+            if let onToggleEdgeDock {
+                Button(action: onToggleEdgeDock) {
+                    Image(systemName: "sidebar.trailing")
+                        .font(.system(size: ClipFlowType.meta, weight: .medium))
+                        .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+                }
+                .buttonStyle(FolioButtonStyle(prominence: .secondary, height: 30, horizontalPadding: 9, cornerRadius: 9))
+                .help("收起至屏幕右侧书签耳")
+            }
         }
     }
 

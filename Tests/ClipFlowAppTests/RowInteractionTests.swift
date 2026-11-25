@@ -317,11 +317,12 @@ final class RowInteractionTests: XCTestCase {
         let width: CGFloat = 454
         let minX = width - layout.trailingInset - layout.barSize.width
         let y = layout.topInset + 4
-        XCTAssertEqual(layout.buttonSize, CGSize(width: 28, height: 28))
+        XCTAssertEqual(layout.buttonSize, CGSize(width: 24, height: 22))
         XCTAssertFalse(LibraryCardAction.hoverActions.contains(.delete))
         XCTAssertEqual(layout.action(at: CGPoint(x: minX + 1, y: y), rowWidth: width), .copy)
         XCTAssertEqual(layout.action(at: CGPoint(x: minX + layout.padding + layout.buttonSize.width + layout.spacing + 4, y: y), rowWidth: width), .pin)
-        XCTAssertEqual(layout.action(at: CGPoint(x: minX + layout.barSize.width - 1, y: y), rowWidth: width), .pin)
+        XCTAssertEqual(layout.action(at: CGPoint(x: minX + layout.padding + 2 * (layout.buttonSize.width + layout.spacing) + 4, y: y), rowWidth: width), .queue)
+        XCTAssertEqual(layout.action(at: CGPoint(x: minX + layout.barSize.width - 1, y: y), rowWidth: width), .paste)
         XCTAssertNil(layout.action(at: CGPoint(x: minX - 1, y: y), rowWidth: width))
         XCTAssertNil(layout.action(at: CGPoint(x: width - 2, y: y), rowWidth: width))
         XCTAssertNil(layout.action(at: CGPoint(x: minX + 10, y: layout.topInset + layout.barSize.height + 1), rowWidth: width))

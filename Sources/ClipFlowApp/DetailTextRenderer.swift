@@ -62,16 +62,18 @@ enum DetailTextDocument {
 
     /// Reads a packaged renderer script. A missing bundle or file is logged and replaced
     /// with an empty script so the preview still shows plain text instead of crashing.
+    /// `moduleRoot` is evaluated lazily so packaged `.app` bundles never touch SwiftPM's resource bundle
+    /// (which traps if SwiftPM's `.bundle` is not copied alongside `Contents/Resources/Renderer`).
     static func load(
         name: String,
         installedRoot: URL?,
-        moduleRoot: URL?,
+        moduleRoot: @autoclosure () -> URL?,
         log: ((String) -> Void)? = nil
     ) -> String {
         if let installedRoot, let value = read(name, from: installedRoot) {
             return value
         }
-        if let moduleRoot, let value = read(name, from: moduleRoot) {
+        if let moduleRoot = moduleRoot(), let value = read(name, from: moduleRoot) {
             return value
         }
         let message = "Renderer resource \(name) is missing. Falling back to plain text."
@@ -279,6 +281,7 @@ struct DetailTextRenderer: NSViewRepresentable {
         let web = WKWebView(frame: .zero, configuration: configuration)
         web.navigationDelegate = context.coordinator
         web.underPageBackgroundColor = .clear
+        web.alphaValue = 0
         web.wantsLayer = true
         web.layer?.masksToBounds = true
         web.setAccessibilityLabel(markdown ? "Markdown 预览" : "代码内容")
@@ -290,11 +293,18 @@ struct DetailTextRenderer: NSViewRepresentable {
         web.layer?.masksToBounds = true
         guard context.coordinator.key != key else { return }
         context.coordinator.key = key
+        web.alphaValue = 0
         web.loadHTMLString(DetailTextDocument.html(text: text, markdown: markdown, language: language, dark: dark), baseURL: nil)
     }
     struct RenderKey: Equatable { let text: String; let markdown: Bool; let language: String; let dark: Bool }
     final class Coordinator: NSObject, WKNavigationDelegate {
         var key: RenderKey?
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            webView.alphaValue = 1
+        }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            webView.alphaValue = 1
+        }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
             if navigationAction.navigationType == .linkActivated,
                let url = navigationAction.request.url,

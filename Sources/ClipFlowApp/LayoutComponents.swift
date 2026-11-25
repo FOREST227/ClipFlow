@@ -16,8 +16,9 @@ enum ClipFlowLayout {
     static let rowRadius: CGFloat = 14
     static let overlayRadius: CGFloat = 22
     static let controlHeight: CGFloat = 32
-    static let libraryWidth: CGFloat = 620
-    static let libraryMaxWidth: CGFloat = 880
+    static let libraryWidth: CGFloat = 700
+    static let libraryMinWidth: CGFloat = 620
+    static let libraryMaxWidth: CGFloat = 960
     static let libraryHeight: CGFloat = 780
     static let libraryMinHeight: CGFloat = 560
     static let settingsWidth: CGFloat = libraryWidth
@@ -31,20 +32,9 @@ struct CleanGlassBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        let dark = colorScheme == .dark
-        let opaque = reduceTransparency || elevated
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        shape.fill(LinearGradient(colors: dark
-            ? [Color(red: 0.17, green: 0.19, blue: 0.23).opacity(opaque ? 1 : 0.94),
-               Color(red: 0.14, green: 0.16, blue: 0.20).opacity(opaque ? 1 : 0.88)]
-            : [Color.white.opacity(reduceTransparency ? 1 : (elevated ? 0.98 : 0.88)),
-               Color.white.opacity(reduceTransparency ? 1 : (elevated ? 0.96 : 0.62))],
-            startPoint: .topLeading, endPoint: .bottomTrailing))
-            .overlay(shape.strokeBorder(LinearGradient(colors: [
-                .white.opacity(dark ? 0.20 : 0.95),
-                .white.opacity(dark ? 0.04 : 0.35)
-            ], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
-            .shadow(color: .black.opacity(dark ? 0.12 : 0.035), radius: 8, y: 3)
+        shape.fill(elevated ? FolioTheme.deckCardFill(depth: 0, for: colorScheme) : FolioTheme.folioPage(for: colorScheme))
+            .overlay(shape.strokeBorder(FolioTheme.hairline(for: colorScheme), lineWidth: 1))
             .allowsHitTesting(false)
     }
 }
@@ -88,18 +78,16 @@ struct ClipFlowBrandMark: View {
 
     private var symbolFill: LinearGradient {
         LinearGradient(colors: usesAppPalette
-            ? [Color(red: 0.843, green: 0.686, blue: 0.486),
-               Color(red: 0.694, green: 0.714, blue: 0.835),
-               Color(red: 0.345, green: 0.580, blue: 0.871)]
+            ? [Color(red: 0.22, green: 0.42, blue: 0.34),
+               Color(red: 0.28, green: 0.49, blue: 0.41)]
             : [.white, .white], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     private var tileFill: LinearGradient {
         LinearGradient(colors: usesAppPalette
-            ? [Color(red: 0.98, green: 0.95, blue: 0.90),
-               Color(red: 0.93, green: 0.96, blue: 0.99),
-               Color(red: 0.95, green: 0.93, blue: 0.98)]
-            : [Color(red: 0.96, green: 0.72, blue: 0.42), ClipCategory.all.tint],
+            ? [Color(red: 0.94, green: 0.95, blue: 0.92),
+               Color(red: 0.89, green: 0.92, blue: 0.89)]
+            : [Color(red: 0.32, green: 0.48, blue: 0.40), ClipCategory.all.tint],
             startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
@@ -130,18 +118,29 @@ private struct ClipFlowActionButtonBody: View {
     let configuration: ButtonStyleConfiguration
     let fill: Color
     let foreground: Color
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous)
         configuration.label
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(foreground)
             .padding(.horizontal, ClipFlowLayout.space12)
             .frame(height: ClipFlowLayout.controlHeight)
-            .background(fill.opacity(configuration.isPressed ? 0.75 : 1),
-                        in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
+            .background(fill.opacity(configuration.isPressed ? 0.78 : 1), in: shape)
+            .overlay {
+                if isHovered && !configuration.isPressed {
+                    shape.fill(Color.primary.opacity(colorScheme == .dark ? 0.09 : 0.06))
+                }
+            }
+            .overlay(shape.strokeBorder(FolioTheme.hairline(for: colorScheme).opacity(isHovered ? 1 : 0.65), lineWidth: 1))
+            .offset(y: reduceMotion ? 0 : (configuration.isPressed ? 1 : (isHovered ? -1 : 0)))
             .scaleEffect(reduceMotion || !configuration.isPressed ? 1 : ClipFlowMotion.pressScale)
+            .animation(reduceMotion ? nil : .easeOut(duration: isHovered ? 0.15 : 0.12), value: isHovered)
             .animation(reduceMotion ? nil : ClipFlowMotion.press, value: configuration.isPressed)
+            .onHover { isHovered = $0 }
     }
 }
 

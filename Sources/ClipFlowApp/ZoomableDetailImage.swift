@@ -5,10 +5,12 @@ import SwiftUI
 struct ZoomableDetailImage: View {
     let url: URL
     var fillsHeight = false
+    var placeholder: NSImage? = nil
+    var canvasBackground: NSColor? = nil
     @StateObject private var pinch = DetailImagePinchBridge()
     @GestureState private var pinching = false
     var body: some View {
-        DetailImageCanvasView(url: url, fillsHeight: fillsHeight, pinch: pinch)
+        DetailImageCanvasView(url: url, fillsHeight: fillsHeight, placeholder: placeholder, canvasBackground: canvasBackground, pinch: pinch)
             .contentShape(Rectangle())
             .simultaneousGesture(MagnificationGesture(minimumScaleDelta: 0.001)
                 .updating($pinching) { _, active, _ in active = true }
@@ -37,10 +39,13 @@ final class DetailImagePinchBridge: ObservableObject {
 private struct DetailImageCanvasView: NSViewRepresentable {
     let url: URL
     let fillsHeight: Bool
+    let placeholder: NSImage?
+    let canvasBackground: NSColor?
     let pinch: DetailImagePinchBridge
     func makeNSView(context: Context) -> DetailImageCanvas {
         let view = DetailImageCanvas()
         view.fillsHeight = fillsHeight
+        view.canvasBackground = canvasBackground
         pinch.canvas = view
         return view
     }
@@ -48,8 +53,10 @@ private struct DetailImageCanvasView: NSViewRepresentable {
         pinch.canvas = view
         let fillChanged = view.fillsHeight != fillsHeight
         view.fillsHeight = fillsHeight
-        view.load(url)
-        if fillChanged { view.needsDisplay = true }
+        let bgChanged = view.canvasBackground != canvasBackground
+        view.canvasBackground = canvasBackground
+        view.load(url, placeholder: placeholder)
+        if fillChanged || bgChanged { view.needsDisplay = true }
     }
     static func dismantleNSView(_ view: DetailImageCanvas, coordinator: ()) { view.cancelLoading() }
 }
@@ -83,6 +90,7 @@ struct ImageViewport {
 final class DetailImageCanvas: NSView {
     private var image: NSImage?
     var fillsHeight = false
+    var canvasBackground: NSColor?
     var isImageReady: Bool { image != nil }
     private var url: URL?
     private var loading: Task<Void, Never>?
@@ -104,12 +112,13 @@ final class DetailImageCanvas: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func load(_ url: URL) {
+    func load(_ url: URL, placeholder: NSImage? = nil) {
         guard self.url != url else { return }
         loading?.cancel()
         loading = nil
         self.url = url
-        image = nil
+        // Show pre-warmed RAM thumbnail immediately so scrolling never flashes blank white while full-res decodes!
+        image = placeholder
         viewport.reset()
         needsDisplay = true
         loading = Task { [weak self] in
@@ -179,7 +188,7 @@ final class DetailImageCanvas: NSView {
         needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.textBackgroundColor.setFill()
+        (canvasBackground ?? NSColor.textBackgroundColor).setFill()
         bounds.fill()
         guard let image else {
             let message = loading == nil ? "图片不可用" : "正在加载图片…"
@@ -197,6 +206,29 @@ final class DetailImageCanvas: NSView {
                           width: size.width, height: size.height)
         NSGraphicsContext.current?.imageInterpolation = .high
         image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+
+        if viewport.zoom > 1.01 {
+            let badgeText = "\(Int(round(viewport.zoom * 100)))%" as NSString
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold),
+                .foregroundColor: NSColor.white
+            ]
+            let textSize = badgeText.size(withAttributes: attrs)
+            let pillSize = NSSize(width: textSize.width + 14, height: textSize.height + 6)
+            let pillRect = NSRect(
+                x: bounds.maxX - pillSize.width - 8,
+                y: bounds.minY + 8,
+                width: pillSize.width,
+                height: pillSize.height
+            )
+            let pillPath = NSBezierPath(roundedRect: pillRect, xRadius: pillSize.height / 2, yRadius: pillSize.height / 2)
+            NSColor.black.withAlphaComponent(0.62).setFill()
+            pillPath.fill()
+            badgeText.draw(
+                at: NSPoint(x: pillRect.minX + 7, y: pillRect.minY + 3),
+                withAttributes: attrs
+            )
+        }
     }
     private func zoom(by factor: CGFloat, event: NSEvent) {
         guard image != nil else { return }

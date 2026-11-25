@@ -1,18 +1,35 @@
 import AppKit
 import SwiftUI
 
-struct HeaderView: View {
+struct FolioHeaderBar: View {
     @ObservedObject var store: ClipFlowStore
     @ObservedObject var searchFocus: LibrarySearchFocusModel
     let palette: ClipFlowPalette
-    @FocusState private var searchFieldFocused: Bool
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var appliedFocusRequest = 0
+    var reservesTrafficLights = false
+    var showsInlineCategoryStrip = false
+    var onToggleEdgeDock: (() -> Void)? = nil
 
-    init(store: ClipFlowStore, palette: ClipFlowPalette, searchFocus: LibrarySearchFocusModel? = nil) {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+    @FocusState private var searchFieldFocused: Bool
+    @State private var appliedFocusRequest = 0
+    @Namespace private var modeNamespace
+
+    init(
+        store: ClipFlowStore,
+        palette: ClipFlowPalette,
+        searchFocus: LibrarySearchFocusModel? = nil,
+        reservesTrafficLights: Bool = false,
+        showsInlineCategoryStrip: Bool = false,
+        onToggleEdgeDock: (() -> Void)? = nil
+    ) {
         self.store = store
         self.palette = palette
         self.searchFocus = searchFocus ?? .inactive
+        self.reservesTrafficLights = reservesTrafficLights
+        self.showsInlineCategoryStrip = showsInlineCategoryStrip
+        self.onToggleEdgeDock = onToggleEdgeDock
     }
 
     private var canClaimSearchFocus: Bool {
@@ -20,24 +37,106 @@ struct HeaderView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("搜索内容、来源或标签", text: $store.searchText)
-                    .textFieldStyle(.plain)
-                    .focused($searchFieldFocused)
-                    .accessibilityIdentifier(LibrarySearchFocus.fieldIdentifier)
-                    .background(LibrarySearchFieldAnchor(requestID: searchFocus.requestID, canClaim: canClaimSearchFocus))
-                if !store.searchText.isEmpty {
-                    Button { store.searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary).help("清除搜索")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                if reservesTrafficLights {
+                    // Leaves breathing room for native red/yellow/green window controls on the same horizontal band.
+                    Spacer().frame(width: 60)
+                }
+
+                // Borderless calm search field with ⌘F keycap
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+
+                    TextField("搜索叠卡、来源或标签…", text: $store.searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: ClipFlowType.body))
+                        .focused($searchFieldFocused)
+                        .accessibilityIdentifier(LibrarySearchFocus.fieldIdentifier)
+                        .background(LibrarySearchFieldAnchor(requestID: searchFocus.requestID, canClaim: canClaimSearchFocus))
+
+                    if !store.searchText.isEmpty {
+                        Button { store.searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("清除搜索")
+                    } else {
+                        TactileKeycap(label: "⌘F")
+                    }
+                }
+                .padding(.horizontal, 10)
+                .frame(minWidth: 0, maxWidth: .infinity)
+                .frame(height: 30)
+                .background(FolioTheme.recessedWell(for: colorScheme), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(FolioTheme.hairline(for: colorScheme), lineWidth: 1)
+                )
+
+                // [❐ 叠卡 | ☰ 清单] Segmented View Mode Switcher
+                HStack(spacing: 2) {
+                    ForEach(LibraryViewMode.allCases, id: \.self) { mode in
+                        let selected = store.libraryViewMode == mode
+                        Button {
+                            guard store.libraryViewMode != mode else { return }
+                            withAnimation(reduceMotion ? nil : ClipFlowMotion.selection) {
+                                store.libraryViewMode = mode
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: mode.icon)
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text(mode.label)
+                                    .font(.system(size: 11, weight: selected ? .semibold : .medium))
+                            }
+                            .foregroundStyle(selected ? Color.primary : ClipFlowPalette.secondaryText(for: colorScheme))
+                            .padding(.horizontal, 9)
+                            .frame(height: 24)
+                            .background {
+                                if selected {
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(FolioTheme.deckCardFill(depth: 0, for: colorScheme))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                                .strokeBorder(FolioTheme.hairline(for: colorScheme), lineWidth: 1)
+                                        )
+                                        .matchedGeometryEffect(id: "folioViewMode", in: modeNamespace)
+                                }
+                            }
+                            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(mode.label)视图")
+                        .accessibilityAddTraits(selected ? [.isSelected] : [])
+                    }
+                }
+                .padding(3)
+                .background(FolioTheme.recessedWell(for: colorScheme), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(FolioTheme.hairline(for: colorScheme), lineWidth: 1)
+                )
+
+                if let onToggleEdgeDock {
+                    Button(action: onToggleEdgeDock) {
+                        Image(systemName: "sidebar.trailing")
+                            .font(.system(size: ClipFlowType.meta, weight: .medium))
+                            .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+                    }
+                    .buttonStyle(FolioButtonStyle(prominence: .secondary, height: 30, horizontalPadding: 9, cornerRadius: 9))
+                    .help("收起至屏幕右侧书签耳")
+                    .accessibilityLabel("贴边收起活页夹")
                 }
             }
-            .font(.system(size: 13))
-            .padding(.horizontal, ClipFlowLayout.space12)
-            .frame(height: ClipFlowLayout.controlHeight)
-            .background(palette.inputFill, in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous).strokeBorder(palette.border, lineWidth: 1))
+
+            if showsInlineCategoryStrip {
+                CategoryFilterBar(store: store)
+            }
         }
         .onAppear(perform: claimRequestedFocus)
         .onChangeBackward(of: searchFocus.requestID) { claimRequestedFocus() }
@@ -50,12 +149,27 @@ struct HeaderView: View {
         }
     }
 
-    /// `@FocusState` asks SwiftUI; the anchor repeats the claim once the field is in the key window.
     private func claimRequestedFocus() {
         let request = searchFocus.requestID
         guard request != 0, request != appliedFocusRequest, canClaimSearchFocus else { return }
         appliedFocusRequest = request
         searchFieldFocused = true
+    }
+}
+
+struct HeaderView: View {
+    @ObservedObject var store: ClipFlowStore
+    @ObservedObject var searchFocus: LibrarySearchFocusModel
+    let palette: ClipFlowPalette
+
+    init(store: ClipFlowStore, palette: ClipFlowPalette, searchFocus: LibrarySearchFocusModel? = nil) {
+        self.store = store
+        self.palette = palette
+        self.searchFocus = searchFocus ?? .inactive
+    }
+
+    var body: some View {
+        FolioHeaderBar(store: store, palette: palette, searchFocus: searchFocus)
     }
 }
 
@@ -66,7 +180,7 @@ enum CategoryFilterChips {
     }
 }
 
-/// One row of filters. Extra pills scroll instead of being clipped by the 620pt window.
+/// Fallback horizontal filter bar when `ContentView` is hosted standalone without outer spine tabs.
 struct CategoryFilterBar: View {
     @ObservedObject var store: ClipFlowStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -99,8 +213,6 @@ struct CategoryFilterBar: View {
     }
 }
 
-/// Horizontal scroller with 12pt edge fades. The fade is an AppKit mask, so measuring
-/// overflow does not publish SwiftUI state or rebuild the history list.
 private struct CategoryFilterScroll<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -183,4 +295,3 @@ private struct FilterScrollProbe: NSViewRepresentable {
         }
     }
 }
-

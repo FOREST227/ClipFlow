@@ -13,6 +13,12 @@ extension ClipFlowStore {
         return try? Data(contentsOf: imageURL, options: [.mappedIfSafe])
     }
 
+    /// O(1) RAM-only thumbnail lookup for 120Hz scrolling — never blocks the main thread on disk I/O.
+    func cachedImagePreview(for item: ClipboardItem) -> NSImage? {
+        guard !item.isExpired(), let imageFilename = item.imageFilename else { return nil }
+        return imagePreviewCache.object(forKey: imageFilename as NSString)
+    }
+
     func imagePreview(for item: ClipboardItem) -> NSImage? {
         guard !item.isExpired() else { return nil }
         guard let imageFilename = item.imageFilename else { return nil }
@@ -23,19 +29,96 @@ extension ClipFlowStore {
         }
 
         guard let imageURL = imageURL(for: item),
-              let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
-              let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 640,
-                kCGImageSourceShouldCacheImmediately: true
-              ] as CFDictionary) else {
+              let thumbnail = Self.decodeThumbnail(at: imageURL) else {
             return nil
         }
 
         let image = NSImage(cgImage: thumbnail, size: .zero)
         imagePreviewCache.setObject(image, forKey: cacheKey, cost: thumbnail.bytesPerRow * thumbnail.height)
         return image
+    }
+
+    /// Decodes image thumbnails concurrently off the main thread and streams each into RAM
+    /// immediately as soon as it completes, so fast scrolling and time-dial jumps never block or show blanks.
+    func prewarmQuickPasteAssets(
+        around centerIndex: Int = 0,
+        limit: Int = 24,
+        in sourceItems: [ClipboardItem]? = nil,
+        priority: TaskPriority = .utility
+    ) {
+        let candidates = sourceItems ?? quickPasteItems
+        guard !candidates.isEmpty, limit > 0 else { return }
+        let clampedCenter = min(max(0, centerIndex), candidates.count - 1)
+        let start = max(0, clampedCenter - 4)
+        let end = min(candidates.count, start + limit)
+        guard start < end else { return }
+        let slice = Array(candidates[start..<end])
+
+        AppIconResolver.shared.prewarm(items: slice)
+        DetailTextPrewarmer.shared.prewarm(items: slice, store: self, priority: priority)
+
+        var uncachedImages: [(filename: String, url: URL)] = []
+        for item in slice where item.isImage && !item.isExpired() {
+            guard let filename = item.imageFilename else { continue }
+            if imagePreviewCache.object(forKey: filename as NSString) == nil,
+               !inFlightPrewarmFilenames.contains(filename),
+               let url = imageURL(for: item) {
+                inFlightPrewarmFilenames.insert(filename)
+                uncachedImages.append((filename, url))
+            }
+        }
+        guard !uncachedImages.isEmpty else { return }
+
+        Task.detached(priority: priority) { [weak self] in
+            let maxConcurrent = 4
+            await withTaskGroup(of: (String, CGImage?, Int).self) { group in
+                var nextIndex = 0
+                let initialCount = min(maxConcurrent, uncachedImages.count)
+                for _ in 0..<initialCount {
+                    let entry = uncachedImages[nextIndex]
+                    nextIndex += 1
+                    group.addTask {
+                        if let cgImage = Self.decodeThumbnail(at: entry.url) {
+                            return (entry.filename, cgImage, cgImage.bytesPerRow * cgImage.height)
+                        }
+                        return (entry.filename, nil, 0)
+                    }
+                }
+
+                for await (filename, cgImage, cost) in group {
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        self.inFlightPrewarmFilenames.remove(filename)
+                        if let cgImage {
+                            let key = filename as NSString
+                            if self.imagePreviewCache.object(forKey: key) == nil {
+                                self.imagePreviewCache.setObject(NSImage(cgImage: cgImage, size: .zero), forKey: key, cost: cost)
+                            }
+                        }
+                    }
+                    if nextIndex < uncachedImages.count {
+                        let entry = uncachedImages[nextIndex]
+                        nextIndex += 1
+                        group.addTask {
+                            if let cgImage = Self.decodeThumbnail(at: entry.url) {
+                                return (entry.filename, cgImage, cgImage.bytesPerRow * cgImage.height)
+                            }
+                            return (entry.filename, nil, 0)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    nonisolated static func decodeThumbnail(at url: URL) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 640,
+            kCGImageSourceShouldCacheImmediately: true
+        ] as CFDictionary)
     }
 
     func loadItems() -> [ClipboardItem] {
@@ -129,9 +212,9 @@ extension ClipFlowStore {
                 }
             }
         }
-        let workItem = DispatchWorkItem(qos: .utility, flags: .assignCurrentContext, block: writerBlock)
+        let workItem = DispatchWorkItem(qos: .userInitiated, flags: .assignCurrentContext, block: writerBlock)
         pendingPersistWorkItem = workItem
-        persistenceQueue.asyncAfter(deadline: .now() + 0.12, execute: workItem)
+        persistenceQueue.asyncAfter(deadline: .now() + 0.08, execute: workItem)
     }
 
     /// Writes any debounced history snapshot immediately. Safe when nothing is waiting.

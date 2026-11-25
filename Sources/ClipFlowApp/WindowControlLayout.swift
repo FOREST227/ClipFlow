@@ -1,16 +1,16 @@
 import AppKit
 import SwiftUI
 
-/// Traffic lights sit in the band above the sidebar card, lined up with its padding.
+/// Traffic lights sit cleanly inside the top-left header of the Folio inner page, right of the protruding spine tabs.
 enum WindowChrome {
-    static let cardLeading: CGFloat = 12
+    static let cardLeading: CGFloat = FolioSpineTabsView.spineWidth + 6
     static let cardTop: CGFloat = 40
     static let cardBottom: CGFloat = 8
     static let cardPadding: CGFloat = 8
     static let buttonSpacing: CGFloat = 20
-    /// Halfway down the clear band, so the buttons are not on the window edge or the card stroke.
+    /// Halfway down the titlebar band so native standardWindowButtons stay inside NSTitlebarView.bounds.
     static var buttonCenterFromTop: CGFloat { cardTop / 2 }
-    /// The close button's center lines up with the card's inner leading padding.
+    /// Aligns the red close button inside the Folio page's leading margin, clear of the protruding spine tabs.
     static var firstButtonCenterX: CGFloat { cardLeading + cardPadding + 7 }
 }
 

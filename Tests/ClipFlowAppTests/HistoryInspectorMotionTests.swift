@@ -14,6 +14,7 @@ final class HistoryInspectorHarness {
     init(context: InspectorTestContext, showsBackground: Bool = false) {
         _ = NSApplication.shared
         self.context = context
+        context.store.libraryViewMode = .list
         inspector = InspectorPresentation(driver: driver)
         host = NSHostingController(rootView: AnyView(ContentView(showsBackground: showsBackground,
             showsPermissionOverlay: false, store: context.store, inspector: inspector)

@@ -115,20 +115,20 @@ final class RowHoverState: ObservableObject {
 }
 
 enum LibraryCardAction: Int, CaseIterable {
-    case copy, pin, delete
+    case copy, pin, queue, paste, delete
 
     /// Delete stays in the context menu and in VoiceOver actions.
-    static let hoverActions: [LibraryCardAction] = [.copy, .pin]
+    static let hoverActions: [LibraryCardAction] = [.copy, .pin, .queue, .paste]
 }
 
 /// The action bar is drawn by SwiftUI but clicked through the row's native
 /// event handling, so both sides share this geometry.
 enum LibraryCardActionLayout {
-    static let buttonSize = CGSize(width: 28, height: 28)
-    static let spacing: CGFloat = ClipFlowLayout.space4
-    static let padding: CGFloat = ClipFlowLayout.space4
-    static let trailingInset: CGFloat = ClipFlowLayout.space8
-    static let topInset: CGFloat = ClipFlowLayout.space4
+    static let buttonSize = CGSize(width: 24, height: 22)
+    static let spacing: CGFloat = 3
+    static let padding: CGFloat = 2
+    static let trailingInset: CGFloat = 10
+    static let topInset: CGFloat = 5
 
     static var barSize: CGSize {
         let count = CGFloat(LibraryCardAction.hoverActions.count)
@@ -157,30 +157,51 @@ enum HistoryPasteRouting {
 
 struct LibraryCardActionBar: View {
     @ObservedObject var hover: RowHoverState
+    @ObservedObject var pasteStack: PasteStackState
+    let itemID: UUID
     let pinned: Bool
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var isQueued: Bool {
+        pasteStack.contains(itemID)
+    }
+
     var body: some View {
+        let accent = FolioTheme.sageAccent(for: colorScheme)
         HStack(spacing: LibraryCardActionLayout.spacing) {
             ForEach(LibraryCardAction.hoverActions, id: \.self) { action in
-                Image(systemName: hover.confirmedAction == action ? "checkmark" : symbol(for: action))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(action == .delete ? ClipCategory.protected.tint : Color.primary.opacity(0.75))
+                let confirmed = hover.confirmedAction == action
+                let highlighted = confirmed || (action == .queue && isQueued) || action == .paste
+                Image(systemName: confirmed ? "checkmark" : symbol(for: action))
+                    .font(.system(size: 11, weight: confirmed || action == .paste ? .bold : .medium))
+                    .foregroundStyle(
+                        confirmed || (action == .queue && isQueued)
+                            ? accent
+                            : (action == .paste
+                                ? accent
+                                : (action == .delete ? ClipCategory.protected.tint : Color.primary.opacity(0.75)))
+                    )
                     .frame(width: LibraryCardActionLayout.buttonSize.width,
                         height: LibraryCardActionLayout.buttonSize.height)
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
+                    .background(
+                        (highlighted ? accent.opacity(action == .paste ? 0.14 : 0.12) : Color.primary.opacity(0.06)),
+                        in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous)
+                    )
                     .help(title(for: action))
             }
         }
         .padding(LibraryCardActionLayout.padding)
-        .background(colorScheme == .dark ? Color(red: 0.22, green: 0.24, blue: 0.29) : Color.white,
+        .background(FolioTheme.deckCardFill(depth: 0, for: colorScheme),
             in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous)
+            .strokeBorder(FolioTheme.hairline(for: colorScheme), lineWidth: 1))
         .padding(.trailing, LibraryCardActionLayout.trailingInset)
         .padding(.top, LibraryCardActionLayout.topInset)
         .opacity(hover.isHovered ? 1 : 0)
+        .offset(y: hover.isHovered || reduceMotion ? 0 : -2)
         .animation(reduceMotion ? nil : ClipFlowMotion.fade, value: hover.isHovered)
+        .animation(reduceMotion ? nil : ClipFlowMotion.fade, value: hover.confirmedAction)
         .accessibilityHidden(true)
     }
 
@@ -188,6 +209,8 @@ struct LibraryCardActionBar: View {
         switch action {
         case .copy: "doc.on.doc"
         case .pin: pinned ? "pin.slash" : "pin"
+        case .queue: isQueued ? "checkmark.circle.fill" : "plus.circle"
+        case .paste: "arrow.turn.down.left"
         case .delete: "trash"
         }
     }
@@ -196,6 +219,8 @@ struct LibraryCardActionBar: View {
         switch action {
         case .copy: "复制"
         case .pin: pinned ? "取消置顶" : "置顶"
+        case .queue: isQueued ? "移出顺序粘贴" : "加入顺序粘贴"
+        case .paste: "直接粘贴"
         case .delete: "删除条目"
         }
     }
@@ -213,7 +238,8 @@ enum ListKeyCommand: Equatable {
     ///   - isComposing: an input method has uncommitted text; every key belongs to it.
     ///   - queryIsEmpty: Space only reaches the list while the search field is empty.
     static func resolve(keyCode: UInt16, modifiers: NSEvent.ModifierFlags,
-                        isEditingText: Bool, isComposing: Bool, queryIsEmpty: Bool) -> ListKeyCommand? {
+                        isEditingText: Bool, isComposing: Bool, queryIsEmpty: Bool,
+                        allowHorizontalArrows: Bool = false) -> ListKeyCommand? {
         guard !isComposing else { return nil }
         let active = modifiers.intersection([.command, .option, .control, .shift])
         if active == .command, let index = digitKeyCodes.firstIndex(of: keyCode) {
@@ -241,6 +267,8 @@ enum ListKeyCommand: Equatable {
         switch keyCode {
         case 126: return .moveUp
         case 125: return .moveDown
+        case 123: return allowHorizontalArrows && (!isEditingText || queryIsEmpty) ? .moveUp : nil
+        case 124: return allowHorizontalArrows && (!isEditingText || queryIsEmpty) ? .moveDown : nil
         case 36, 76: return .activate
         case 49: return !isEditingText || queryIsEmpty ? .toggleDetails : nil
         default: return nil
@@ -254,6 +282,7 @@ enum ListKeyCommand: Equatable {
 /// Window-scoped key handling that still works while the search field has focus.
 struct ListKeyCommandMonitor: NSViewRepresentable {
     var queryIsEmpty = true
+    var allowHorizontalArrows = false
     let onCommand: (ListKeyCommand) -> Bool
     @Environment(\.isEnabled) private var scopeEnabled
 
@@ -264,6 +293,7 @@ struct ListKeyCommandMonitor: NSViewRepresentable {
     }
     func updateNSView(_ view: ListKeyCommandView, context: Context) {
         view.queryIsEmpty = queryIsEmpty
+        view.allowHorizontalArrows = allowHorizontalArrows
         view.onCommand = onCommand
         view.scopeEnabled = scopeEnabled
     }
@@ -272,6 +302,7 @@ struct ListKeyCommandMonitor: NSViewRepresentable {
 
 final class ListKeyCommandView: NSView {
     var queryIsEmpty = true
+    var allowHorizontalArrows = false
     var onCommand: (ListKeyCommand) -> Bool = { _ in false }
     var scopeEnabled = true
     private var monitor: Any?
@@ -293,7 +324,7 @@ final class ListKeyCommandView: NSView {
         let editor = window.firstResponder as? NSTextView
         guard let command = ListKeyCommand.resolve(keyCode: event.keyCode, modifiers: event.modifierFlags,
             isEditingText: editor != nil, isComposing: editor?.hasMarkedText() == true,
-            queryIsEmpty: queryIsEmpty) else { return false }
+            queryIsEmpty: queryIsEmpty, allowHorizontalArrows: allowHorizontalArrows) else { return false }
         // With Full Keyboard Access, Space activates the focused control.
         if command == .toggleDetails, editor == nil, window.firstResponder !== window,
            NSApp.isFullKeyboardAccessEnabled { return false }

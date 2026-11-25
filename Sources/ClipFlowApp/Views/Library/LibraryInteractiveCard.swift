@@ -50,6 +50,8 @@ struct LibraryInteractiveCard: NSViewRepresentable {
                 switch action {
                 case .copy: ClipFlowRuntime.shared.copyToClipboard(current)
                 case .pin: store.togglePin(id)
+                case .queue: store.pasteStack.toggle(id)
+                case .paste: ClipFlowRuntime.shared.paste(current)
                 case .delete: store.delete(id)
                 }
             },
@@ -168,6 +170,14 @@ final class LibraryInteractiveHostingView: ClipboardRowHitView {
                 self?.onAction?(.pin)
                 return true
             },
+            NSAccessibilityCustomAction(name: "加入或移出顺序粘贴") { [weak self] in
+                self?.onAction?(.queue)
+                return true
+            },
+            NSAccessibilityCustomAction(name: "粘贴") { [weak self] in
+                self?.onAction?(.paste)
+                return true
+            },
             NSAccessibilityCustomAction(name: "删除") { [weak self] in
                 self?.onAction?(.delete)
                 return true
@@ -185,8 +195,8 @@ final class LibraryInteractiveHostingView: ClipboardRowHitView {
         guard !redirectLeftClickIfNeeded(event) else { return }
         if let action = hoverAction(for: event) {
             Self.lastClickedRow = nil
-            if action == .copy { hover.confirm(action) }
-            // Pinning and deleting move rows under a resting pointer.
+            if action == .copy || action == .queue { hover.confirm(action) }
+            // Pinning, pasting, and deleting move rows or switch focus under a resting pointer.
             else { setHovered(false) }
             onAction?(action)
             return

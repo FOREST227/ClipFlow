@@ -85,10 +85,17 @@ final class DetailTextRendererTests: XCTestCase {
         try "module-script".write(to: moduleRoot.appendingPathComponent("Renderer/sample.js"), atomically: true, encoding: .utf8)
 
         var messages: [String] = []
+        var evaluatedModuleRoot = false
         XCTAssertEqual(
-            DetailTextDocument.load(name: "sample.js", installedRoot: installed, moduleRoot: moduleRoot, log: { messages.append($0) }),
+            DetailTextDocument.load(
+                name: "sample.js",
+                installedRoot: installed,
+                moduleRoot: { evaluatedModuleRoot = true; return moduleRoot }(),
+                log: { messages.append($0) }
+            ),
             "installed-script"
         )
+        XCTAssertFalse(evaluatedModuleRoot, "Installed app bundle must not eagerly evaluate Bundle.module")
         XCTAssertEqual(
             DetailTextDocument.load(name: "sample.js", installedRoot: nil, moduleRoot: moduleRoot, log: { messages.append($0) }),
             "module-script"
@@ -108,5 +115,56 @@ final class DetailTextRendererTests: XCTestCase {
         XCTAssertEqual(text, source)
         XCTAssertTrue(DetailTextFormat.isMarkdown("# 标题\n\n正文"))
         XCTAssertFalse(DetailTextFormat.isMarkdown("普通文字"))
+    }
+
+    func testDetailTextPrewarmerPreRendersCodeMarkdownAndTables() {
+        let codeItem = ClipboardClassifier.makeItem(
+            text: "func hello(name: String) -> String {\n    return \"Hi \\(name)\"\n}",
+            sourceApp: "Xcode",
+            sourceBundleID: "com.apple.dt.Xcode",
+            autoProtectSecrets: true,
+            existingItem: nil
+        )
+        let preCode = DetailTextPrewarmer.shared.renderNow(
+            for: codeItem,
+            text: codeItem.fullText,
+            isMarkdown: false
+        )
+        XCTAssertGreaterThan(preCode.light.runs.count, 1, "Pre-rendered code must contain syntax-highlighted color runs")
+        XCTAssertGreaterThan(preCode.dark.runs.count, 1)
+
+        let mdSource = """
+        # 发布清单
+
+        | 模块 | 状态 |
+        | --- | --- |
+        | 快捷面板 | 已完成 |
+        | 活页夹 | 已完成 |
+
+        ```swift
+        let ready = true
+        ```
+        """
+        let mdItem = ClipboardClassifier.makeItem(
+            text: mdSource,
+            sourceApp: "Notes",
+            sourceBundleID: nil,
+            autoProtectSecrets: true,
+            existingItem: nil
+        )
+        let preMD = DetailTextPrewarmer.shared.renderNow(
+            for: mdItem,
+            text: mdSource,
+            isMarkdown: true
+        )
+        let blocks = preMD.markdownBlocks ?? []
+        XCTAssertTrue(blocks.contains { if case .heading(_, 1, _) = $0 { return true }; return false })
+        XCTAssertTrue(blocks.contains {
+            if case .table(_, let headers, let rows) = $0 {
+                return headers == ["模块", "状态"] && rows.count == 2
+            }
+            return false
+        }, "Markdown pipe tables must be pre-parsed into native structured table blocks")
+        XCTAssertTrue(blocks.contains { if case .codeBlock(_, "swift", _, _) = $0 { return true }; return false })
     }
 }

@@ -6,32 +6,8 @@ struct AppBackground: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: restrained
-                    ? (colorScheme == .dark
-                        ? [Color(red: 0.10, green: 0.11, blue: 0.14), Color(red: 0.11, green: 0.13, blue: 0.16)]
-                        : [Color(red: 0.97, green: 0.965, blue: 0.955),
-                           Color(red: 0.955, green: 0.97, blue: 0.985),
-                           Color(red: 0.965, green: 0.965, blue: 0.98)])
-                    : [palette.backgroundStart, palette.backgroundMiddle, palette.backgroundEnd],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+        FolioTheme.spineGutter(for: colorScheme)
             .ignoresSafeArea()
-
-            Circle()
-                .fill(palette.orbA.opacity(restrained ? 0.45 : 1))
-                .frame(width: 420, height: 420)
-                .blur(radius: 60)
-                .offset(x: -160, y: -80)
-
-            Circle()
-                .fill(palette.orbB.opacity(restrained ? 0.45 : 1))
-                .frame(width: 520, height: 520)
-                .blur(radius: 80)
-                .offset(x: 180, y: 140)
-        }
     }
 }
 

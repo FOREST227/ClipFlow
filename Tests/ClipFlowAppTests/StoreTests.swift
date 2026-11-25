@@ -166,7 +166,7 @@ final class StoreTests: XCTestCase {
         try await Task.sleep(nanoseconds: 1100000000)
         monitor.poll(sourceApplication: nil)
         XCTAssertTrue(store.items.isEmpty)
-        try await Task.sleep(nanoseconds: 200000000)
+        try await Task.sleep(nanoseconds: 350000000)
         let persisted = try JSONDecoder().decode([ClipboardItem].self, from: Data(contentsOf: directory.appendingPathComponent("history.json")))
         XCTAssertTrue(persisted.isEmpty)
     }

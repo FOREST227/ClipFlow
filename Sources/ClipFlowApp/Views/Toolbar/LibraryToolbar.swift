@@ -1,30 +1,129 @@
 import AppKit
 import SwiftUI
 
+struct FolioHeaderBar: View {
+    @ObservedObject var store: ClipFlowStore
+    let palette: ClipFlowPalette
+    var reservesTrafficLights = false
+    var showsInlineCategoryStrip = false
+    var onToggleEdgeDock: (() -> Void)? = nil
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var modeNamespace
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                if reservesTrafficLights {
+                    // Leaves breathing room for native red/yellow/green window controls on the same horizontal band.
+                    Spacer().frame(width: 60)
+                }
+
+                // Borderless calm search field with ⌘F keycap
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+
+                    TextField("搜索叠卡、来源或标签…", text: $store.searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: ClipFlowType.body))
+
+                    if !store.searchText.isEmpty {
+                        Button { store.searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("清除搜索")
+                    } else {
+                        TactileKeycap(label: "⌘F")
+                    }
+                }
+                .padding(.horizontal, 10)
+                .frame(minWidth: 0, maxWidth: .infinity)
+                .frame(height: 30)
+                .background(FolioTheme.recessedWell(for: colorScheme), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(FolioTheme.hairline(for: colorScheme), lineWidth: 1)
+                )
+
+                // [❐ 叠卡 | ☰ 清单] Segmented View Mode Switcher
+                HStack(spacing: 2) {
+                    ForEach(LibraryViewMode.allCases, id: \.self) { mode in
+                        let selected = store.libraryViewMode == mode
+                        Button {
+                            guard store.libraryViewMode != mode else { return }
+                            withAnimation(reduceMotion ? nil : ClipFlowMotion.selection) {
+                                store.libraryViewMode = mode
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: mode.icon)
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text(mode.label)
+                                    .font(.system(size: 11, weight: selected ? .semibold : .medium))
+                            }
+                            .foregroundStyle(selected ? Color.primary : ClipFlowPalette.secondaryText(for: colorScheme))
+                            .padding(.horizontal, 9)
+                            .frame(height: 24)
+                            .background {
+                                if selected {
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(FolioTheme.deckCardFill(depth: 0, for: colorScheme))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                                .strokeBorder(FolioTheme.hairline(for: colorScheme), lineWidth: 1)
+                                        )
+                                        .matchedGeometryEffect(id: "folioViewMode", in: modeNamespace)
+                                }
+                            }
+                            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(mode.label)视图")
+                        .accessibilityAddTraits(selected ? [.isSelected] : [])
+                    }
+                }
+                .padding(3)
+                .background(FolioTheme.recessedWell(for: colorScheme), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(FolioTheme.hairline(for: colorScheme), lineWidth: 1)
+                )
+
+                if let onToggleEdgeDock {
+                    Button(action: onToggleEdgeDock) {
+                        Image(systemName: "sidebar.trailing")
+                            .font(.system(size: ClipFlowType.meta, weight: .medium))
+                            .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+                    }
+                    .buttonStyle(FolioButtonStyle(prominence: .secondary, height: 30, horizontalPadding: 9, cornerRadius: 9))
+                    .help("收起至屏幕右侧书签耳")
+                    .accessibilityLabel("贴边收起活页夹")
+                }
+            }
+
+            if showsInlineCategoryStrip {
+                CategoryFilterBar(store: store)
+            }
+        }
+    }
+}
+
 struct HeaderView: View {
     @ObservedObject var store: ClipFlowStore
     let palette: ClipFlowPalette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("搜索内容、来源或标签", text: $store.searchText).textFieldStyle(.plain)
-                if !store.searchText.isEmpty {
-                    Button { store.searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary).help("清除搜索")
-                }
-            }
-            .font(.system(size: 13))
-            .padding(.horizontal, ClipFlowLayout.space12)
-            .frame(height: ClipFlowLayout.controlHeight)
-            .background(palette.inputFill, in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous).strokeBorder(palette.border, lineWidth: 1))
-        }
+        FolioHeaderBar(store: store, palette: palette)
     }
 }
 
-/// One row of filters. Extra pills scroll instead of being clipped by the 620pt window.
+/// Fallback horizontal filter bar when `ContentView` is hosted standalone without outer spine tabs.
 struct CategoryFilterBar: View {
     @ObservedObject var store: ClipFlowStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -52,8 +151,6 @@ struct CategoryFilterBar: View {
     }
 }
 
-/// Horizontal scroller with 12pt edge fades. The fade is an AppKit mask, so measuring
-/// overflow does not publish SwiftUI state or rebuild the history list.
 private struct CategoryFilterScroll<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -136,4 +233,3 @@ private struct FilterScrollProbe: NSViewRepresentable {
         }
     }
 }
-

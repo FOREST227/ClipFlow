@@ -20,6 +20,7 @@ final class MainWindowTests: XCTestCase {
     func testSelectingScrolledHistoryRowKeepsViewport() throws {
         _ = NSApplication.shared
         let store = try makeStore()
+        store.libraryViewMode = .list
         for index in 0..<40 {
             store.ingestCopiedText(index % 2 == 0 ? "Note \(index)" : "func example\(index)() {\n    return true\n}",
                 sourceApp: "Test", sourceBundleID: nil)
@@ -65,6 +66,7 @@ final class MainWindowTests: XCTestCase {
     func testListViewportsShowAtLeastSixUnitsAndHistoryGrowsWithTheWindow() throws {
         _ = NSApplication.shared
         let store = try makeStore()
+        store.libraryViewMode = .list
         for index in 0..<12 {
             store.ingestCopiedText("Row \(index)", sourceApp: "Test", sourceBundleID: nil)
         }
@@ -277,10 +279,10 @@ final class MainWindowTests: XCTestCase {
         let controller = MainWindowController(store: try makeStore(), locale: Locale(identifier: "zh-Hans"))
         let window = try XCTUnwrap(controller.window)
         defer { window.close() }
-        XCTAssertEqual(window.contentMinSize.width, ClipFlowLayout.libraryWidth)
+        XCTAssertEqual(window.contentMinSize.width, ClipFlowLayout.libraryMinWidth)
         XCTAssertEqual(window.contentMaxSize.width, ClipFlowLayout.libraryMaxWidth)
         XCTAssertEqual(window.contentMinSize.height, ClipFlowLayout.libraryMinHeight)
-        XCTAssertGreaterThan(ClipFlowLayout.libraryMaxWidth, ClipFlowLayout.libraryWidth)
+        XCTAssertGreaterThan(ClipFlowLayout.libraryMaxWidth, ClipFlowLayout.libraryMinWidth)
     }
 
     func testSharedDetailFitsQuickPasteWidth() throws {
@@ -372,7 +374,7 @@ final class MainWindowTests: XCTestCase {
         controller.navigation.select(.history)
         XCTAssertTrue(controller.window === window)
         XCTAssertTrue(controller.window?.contentViewController === content)
-        XCTAssertEqual(window.contentLayoutRect.width, 620, accuracy: 0.5)
+        XCTAssertEqual(window.contentLayoutRect.width, ClipFlowLayout.libraryWidth, accuracy: 0.5)
         XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
         XCTAssertEqual(window.titleVisibility, .hidden)
         XCTAssertTrue(window.titlebarAppearsTransparent)

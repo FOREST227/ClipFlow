@@ -157,7 +157,7 @@ final class HistoryRowDocument: NSView {
         defer { materializing = false }
         let origin = scroll.contentView.bounds.origin
         let clip = scroll.contentView.bounds
-        let width = max(clip.width, bounds.width, 1)
+        let width = clip.width > 1 ? clip.width : max(bounds.width, 1)
         let placed = HistoryRowGeometry.place(items: items, width: width)
         let height = max(placed.height, clip.height)
         if abs(frame.width - width) > 0.5 || abs(frame.height - height) > 0.5 {
@@ -228,6 +228,8 @@ final class HistoryRowDocument: NSView {
         switch action {
         case .copy: ClipFlowRuntime.shared.copyToClipboard(item)
         case .pin: store.togglePin(id)
+        case .queue: store.pasteStack.toggle(id)
+        case .paste: ClipFlowRuntime.shared.paste(item)
         case .delete: store.delete(id)
         }
     }

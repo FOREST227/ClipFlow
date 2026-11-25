@@ -3,9 +3,11 @@ import Combine
 import Carbon
 import SwiftUI
 
-private enum QuickPastePanelLayout {
+enum QuickPastePanelLayout {
     static let panelWidth: CGFloat = ClipFlowLayout.menuWidth
     static let panelHeight: CGFloat = QuickPasteCardLayout.viewportHeight + 164
+    static let floatingCarouselWidth: CGFloat = 636
+    static let floatingCarouselHeight: CGFloat = 394
     static let cornerRadius: CGFloat = ClipFlowLayout.overlayRadius
     static let anchorOffset: CGFloat = 18
     static let screenInset: CGFloat = 12
@@ -72,6 +74,11 @@ final class ClipFlowRuntime: NSObject {
     func paste(_ item: ClipboardItem) {
         hudController.hide()
         pasteService.paste(item, preferredTarget: lastExternalApp)
+    }
+
+    func pasteNextFromStack() {
+        guard let next = store.pasteStack.popNext(from: store.items) else { return }
+        paste(next)
     }
 
     @discardableResult
@@ -410,7 +417,8 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
 
     func show(anchorAt mouseLocation: CGPoint, preferredTarget: NSRunningApplication?) {
         inspector?.reset()
-        let panel = makePanel()
+        store.prewarmQuickPasteAssets(limit: 24)
+        let panel = makePanel(floatingCarousel: true)
         let inspector = InspectorPresentation(driver: AppKitInspectorAnimationDriver())
         self.inspector = inspector
         panel.onCancelInspector = { [weak inspector] in
@@ -428,16 +436,26 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
                 onClose: { [weak self] in
                     self?.hide()
                 },
-                inspector: inspector
+                inspector: inspector,
+                initialMode: .fan
             )
         )
 
-        configurePanelMask(panel)
-        position(panel: panel, near: mouseLocation)
+        configureTransparentPanel(panel)
+        position(panel: panel, near: mouseLocation, centeredOnCursor: true)
+        let animateEntrance = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if animateEntrance { panel.alphaValue = 0 }
         // Activate like the history window so SwiftUI receives full trackpad gestures.
         // Runtime retains lastExternalApp separately for the eventual paste.
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+        if animateEntrance {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.09
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+            }
+        }
     }
 
     func hide() {
@@ -453,7 +471,7 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
         self.panel = nil
     }
 
-    private func makePanel() -> QuickPastePanel {
+    private func makePanel(floatingCarousel: Bool = false) -> QuickPastePanel {
         if let existing = panel {
             existing.delegate = nil
             existing.contentView = nil
@@ -462,8 +480,10 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
             self.panel = nil
         }
 
+        let width = floatingCarousel ? QuickPastePanelLayout.floatingCarouselWidth : QuickPastePanelLayout.panelWidth
+        let height = floatingCarousel ? QuickPastePanelLayout.floatingCarouselHeight : QuickPastePanelLayout.panelHeight
         let panel = QuickPastePanel(
-            contentRect: NSRect(x: 0, y: 0, width: QuickPastePanelLayout.panelWidth, height: QuickPastePanelLayout.panelHeight),
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -471,7 +491,8 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
 
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        // Individual cards render their own soft shadows directly over the live desktop.
+        panel.hasShadow = !floatingCarousel
         panel.level = .statusBar
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
@@ -486,27 +507,36 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
         hide()
     }
 
-    private func configurePanelMask(_ panel: QuickPastePanel) {
-        let radius = QuickPastePanelLayout.cornerRadius
+    private func configureTransparentPanel(_ panel: QuickPastePanel) {
         let views: [NSView] = [panel.contentView, panel.contentView?.superview].compactMap { $0 }
-
         for view in views {
             view.wantsLayer = true
             view.layer?.backgroundColor = NSColor.clear.cgColor
-            view.layer?.cornerRadius = radius
-            view.layer?.masksToBounds = true
-            if #available(macOS 10.15, *) {
-                view.layer?.cornerCurve = .continuous
-            }
+            view.layer?.masksToBounds = false
         }
     }
 
-    private func position(panel: NSPanel, near mouseLocation: CGPoint) {
+    private func position(panel: NSPanel, near mouseLocation: CGPoint, centeredOnCursor: Bool = false) {
         let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) ?? NSScreen.main
         let visibleFrame = screen?.visibleFrame ?? NSRect(x: 120, y: 120, width: 1200, height: 800)
         let panelSize = panel.frame.size
-        let offset = QuickPastePanelLayout.anchorOffset
         let inset = QuickPastePanelLayout.screenInset
+
+        if centeredOnCursor {
+            let centeredOrigin = CGPoint(
+                x: mouseLocation.x - panelSize.width / 2,
+                y: mouseLocation.y - panelSize.height / 2
+            )
+            let clamped = clamp(
+                origin: centeredOrigin,
+                panelSize: panelSize,
+                to: visibleFrame.insetBy(dx: inset, dy: inset)
+            )
+            panel.setFrameOrigin(clamped)
+            return
+        }
+
+        let offset = QuickPastePanelLayout.anchorOffset
 
         let candidateOrigins: [CGPoint] = [
             CGPoint(x: mouseLocation.x + offset, y: mouseLocation.y - panelSize.height - offset),
@@ -594,45 +624,354 @@ struct QuickPastePanelView: View {
     let onClose: () -> Void
 
     @ViewState private var query = ""
+    @ViewState private var showsFloatingSearch = false
+    @FocusState private var isFloatingSearchFocused: Bool
+    // Isolated ObservableObject reference so hovering cards NEVER re-evaluates QuickPastePanelView.body!
+    @ViewState private var carouselHoverState = CarouselHoverState()
+    @ViewState private var presentationMode: QuickPastePresentationMode
     // Keep selection independent of the parent view's layout/scroll identity.
     @ViewState private var selection = HistorySelection()
     @ViewState private var listProxy = QuickPasteListProxy()
     @StateObject private var inspector: InspectorPresentation
     private var motionPreferences = InspectorMotionPreferences()
     private var reduceMotion: Bool { motionPreferences.reduceMotion }
+    private let initialSelectionID: UUID?
 
     init(store: ClipFlowStore, preferredTargetName: String?, onPaste: @escaping (ClipboardItem) -> Void,
          onOpenLibrary: @escaping () -> Void, onClose: @escaping () -> Void,
-         inspector: InspectorPresentation? = nil) {
+         inspector: InspectorPresentation? = nil,
+         initialMode: QuickPastePresentationMode = .list,
+         initialSelectionID: UUID? = nil) {
         self.store = store
         self.preferredTargetName = preferredTargetName
         self.onPaste = onPaste
         self.onOpenLibrary = onOpenLibrary
         self.onClose = onClose
+        self.initialSelectionID = initialSelectionID
+        _presentationMode = ViewState(wrappedValue: initialMode)
         _inspector = StateObject(wrappedValue: inspector ??
             InspectorPresentation(driver: AppKitInspectorAnimationDriver()))
     }
 
-    var body: some View {
-        let palette = ClipFlowPalette.resolve(for: colorScheme)
-        let clips = store.hudItems(matching: query)
+    private var effectiveMode: QuickPastePresentationMode {
+        presentationMode
+    }
 
-        ZStack {
+    var body: some View {
+        let clips = store.hudItems(matching: query)
+        if presentationMode == .fan {
+            floatingCarouselBody(clips: clips)
+        } else {
+            classicListBody(clips: clips)
+        }
+    }
+
+    private func floatingCarouselBody(clips: [ClipboardItem]) -> some View {
+        let queued = store.pasteStack.queuedItems(from: store.items)
+        return ZStack {
+            // Clicking any transparent empty space outside the floating cards closes the HUD.
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if showsFloatingSearch {
+                        dismissFloatingSearch()
+                    } else {
+                        onClose()
+                    }
+                }
+
+            VStack(spacing: 10) {
+                // Top 36pt transparent air slot: hosts floating search capsule (on demand) or Paste Stack ready pill.
+                ZStack {
+                    if showsFloatingSearch {
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: ClipFlowType.meta, weight: .semibold))
+                                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+                            TextField("输入关键词过滤…", text: $query)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: ClipFlowType.body, weight: .medium))
+                                .focused($isFloatingSearchFocused)
+                            if !query.isEmpty {
+                                Text("\(clips.count) 条")
+                                    .font(.system(size: ClipFlowType.mono, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+                            }
+                            Button {
+                                dismissFloatingSearch()
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: ClipFlowType.body))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("关闭搜索 (Esc)")
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(width: 276, height: 34)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(FolioTheme.deckCardFill(depth: 0, for: colorScheme))
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(FolioTheme.primaryAccent(for: colorScheme).opacity(0.65), lineWidth: 1.2)
+                        )
+                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.36 : 0.12), radius: 10, y: 4)
+                        .transition(.opacity.combined(with: .offset(y: -6)))
+                    } else if let head = queued.first {
+                        Button {
+                            guard let next = store.pasteStack.popNext(from: store.items) else { return }
+                            onClose()
+                            onPaste(next)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(FolioTheme.sageAccent(for: colorScheme))
+                                    .frame(width: 6, height: 6)
+                                Text("待贴 ① \(PasteStackTrayView.shortLabel(for: head, store: store))")
+                                    .font(.system(size: ClipFlowType.meta, weight: .semibold))
+                                    .lineLimit(1)
+                                Text("粘贴下一条 ↩")
+                                    .font(.system(size: ClipFlowType.mono, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(FolioTheme.sageAccent(for: colorScheme))
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(height: 30)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(FolioTheme.deckCardFill(depth: 0, for: colorScheme).opacity(0.96))
+                            )
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder(FolioTheme.hairline(for: colorScheme), lineWidth: 1)
+                            )
+                            .shadow(color: .black.opacity(colorScheme == .dark ? 0.32 : 0.10), radius: 8, y: 3)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(height: 36)
+                .animation(reduceMotion ? nil : ClipFlowMotion.selection, value: showsFloatingSearch)
+
+                if clips.isEmpty {
+                    VStack(spacing: 10) {
+                        Text(query.isEmpty ? "还没有剪贴记录" : "没有匹配「\(query)」的卡片")
+                            .font(.system(size: ClipFlowType.cardTitle, weight: .semibold))
+                        if !query.isEmpty {
+                            Button("清除搜索") { dismissFloatingSearch() }
+                                .buttonStyle(FolioButtonStyle(prominence: .secondary))
+                        } else {
+                            Text("复制文字或图片后按 \(store.quickPasteShortcut.displayName) 呼出")
+                                .font(.system(size: ClipFlowType.meta))
+                                .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
+                        }
+                    }
+                    .padding(20)
+                    .frame(width: 244, height: 140)
+                    .background(
+                        RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
+                            .fill(FolioTheme.deckCardFill(depth: 0, for: colorScheme))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
+                            .strokeBorder(FolioTheme.hairline(for: colorScheme), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.40 : 0.14), radius: 14, y: 6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    QuickPasteFanDeckView(
+                        items: clips,
+                        store: store,
+                        selection: selection,
+                        pasteStack: store.pasteStack,
+                        hoverState: carouselHoverState,
+                        isSearchActive: showsFloatingSearch,
+                        isBlocked: inspector.blocksBackground,
+                        onSelectCenter: { item in selection.itemID = item.id },
+                        onPaste: { item in
+                            selection.itemID = item.id
+                            onClose()
+                            onPaste(item)
+                        },
+                        onInspect: { item in
+                            selection.itemID = item.id
+                            if inspector.snapshot.itemID == item.id && inspector.snapshot.phase != .closing {
+                                inspector.dismiss(reduceMotion: reduceMotion)
+                            } else {
+                                inspector.open(itemID: item.id, reduceMotion: reduceMotion)
+                            }
+                        },
+                        onOpenLibrary: {
+                            onClose()
+                            onOpenLibrary()
+                        },
+                        onToggleSearch: {
+                            if showsFloatingSearch {
+                                dismissFloatingSearch()
+                            } else {
+                                activateFloatingSearch(initialText: nil)
+                            }
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .padding(.vertical, 8)
+            .allowsHitTesting(!inspector.blocksBackground)
+            .disabled(inspector.blocksBackground)
+            .accessibilityHidden(inspector.blocksBackground)
+
+            if let inspectingItem {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { inspector.dismiss(reduceMotion: reduceMotion) }
+                HUDInspectorOverlay(
+                    item: inspectingItem, store: store,
+                    sourceRectInWindow: inspector.snapshot.sourceRectInWindow,
+                    motion: inspector.motion,
+                    onClose: { inspector.dismiss(reduceMotion: reduceMotion) },
+                    onPaste: {
+                        inspector.dismiss(reduceMotion: reduceMotion) {
+                            guard let current = store.item(withID: inspectingItem.id) else { return }
+                            onClose()
+                            onPaste(current)
+                        }
+                    }
+                )
+                .frame(maxWidth: 360, maxHeight: QuickPastePanelLayout.floatingCarouselHeight - 16)
+            }
+        }
+        .frame(width: QuickPastePanelLayout.floatingCarouselWidth, height: QuickPastePanelLayout.floatingCarouselHeight, alignment: .center)
+        .background(Color.clear)
+        .background(
+            InspectorEscapeHandler(onEscape: {
+                if inspector.blocksBackground {
+                    inspector.dismiss(reduceMotion: reduceMotion)
+                    return true
+                }
+                if showsFloatingSearch {
+                    dismissFloatingSearch()
+                    return true
+                }
+                return false
+            }, onWindowInactive: { inspector.reset() }).frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
+        )
+        .background(
+            FloatingQuickPasteKeyMonitor(
+                isSearchActive: showsFloatingSearch,
+                isBlocked: inspector.blocksBackground,
+                onStartSearch: { initialChars in
+                    activateFloatingSearch(initialText: initialChars)
+                },
+                onDismissSearch: {
+                    dismissFloatingSearch()
+                },
+                onOpenLibrary: {
+                    onClose()
+                    onOpenLibrary()
+                }
+            )
+            .frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
+        )
+        .background(
+            ListKeyCommandMonitor(
+                queryIsEmpty: query.isEmpty,
+                allowHorizontalArrows: !showsFloatingSearch || query.isEmpty,
+                onCommand: { handleKeyCommand($0, clips: clips) }
+            )
+            .frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
+        )
+        .onChangeBackward(of: store.items) {
+            inspector.invalidateIfMissing(availableIDs: Set(store.items.filter { !$0.isExpired() }.map(\.id)))
+        }
+        .onDisappear { inspector.reset() }
+        .onAppear {
+            if let initialSelectionID, clips.contains(where: { $0.id == initialSelectionID }) {
+                selection.itemID = initialSelectionID
+            } else if selection.itemID == nil {
+                selection.itemID = clips.first?.id
+            }
+        }
+        .onChangeBackward(of: query) {
+            selection.itemID = clips.first?.id
+        }
+    }
+
+    private func activateFloatingSearch(initialText: String?) {
+        withAnimation(reduceMotion ? nil : ClipFlowMotion.selection) {
+            showsFloatingSearch = true
+        }
+        if let initialText, !initialText.isEmpty {
+            query.append(initialText)
+        }
+        DispatchQueue.main.async {
+            isFloatingSearchFocused = true
+        }
+    }
+
+    private func dismissFloatingSearch() {
+        isFloatingSearchFocused = false
+        query = ""
+        withAnimation(reduceMotion ? nil : ClipFlowMotion.selection) {
+            showsFloatingSearch = false
+        }
+    }
+
+    private func classicListBody(clips: [ClipboardItem]) -> some View {
+        let palette = ClipFlowPalette.resolve(for: colorScheme)
+
+        return ZStack {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     HStack(spacing: 8) {
-                        ClipFlowBrandMark(icon: "cursorarrow.rays", size: 28)
+                        Image(nsImage: NSApp.applicationIconImage)
+                            .resizable()
+                            .interpolation(.high)
+                            .frame(width: 24, height: 24)
+                            .accessibilityHidden(true)
                         Text("快速粘贴")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .font(.system(size: ClipFlowType.cardTitle, weight: .semibold))
                         if let preferredTargetName, !preferredTargetName.isEmpty {
                             Text("→ \(preferredTargetName)")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: ClipFlowType.meta, weight: .medium))
                                 .foregroundStyle(.secondary).lineLimit(1)
                                 .help("粘贴到 \(preferredTargetName)")
                         }
                     }
 
                     Spacer()
+
+                    HStack(spacing: 2) {
+                        Button {
+                            withAnimation(reduceMotion ? nil : ClipFlowMotion.selection) {
+                                presentationMode = .fan
+                            }
+                        } label: {
+                            Text("轮播")
+                                .font(.system(size: ClipFlowType.meta, weight: effectiveMode == .fan ? .semibold : .medium))
+                                .padding(.horizontal, 8)
+                                .frame(height: 22)
+                                .background(effectiveMode == .fan ? FolioTheme.deckCardFill(depth: 0, for: colorScheme) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            withAnimation(reduceMotion ? nil : ClipFlowMotion.selection) {
+                                presentationMode = .list
+                            }
+                        } label: {
+                            Text("列表")
+                                .font(.system(size: ClipFlowType.meta, weight: effectiveMode == .list ? .semibold : .medium))
+                                .padding(.horizontal, 8)
+                                .frame(height: 22)
+                                .background(effectiveMode == .list ? FolioTheme.deckCardFill(depth: 0, for: colorScheme) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(2)
+                    .background(FolioTheme.recessedWell(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(FolioTheme.hairline(for: colorScheme), lineWidth: 1))
 
                     Button("关闭", action: onClose)
                         .buttonStyle(ClipFlowActionButtonStyle(fill: palette.secondaryButtonFill))
@@ -664,7 +1003,7 @@ struct QuickPastePanelView: View {
                                     + Text("，就能在指针附近把它调出来。"))
                                     .accessibilityLabel("先去其他应用复制文字或图片，然后按下 \(store.quickPasteShortcut.displayName)，就能在指针附近把它调出来。")
                             } else {
-                                Text("试试其他关键词，或打开历史记录查看全部内容。")
+                                Text("试试其他关键词，或打开活页叠卡查看全部内容。")
                             }
                         }
                         .font(.system(size: 12, weight: .medium))
@@ -672,6 +1011,36 @@ struct QuickPastePanelView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .frame(height: QuickPasteCardLayout.viewportHeight, alignment: .top)
+                } else if effectiveMode == .fan {
+                    QuickPasteFanDeckView(
+                        items: clips,
+                        store: store,
+                        selection: selection,
+                        pasteStack: store.pasteStack,
+                        hoverState: carouselHoverState,
+                        isSearchActive: false,
+                        isBlocked: inspector.blocksBackground,
+                        onSelectCenter: { item in selection.itemID = item.id },
+                        onPaste: { item in
+                            selection.itemID = item.id
+                            onClose()
+                            onPaste(item)
+                        },
+                        onInspect: { item in
+                            selection.itemID = item.id
+                            if inspector.snapshot.itemID == item.id && inspector.snapshot.phase != .closing {
+                                inspector.dismiss(reduceMotion: reduceMotion)
+                            } else {
+                                inspector.open(itemID: item.id, reduceMotion: reduceMotion)
+                            }
+                        },
+                        onOpenLibrary: {
+                            onClose()
+                            onOpenLibrary()
+                        },
+                        onToggleSearch: {}
+                    )
+                    .frame(height: QuickPasteCardLayout.viewportHeight)
                 } else {
                     QuickPasteNativeList(items: clips, store: store, selection: selection, proxy: listProxy,
                         isBlocked: { [weak inspector] in inspector?.blocksBackground != false },
@@ -700,17 +1069,19 @@ struct QuickPastePanelView: View {
                     .frame(height: QuickPasteCardLayout.viewportHeight)
                 }
 
-                HStack(spacing: 8) {
-                    QuickPasteKeyHint(keys: "↑↓", title: "选择")
+                HStack(spacing: 6) {
+                    QuickPasteKeyHint(keys: effectiveMode == .fan ? "←→" : "↑↓", title: effectiveMode == .fan ? "轮换" : "选择")
                     QuickPasteKeyHint(keys: "↩", title: "粘贴")
-                    QuickPasteKeyHint(keys: "⌘1–9", title: "直接粘贴")
+                    QuickPasteKeyHint(keys: "⌘1–9", title: "直贴")
                     QuickPasteKeyHint(keys: "空格", title: "详情")
-                    Spacer(minLength: 0)
+                    Spacer(minLength: 4)
                     Button {
                         onClose()
                         onOpenLibrary()
                     } label: {
-                        Text("历史记录")
+                        Text("活页夹")
+                            .lineLimit(1)
+                            .fixedSize()
                     }
                     .buttonStyle(MenuFooterActionStyle(fill: palette.secondaryButtonFill))
                 }
@@ -766,16 +1137,16 @@ struct QuickPastePanelView: View {
             selection.itemID = clips.first?.id
         }
         .background(
-            ListKeyCommandMonitor(queryIsEmpty: query.isEmpty, onCommand: { handleKeyCommand($0, clips: clips) })
-                .frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
+            ListKeyCommandMonitor(
+                queryIsEmpty: query.isEmpty,
+                allowHorizontalArrows: effectiveMode == .fan,
+                onCommand: { handleKeyCommand($0, clips: clips) }
+            )
+            .frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
         )
         .background {
-            GeometryReader { proxy in
-                FloatingPanelBackground(palette: palette)
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .clipped()
-            }
-            .allowsHitTesting(false)
+            FolioTheme.folioPage(for: colorScheme)
+                .allowsHitTesting(false)
         }
         .clipShape(RoundedRectangle(cornerRadius: QuickPastePanelLayout.cornerRadius, style: .continuous))
         .overlay(
@@ -791,9 +1162,11 @@ struct QuickPastePanelView: View {
 
     private func handleKeyCommand(_ command: ListKeyCommand, clips: [ClipboardItem]) -> Bool {
         guard !inspector.blocksBackground, !clips.isEmpty else { return false }
-        let selected = clips.first(where: { $0.id == selection.itemID })
+        let activeID = (effectiveMode == .fan ? carouselHoverState.hoveredID : nil) ?? selection.itemID
+        let selected = clips.first(where: { $0.id == activeID })
         switch command {
         case .moveUp, .moveDown:
+            carouselHoverState.hoveredID = nil
             return selection.move(by: command == .moveUp ? -1 : 1, in: clips.map(\.id)) != nil
         case .activate:
             paste(selected ?? clips[0])
@@ -823,10 +1196,10 @@ struct QuickPasteKeyHint: View {
     var body: some View {
         HStack(spacing: 3) {
             Text(keys)
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .font(.system(size: ClipFlowType.mono, weight: .semibold, design: .rounded))
                 .padding(.horizontal, 4).frame(minWidth: 16, minHeight: 16)
                 .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 4))
-            Text(title).font(.system(size: 10))
+            Text(title).font(.system(size: ClipFlowType.mono))
         }
         .foregroundStyle(.secondary)
         .lineLimit(1).fixedSize()
@@ -846,12 +1219,11 @@ struct HUDSelectionChrome: View {
 
     var body: some View {
         let palette = ClipFlowPalette.resolve(for: colorScheme)
+        let accent = FolioTheme.primaryAccent(for: colorScheme)
         RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
             .fill(isSelected ? palette.selectedRowFill : palette.rowFill)
             .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
-                .fill(isSelected ? tint.opacity(0.16) : .clear))
-            .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
-                .strokeBorder(isSelected ? tint.opacity(0.65) : palette.rowBorder,
+                .strokeBorder(isSelected ? accent.opacity(0.70) : palette.rowBorder,
                     lineWidth: isSelected ? 1.5 : 1))
             .animation(reduceMotion ? nil : ClipFlowMotion.rowSelection, value: isSelected)
             .onReceive(selection.$itemID.map { $0 == itemID }.removeDuplicates()) {
@@ -873,13 +1245,17 @@ struct HUDRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: item.isImage || item.kind == .code ? 6 : 4) {
             HStack(spacing: 5) {
-                Image(systemName: iconName).foregroundStyle(item.kind.labelColor(for: colorScheme))
+                AppIconBadgeView(item: item, size: 13)
                 Text(item.kind.label).foregroundStyle(item.kind.labelColor(for: colorScheme)).fixedSize()
                 Text(item.sourceApp).lineLimit(1)
                 if item.pinned { Image(systemName: "pin.fill").foregroundStyle(ClipCategory.pinned.tint) }
                 if item.isSensitive { Image(systemName: "lock.fill").foregroundStyle(item.privacy.color) }
                 Spacer(minLength: 4)
-                Text(item.timeLabel).lineLimit(1).fixedSize()
+                if item.autoExpire && item.expiresAt != nil {
+                    ExpiryCountdownRing(item: item, compact: true)
+                } else {
+                    Text(item.timeLabel).lineLimit(1).fixedSize()
+                }
                 if let shortcutIndex, shortcutIndex < 9 {
                     Text("⌘\(shortcutIndex + 1)")
                         .font(.system(size: 9, weight: .semibold, design: .rounded)).monospacedDigit()

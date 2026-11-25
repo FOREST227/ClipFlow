@@ -61,9 +61,9 @@ final class UIAuditTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(contrast(solid, NSColor.white), 4.5, category.title)
         }
         let brand = try components(ClipCategory.all.solid)
-        XCTAssertEqual(brand.redComponent, 0.15, accuracy: 0.01)
-        XCTAssertEqual(brand.greenComponent, 0.40, accuracy: 0.01)
-        XCTAssertEqual(brand.blueComponent, 0.78, accuracy: 0.01)
+        XCTAssertEqual(brand.redComponent, 0.22, accuracy: 0.01)
+        XCTAssertEqual(brand.greenComponent, 0.42, accuracy: 0.01)
+        XCTAssertEqual(brand.blueComponent, 0.34, accuracy: 0.01)
         XCTAssertEqual(ClipFlowLayout.controlRadius, 10)
         XCTAssertEqual(ClipFlowLayout.rowRadius, 14)
         XCTAssertEqual(ClipFlowLayout.overlayRadius, 22)

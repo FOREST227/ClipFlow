@@ -46,6 +46,7 @@ final class HistorySelectionPerformanceTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         let store = ClipFlowStore(storageDirectory: directory, defaults: defaults)
+        store.libraryViewMode = .list
         let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 800,
             pixelsHigh: 1000, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
             isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))

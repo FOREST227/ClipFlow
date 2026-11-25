@@ -45,6 +45,7 @@ final class InspectorLifecycleTests: XCTestCase {
         let context = try InspectorTestContext()
         defer { context.cleanup() }
         _ = try context.text("Hidden page fixture")
+        context.store.libraryViewMode = .list
         let controller = MainWindowController(store: context.store, locale: Locale(identifier: "zh-Hans"))
         controller.show(page: .history)
         let window = try XCTUnwrap(controller.window)

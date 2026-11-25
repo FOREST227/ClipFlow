@@ -6,7 +6,17 @@ import SwiftUI
 struct InspectorSourceAnchor {
     private weak var view: NSView?
     private let identifier: NSUserInterfaceItemIdentifier?
-    init(view: NSView) { self.view = view; identifier = view.identifier }
+    private let fixedRectInWindow: CGRect?
+    init(view: NSView) {
+        self.view = view
+        self.identifier = view.identifier
+        self.fixedRectInWindow = nil
+    }
+    init(rectInWindow: CGRect) {
+        self.view = nil
+        self.identifier = nil
+        self.fixedRectInWindow = rectInWindow
+    }
     static func callback(for view: NSView, fallback: @escaping () -> Void,
                          anchored: ((InspectorSourceAnchor) -> Void)?) -> () -> Void {
         { [weak view] in
@@ -19,6 +29,9 @@ struct InspectorSourceAnchor {
         }
     }
     func rectInWindow() -> CGRect? {
+        if let fixedRectInWindow {
+            return fixedRectInWindow.width > 1 && fixedRectInWindow.height > 1 ? fixedRectInWindow : nil
+        }
         guard let view, let window = view.window, window.isVisible,
               !view.isHiddenOrHasHiddenAncestor, view.identifier == identifier else { return nil }
         var rect = view.convert(view.visibleRect.intersection(view.bounds), to: nil)

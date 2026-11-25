@@ -14,6 +14,10 @@ final class ClipFlowStore: ObservableObject {
         didSet { ensureSelectionStillValid() }
     }
     let historySelection = HistorySelection()
+    let pasteStack = PasteStackState()
+    @Published var libraryViewMode: LibraryViewMode {
+        didSet { defaults.set(libraryViewMode.rawValue, forKey: Keys.libraryViewMode) }
+    }
     var selectedItemID: ClipboardItem.ID? {
         get { historySelection.itemID }
         set {
@@ -65,6 +69,7 @@ final class ClipFlowStore: ObservableObject {
             itemsRevision += 1
             schedulePersistItems()
             ensureSelectionStillValid()
+            pasteStack.prune(validIDs: Set(items.filter { !$0.isExpired() }.map(\.id)))
             if iCloudSyncEnabled && !isApplyingCloudSnapshot {
                 scheduleICloudSync()
             }
@@ -78,6 +83,7 @@ final class ClipFlowStore: ObservableObject {
     let fileManager = FileManager.default
     let persistenceQueue = DispatchQueue(label: "ClipFlow.persistence", qos: .utility)
     let imagePreviewCache = NSCache<NSString, NSImage>()
+    var inFlightPrewarmFilenames: Set<String> = []
     let historyURL: URL
     let historyWriter: HistoryFileWriter
     let payloadRepository: SensitivePayloadRepository
@@ -109,6 +115,7 @@ final class ClipFlowStore: ObservableObject {
         self.payloadRepository = payloadRepository
         self.accessibility = accessibility
         appearanceMode = ClipFlowAppearance.load(from: defaults)
+        libraryViewMode = defaults.string(forKey: Keys.libraryViewMode).flatMap(LibraryViewMode.init(rawValue:)) ?? .deck
         quickPasteShortcut = ClipFlowShortcut.load(from: defaults)
         let appSupport = storageDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("ClipFlow", isDirectory: true) ?? URL(fileURLWithPath: NSTemporaryDirectory())
@@ -139,6 +146,7 @@ final class ClipFlowStore: ObservableObject {
 
     func start() {
         schedulePersistItems()
+        prewarmQuickPasteAssets(around: 0, limit: maxItems, in: items)
         runStartupPermissionCheck()
         if iCloudSyncEnabled {
             Task { [weak self] in
@@ -243,9 +251,14 @@ final class ClipFlowStore: ObservableObject {
 
         items.insert(item, at: 0)
         trimItemsToLimit()
+        if pasteStack.autoCollectEnabled {
+            pasteStack.enqueue(item.id)
+        }
 
         selectedItemID = selectedItemID ?? item.id
         lastCaptureStatus = "已从 \(sourceApp) 捕获新内容"
+        // Pre-render Code, Markdown, and Tables off the main thread immediately on capture!
+        DetailTextPrewarmer.shared.prewarm(items: [item], store: self, priority: .userInitiated)
     }
 
     func ingestCopiedImage(
@@ -297,9 +310,13 @@ final class ClipFlowStore: ObservableObject {
 
         items.insert(item, at: 0)
         trimItemsToLimit()
+        if pasteStack.autoCollectEnabled {
+            pasteStack.enqueue(item.id)
+        }
 
         selectedItemID = selectedItemID ?? item.id
         lastCaptureStatus = "已从 \(sourceApp) 捕获图片"
+        prewarmQuickPasteAssets(limit: 6)
     }
 
     /// Saved exclusions plus every password-manager id, so an older saved list still skips those apps.
@@ -446,6 +463,7 @@ final class ClipFlowStore: ObservableObject {
 
     enum Keys {
         static let appearanceMode = "appearanceMode"
+        static let libraryViewMode = "libraryViewMode"
         static let capturePaused = "capturePaused"
         static let autoProtectSecrets = "autoProtectSecrets"
         static let sensitiveAutoExpireEnabled = "sensitiveAutoExpireEnabled"

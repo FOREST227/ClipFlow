@@ -39,7 +39,28 @@ final class DocumentationScreenshotTests: XCTestCase {
             ("# 项目笔记\n\n## 本周安排\n- 完成界面调整\n- 整理使用说明\n\n**所有记录，随时找回。**", "文本编辑")
         ]
         for (text, app) in texts { store.ingestCopiedText(text, sourceApp: app, sourceBundleID: nil) }
+        store.ingestCopiedText("您的登录验证码是 482910，5 分钟内有效", sourceApp: "信息", sourceBundleID: "com.apple.MobileSMS")
+        let swiftText = """
+        import AppKit
+        import Combine
+
+        final class ClipboardMonitor: ObservableObject {
+            @Published var items: [ClipboardItem] = []
+            private let pasteboard = NSPasteboard.general
+
+            func captureLatest() {
+                guard let text = pasteboard.string(
+                    forType: .string
+                ) else { return }
+                print("已归入活页叠卡：\\(text.prefix(24))")
+            }
+        }
+        """
+        store.ingestCopiedText(swiftText, sourceApp: "Xcode", sourceBundleID: "com.apple.dt.Xcode")
         if let swift = store.items.first(where: { $0.sourceApp == "Xcode" }) { store.togglePin(swift.id) }
+        for candidate in store.items.prefix(3) where !candidate.isSensitive {
+            store.pasteStack.enqueue(candidate.id)
+        }
         let sample = NSImage(size: NSSize(width: 720, height: 400))
         sample.lockFocus()
         NSColor(calibratedRed: 0.91, green: 0.95, blue: 1, alpha: 1).setFill()
@@ -55,6 +76,9 @@ final class DocumentationScreenshotTests: XCTestCase {
         store.ingestCopiedImage(try XCTUnwrap(image.representation(using: .png, properties: [:])),
             size: sample.size, sourceApp: "预览", sourceBundleID: nil)
         let imageItem = try XCTUnwrap(store.items.first(where: \.isImage))
+        if let swift = store.items.first(where: { $0.sourceApp == "Xcode" }) {
+            store.select(swift)
+        }
         store.lastCaptureStatus = "正在监听系统剪贴板"
         // Rows render their relative time once; items under a second old read "0秒后".
         RunLoop.main.run(until: Date().addingTimeInterval(1.1))
@@ -83,17 +107,38 @@ final class DocumentationScreenshotTests: XCTestCase {
         }
         let controller = MainWindowController(store: store, locale: Locale(identifier: "zh-Hans"))
         let window = try XCTUnwrap(controller.window)
-        window.setContentSize(NSSize(width: 620, height: 780))
+        window.setContentSize(NSSize(width: ClipFlowLayout.libraryWidth, height: ClipFlowLayout.libraryHeight))
         window.appearance = NSAppearance(named: .aqua)
         window.makeKeyAndOrderFront(nil)
         defer { window.close() }
         RunLoop.main.run(until: Date().addingTimeInterval(1.5))
         try save(try XCTUnwrap(window.contentView?.superview), name: "history")
+
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = NSAppearance(named: .darkAqua)
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+        try save(try XCTUnwrap(window.contentView?.superview), name: "folio-dark")
+
+        NSApp.appearance = NSAppearance(named: .aqua)
+        window.appearance = NSAppearance(named: .aqua)
+        store.libraryViewMode = .list
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        try save(try XCTUnwrap(window.contentView?.superview), name: "folio-list")
+        store.libraryViewMode = .deck
+
         controller.navigation.selectSettings(.general)
-        RunLoop.main.run(until: Date().addingTimeInterval(1.5))
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
         try save(try XCTUnwrap(window.contentView?.superview), name: "settings")
-        let backdrop = Color.white
-        try export(QuickPastePanelView(store: store, preferredTargetName: nil,
+        let backdrop = FolioTheme.spineGutter(for: .light)
+        let centerShowcaseItem = store.quickPasteItems.dropFirst(2).first?.id
+        try export(QuickPastePanelView(store: store, preferredTargetName: "Xcode",
+            onPaste: { _ in }, onOpenLibrary: {}, onClose: {}, initialMode: .fan,
+            initialSelectionID: centerShowcaseItem)
+                .padding(12).background(backdrop),
+            size: NSSize(width: QuickPastePanelLayout.floatingCarouselWidth + 24,
+                         height: QuickPastePanelLayout.floatingCarouselHeight + 24),
+            name: "quick-paste-fan")
+        try export(QuickPastePanelView(store: store, preferredTargetName: "Xcode",
             onPaste: { _ in }, onOpenLibrary: {}, onClose: {})
                 .padding(12).background(backdrop),
             size: NSSize(width: 384, height: 612), name: "quick-paste")
@@ -175,8 +220,9 @@ final class DocumentationScreenshotTests: XCTestCase {
         }
         try export(detail(code), size: NSSize(width: 388, height: 624), name: "code-detail")
         try export(detail(markdown), size: NSSize(width: 388, height: 624), name: "markdown-preview") { root in
-            func controls(_ view: NSView) -> [NSSegmentedControl] {
-                (view as? NSSegmentedControl).map { [$0] } ?? view.subviews.flatMap(controls)
+            @MainActor func controls(_ view: NSView) -> [NSSegmentedControl] {
+                if let seg = view as? NSSegmentedControl { return [seg] }
+                return view.subviews.flatMap(controls)
             }
             let picker = try XCTUnwrap(controls(root).first { $0.segmentCount == 2 })
             picker.selectedSegment = 1

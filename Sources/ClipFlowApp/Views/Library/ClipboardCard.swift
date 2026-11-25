@@ -95,17 +95,16 @@ struct LibrarySelectionChrome: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        let accent = FolioTheme.primaryAccent(for: colorScheme)
         RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
             .fill(isSelected ? palette.selectedRowFill : palette.rowFill)
             .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
-                .fill(isSelected ? tint.opacity(colorScheme == .dark ? 0.22 : 0.14) : .clear))
-            .overlay(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
-                .strokeBorder(isSelected ? tint.opacity(0.65) : palette.rowBorder,
+                .strokeBorder(isSelected ? accent.opacity(0.70) : palette.rowBorder,
                     lineWidth: isSelected ? 1.5 : 1))
             .overlay(alignment: .leading) {
-                Capsule().fill(tint).frame(width: 3)
+                Capsule().fill(accent).frame(width: 3)
                     .opacity(isSelected ? 1 : 0)
-                    .padding(.vertical, 18).padding(.leading, 9)
+                    .padding(.vertical, 12).padding(.leading, 9)
             }
             .animation(reduceMotion ? nil : ClipFlowMotion.rowSelection, value: isSelected)
             .onReceive(selection.$itemID.map { $0 == itemID }.removeDuplicates()) {
@@ -141,17 +140,16 @@ struct ClipboardCard: View {
     @ViewState private var isSelected = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: item.kind == .image || item.kind == .code ? 6 : ClipFlowLayout.space4) {
+        VStack(alignment: .leading, spacing: item.kind == .image || item.kind == .code ? 8 : 6) {
             metadata
             if item.isImage {
                 imageContent
             } else if item.kind == .code {
                 Text(String(store.displayFullText(for: item).prefix(1200)))
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(.system(size: ClipFlowType.meta, weight: .medium, design: .monospaced))
                     .lineLimit(5).multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(ClipFlowLayout.space8)
-                    .background(item.kind.tint.opacity(0.045), in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
+                    .padding(.vertical, 2)
                 tags
             } else {
                 Text(summaryLine)
@@ -161,8 +159,8 @@ struct ClipboardCard: View {
                 tags
             }
         }
-        // Reserve the selection rail's gutter even when not selected.
-        .padding(.leading, ClipFlowLayout.space16)
+        // Symmetric breathing room: 9pt from left edge | 3pt bar | 10pt to content.
+        .padding(.leading, 22)
         .padding(.trailing, ClipFlowLayout.space12)
         .padding(.vertical, ClipFlowLayout.space8)
         .frame(maxWidth: .infinity)
@@ -171,41 +169,55 @@ struct ClipboardCard: View {
             if isSelected != $0 { isSelected = $0 }
         }
         .overlay(alignment: .topTrailing) {
-            if let hover { LibraryCardActionBar(hover: hover, pinned: item.pinned) }
+            if let hover {
+                LibraryCardActionBar(hover: hover, pasteStack: store.pasteStack, itemID: item.id, pinned: item.pinned)
+            }
         }
     }
 
     private var metadata: some View {
         HStack(spacing: 6) {
+            AppIconBadgeView(item: item, size: 15)
             Text(item.sourceApp).lineLimit(1)
             Text(item.kind.label)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: ClipFlowType.mono, weight: .semibold))
                 .foregroundStyle(item.kind.labelColor(for: colorScheme))
                 .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(item.kind.tint.opacity(0.1), in: Capsule())
+                .background(item.kind.tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             if item.pinned { Image(systemName: "pin.fill").foregroundStyle(ClipCategory.pinned.labelColor(for: colorScheme)) }
             Spacer(minLength: 4)
-            Text(item.timeLabel).lineLimit(1)
+            if item.autoExpire && item.expiresAt != nil {
+                ExpiryCountdownRing(item: item, compact: true)
+            } else {
+                Text(item.timeLabel).lineLimit(1)
+            }
         }
-        .font(.system(size: 10, weight: .medium))
+        .font(.system(size: ClipFlowType.mono, weight: .medium))
         .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
         .frame(height: 16)
     }
 
     @ViewBuilder private var imageContent: some View {
-        let thumbWidth = LibraryImageThumbnail.width(imageWidth: item.imageWidth, imageHeight: item.imageHeight)
+        let thumbHeight: CGFloat = 104
+        let thumbWidth: CGFloat = {
+            guard let w = item.imageWidth, let h = item.imageHeight, w.isFinite, h.isFinite, w > 0, h > 0 else {
+                return thumbHeight
+            }
+            return min(184, max(68, thumbHeight * w / h))
+        }()
         HStack(alignment: .center, spacing: ClipFlowLayout.space12) {
-            ClipThumbnailView(store: store, item: item, height: LibraryImageThumbnail.height,
+            ClipThumbnailView(store: store, item: item, height: thumbHeight,
                 cornerRadius: ClipFlowLayout.controlRadius, expandsToContainer: false,
-                showsDimensionLabel: false, contentMode: .fit, insetPreview: false)
-                .frame(width: thumbWidth, height: LibraryImageThumbnail.height)
+                showsDimensionLabel: false, contentMode: .fit, insetPreview: true)
+                .frame(width: thumbWidth, height: thumbHeight)
             VStack(alignment: .leading, spacing: ClipFlowLayout.space8) {
-                Text(item.title).font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                Text(item.title).font(.system(size: ClipFlowType.cardTitle, weight: isSelected ? .semibold : .medium))
                     .lineLimit(2)
                 tags
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxHeight: .infinity, alignment: .center)
     }
 
     private var tags: some View {
@@ -218,9 +230,9 @@ struct ClipboardCard: View {
                     .foregroundStyle(item.privacy.color).lineLimit(1)
             }
         }
-        .font(.system(size: 9))
+        .font(.system(size: ClipFlowType.mono))
         .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
-        .frame(height: 12)
+        .frame(height: 13)
     }
 
     private var summaryLine: String {

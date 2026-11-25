@@ -9,7 +9,6 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
     private let onOpenLibrary: () -> Void
     private var panel: QuickPastePanel?
     private var inspector: InspectorPresentation?
-    private var lastAnchorLocation: CGPoint = .zero
 
     init(store: ClipFlowStore, onPaste: @escaping (ClipboardItem) -> Void,
          onPastePlain: @escaping (ClipboardItem) -> Void = { _ in },
@@ -30,7 +29,6 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
 
     func show(anchorAt mouseLocation: CGPoint, preferredTarget: NSRunningApplication?) {
         inspector?.reset()
-        lastAnchorLocation = mouseLocation
         store.prewarmQuickPasteAssets(limit: 24)
         let panel = makePanel(floatingCarousel: true)
         let inspector = InspectorPresentation(driver: AppKitInspectorAnimationDriver())
@@ -58,10 +56,7 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
                     ClipFlowRuntime.shared.pasteSnippetPlain(snippet)
                 },
                 inspector: inspector,
-                initialMode: .fan,
-                onModeChanged: { [weak self] nextMode in
-                    self?.reconfigurePanel(for: nextMode)
-                }
+                initialMode: .fan
             )
         )
 
@@ -93,24 +88,6 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
         panel.orderOut(nil)
         panel.close()
         self.panel = nil
-    }
-
-    private func reconfigurePanel(for mode: QuickPastePresentationMode) {
-        guard let panel else { return }
-        let floating = mode == .fan
-        let size = NSSize(
-            width: floating ? QuickPastePanelLayout.floatingCarouselWidth : QuickPastePanelLayout.panelWidth,
-            height: floating ? QuickPastePanelLayout.floatingCarouselHeight : QuickPastePanelLayout.panelHeight
-        )
-        let center = CGPoint(x: panel.frame.midX, y: panel.frame.midY)
-        panel.hasShadow = !floating
-        panel.setContentSize(size)
-        if floating {
-            configureTransparentPanel(panel)
-        } else {
-            configurePanelMask(panel)
-        }
-        position(panel: panel, near: center, centeredOnCursor: true)
     }
 
     private func makePanel(floatingCarousel: Bool = false) -> QuickPastePanel {
@@ -155,21 +132,6 @@ final class QuickPastePanelController: NSObject, NSWindowDelegate {
             view.layer?.backgroundColor = NSColor.clear.cgColor
             view.layer?.cornerRadius = 0
             view.layer?.masksToBounds = false
-        }
-    }
-
-    private func configurePanelMask(_ panel: QuickPastePanel) {
-        let radius = QuickPastePanelLayout.cornerRadius
-        let views: [NSView] = [panel.contentView, panel.contentView?.superview].compactMap { $0 }
-
-        for view in views {
-            view.wantsLayer = true
-            view.layer?.backgroundColor = NSColor.clear.cgColor
-            view.layer?.cornerRadius = radius
-            view.layer?.masksToBounds = true
-            if #available(macOS 10.15, *) {
-                view.layer?.cornerCurve = .continuous
-            }
         }
     }
 

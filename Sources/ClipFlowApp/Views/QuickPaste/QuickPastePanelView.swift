@@ -10,7 +10,6 @@ struct QuickPastePanelView: View {
     let onClose: () -> Void
     var onPasteSnippet: ((SavedSnippet) -> Void)?
     var onPasteSnippetPlain: ((SavedSnippet) -> Void)?
-    var onModeChanged: ((QuickPastePresentationMode) -> Void)?
 
     @ViewState private var query = ""
     @ViewState private var showsFloatingSearch = false
@@ -34,8 +33,7 @@ struct QuickPastePanelView: View {
          initialScope: QuickPasteScope = .history,
          inspector: InspectorPresentation? = nil,
          initialMode: QuickPastePresentationMode = .list,
-         initialSelectionID: UUID? = nil,
-         onModeChanged: ((QuickPastePresentationMode) -> Void)? = nil) {
+         initialSelectionID: UUID? = nil) {
         self.store = store
         self.preferredTargetName = preferredTargetName
         self.onPaste = onPaste
@@ -44,7 +42,6 @@ struct QuickPastePanelView: View {
         self.onClose = onClose
         self.onPasteSnippet = onPasteSnippet
         self.onPasteSnippetPlain = onPasteSnippetPlain
-        self.onModeChanged = onModeChanged
         self.initialSelectionID = initialSelectionID
         _scope = State(initialValue: initialScope)
         _presentationMode = State(initialValue: initialMode)
@@ -59,18 +56,6 @@ struct QuickPastePanelView: View {
         } else {
             classicListBody(clips: clips)
         }
-    }
-
-    private func switchMode(to next: QuickPastePresentationMode, targetScope: QuickPasteScope? = nil) {
-        if let targetScope {
-            scope = targetScope
-        }
-        guard presentationMode != next else { return }
-        inspector.reset()
-        showsFloatingSearch = false
-        isFloatingSearchFocused = false
-        presentationMode = next
-        onModeChanged?(next)
     }
 
     private func floatingCarouselBody(clips: [ClipboardItem]) -> some View {
@@ -171,16 +156,10 @@ struct QuickPastePanelView: View {
                             Text("复制文字或图片后按 \(store.quickPasteShortcut.displayName) 呼出")
                                 .font(.system(size: ClipFlowType.meta))
                                 .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
-                            if !store.snippets.isEmpty {
-                                Button("查看常用片段") {
-                                    switchMode(to: .list, targetScope: .snippets)
-                                }
-                                .buttonStyle(FolioButtonStyle(prominence: .secondary))
-                            }
                         }
                     }
                     .padding(20)
-                    .frame(width: 244, height: 152)
+                    .frame(width: 244, height: 140)
                     .background(
                         RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
                             .fill(FolioTheme.deckCardFill(depth: 0, for: colorScheme))
@@ -222,9 +201,6 @@ struct QuickPastePanelView: View {
                             } else {
                                 activateFloatingSearch(initialText: nil)
                             }
-                        },
-                        onSwitchToList: {
-                            switchMode(to: .list, targetScope: store.snippets.isEmpty ? .history : .snippets)
                         }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -349,7 +325,6 @@ struct QuickPastePanelView: View {
                 QuickPastePanelHeader(
                     preferredTargetName: preferredTargetName,
                     palette: palette,
-                    onSwitchToFan: onModeChanged != nil ? { switchMode(to: .fan) } : nil,
                     onClose: onClose
                 )
                 QuickPastePanelSearchRow(query: $query, scope: scope, snippetMatchCount: snippetMatches, palette: palette) { next in
@@ -460,12 +435,7 @@ struct QuickPastePanelView: View {
     }
 
     private func handleFanKeyCommand(_ command: ListKeyCommand, clips: [ClipboardItem]) -> Bool {
-        guard !inspector.blocksBackground else { return false }
-        if command == .showSnippets {
-            switchMode(to: .list, targetScope: .snippets)
-            return true
-        }
-        guard !clips.isEmpty else { return false }
+        guard !inspector.blocksBackground, !clips.isEmpty else { return false }
         let activeID = carouselHoverState.hoveredID ?? selection.itemID
         let selected = clips.first(where: { $0.id == activeID })
         switch command {

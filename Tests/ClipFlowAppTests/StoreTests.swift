@@ -34,8 +34,14 @@ final class StoreTests: XCTestCase {
         for index in 0..<80 {
             store.ingestCopiedText("note \(index)", sourceApp: "Editor", sourceBundleID: nil)
         }
-        XCTAssertEqual(store.items.count, 80)
+        XCTAssertEqual(store.items.count, 81, "A pinned row does not consume the 80 unpinned slots")
         XCTAssertNotNil(store.item(withID: pinnedID))
+        XCTAssertTrue(store.items.contains { $0.fullText == "note 0" })
+        store.ingestCopiedText("one more", sourceApp: "Editor", sourceBundleID: nil)
+        XCTAssertEqual(store.items.count, 81)
+        XCTAssertNotNil(store.item(withID: pinnedID))
+        XCTAssertFalse(store.items.contains { $0.fullText == "note 0" })
+        XCTAssertTrue(store.items.contains { $0.fullText == "one more" })
         try await Task.sleep(nanoseconds: 200000000)
     }
 
@@ -87,6 +93,7 @@ final class StoreTests: XCTestCase {
         store.purgeExpired(at: Date().addingTimeInterval(600))
         XCTAssertEqual(store.items.count, 1)
         try await Task.sleep(nanoseconds: 200000000)
+        store.flushPendingPersistence()
         let reloaded = ClipFlowStore(storageDirectory: directory, defaults: defaults, payloadRepository: payloads)
         XCTAssertFalse(reloaded.sensitiveAutoExpireEnabled)
         XCTAssertEqual(reloaded.items.count, 1)

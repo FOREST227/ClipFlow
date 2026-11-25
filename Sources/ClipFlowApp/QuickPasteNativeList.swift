@@ -17,6 +17,7 @@ struct QuickPasteNativeList: NSViewRepresentable {
     let isBlocked: () -> Bool
     let onSelect: (ClipboardItem) -> Void
     let onPaste: (ClipboardItem) -> Void
+    var onPastePlain: (ClipboardItem) -> Void = { _ in }
     let onInspect: (ClipboardItem) -> Void
     let onInspectFrom: (ClipboardItem, InspectorSourceAnchor) -> Void
     @Environment(\.isEnabled) private var enabled
@@ -28,7 +29,7 @@ struct QuickPasteNativeList: NSViewRepresentable {
         proxy?.list = view
         view.update(items: items, store: store, selection: selection, enabled: enabled,
             scheme: scheme, locale: locale, isBlocked: isBlocked, onSelect: onSelect, onPaste: onPaste,
-            onInspect: onInspect, onInspectFrom: onInspectFrom)
+            onPastePlain: onPastePlain, onInspect: onInspect, onInspectFrom: onInspectFrom)
     }
 }
 
@@ -44,6 +45,7 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
     private var locale = Locale(identifier: "zh-Hans")
     private var selectItem: (ClipboardItem) -> Void = { _ in }
     private var pasteItem: (ClipboardItem) -> Void = { _ in }
+    private var pastePlainItem: (ClipboardItem) -> Void = { _ in }
     private var inspectItem: (ClipboardItem) -> Void = { _ in }
     private var inspectFrom: (ClipboardItem, InspectorSourceAnchor) -> Void = { _, _ in }
     private var revealObservation: AnyCancellable?
@@ -85,6 +87,7 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
     func update(items next: [ClipboardItem], store: ClipFlowStore, selection: HistorySelection,
         enabled: Bool, scheme: ColorScheme, locale: Locale, isBlocked: @escaping () -> Bool,
         onSelect: @escaping (ClipboardItem) -> Void, onPaste: @escaping (ClipboardItem) -> Void,
+        onPastePlain: @escaping (ClipboardItem) -> Void = { _ in },
         onInspect: @escaping (ClipboardItem) -> Void,
         onInspectFrom: @escaping (ClipboardItem, InspectorSourceAnchor) -> Void) {
         let changed = items != next
@@ -111,7 +114,8 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
         self.store = store; self.selection = selection
         self.inputEnabled = enabled; self.scheme = scheme; self.locale = locale
         self.blocksInput = isBlocked
-        selectItem = onSelect; pasteItem = onPaste; inspectItem = onInspect; inspectFrom = onInspectFrom
+        selectItem = onSelect; pasteItem = onPaste; pastePlainItem = onPastePlain
+        inspectItem = onInspect; inspectFrom = onInspectFrom
         self.items = next
         if changed || appearanceChanged {
             table.reloadData()
@@ -138,7 +142,7 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
     }
     func numberOfRows(in tableView: NSTableView) -> Int { items.count }
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        QuickPasteCardLayout.height(for: items[row].kind) + (row + 1 < items.count ? QuickPasteCardLayout.spacing : 0)
+        QuickPasteCardLayout.height(for: items[row]) + (row + 1 < items.count ? QuickPasteCardLayout.spacing : 0)
     }
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { ClearRowView() }
@@ -154,7 +158,7 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
     private func configure(_ cell: QuickPasteTableCell, item: ClipboardItem, index: Int) {
         guard let store, let selection else { return }
         let identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
-        cell.cardHeight = QuickPasteCardLayout.height(for: item.kind)
+        cell.cardHeight = QuickPasteCardLayout.height(for: item)
         cell.row.identifier = identifier
         cell.row.interactionEnabled = inputEnabled
         cell.row.update(itemID: item.id,
@@ -164,6 +168,7 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
                 .environment(\.colorScheme, scheme).environment(\.locale, locale)),
             onSelect: { [weak self] in self?.perform(item.id, action: .select) },
             onPaste: { [weak self] in self?.perform(item.id, action: .paste) },
+            onPastePlain: { [weak self] in self?.perform(item.id, action: .pastePlain) },
             onInspect: InspectorSourceAnchor.callback(for: cell.row,
                 fallback: { [weak self] in self?.perform(item.id, action: .inspect) },
                 anchored: { [weak self] source in
@@ -199,7 +204,7 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
         cell.row.openDetails()
         return true
     }
-    private enum Action { case select, paste, inspect }
+    private enum Action { case select, paste, pastePlain, inspect }
     private var canInteract: Bool {
         inputEnabled && !blocksInput() && window?.isVisible == true
             && window?.attachedSheet == nil && !isHiddenOrHasHiddenAncestor && alphaValue > 0
@@ -213,6 +218,7 @@ final class QuickPasteListView: NSScrollView, NSTableViewDataSource, NSTableView
         switch action {
         case .select: selectItem(item)
         case .paste: pasteItem(item)
+        case .pastePlain: pastePlainItem(item)
         case .inspect: inspectItem(item)
         }
     }

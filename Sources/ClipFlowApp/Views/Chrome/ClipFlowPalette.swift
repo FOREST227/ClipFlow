@@ -166,6 +166,7 @@ struct ClipFlowPalette {
         colorScheme == .dark ? Color(red: 0.94, green: 0.73, blue: 0.47) : pausedStatus
     }
 
+    /// Same stops as the elevated library glass. The detail card is not a separate blue shell.
     static func detailShellColors(for colorScheme: ColorScheme) -> (top: Color, bottom: Color) {
         if colorScheme == .dark {
             return (Color(red: 0.149, green: 0.165, blue: 0.204), Color(red: 0.125, green: 0.137, blue: 0.169))

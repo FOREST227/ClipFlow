@@ -8,6 +8,7 @@ struct ContentView: View {
     var onToggleEdgeDock: (() -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isEnabled) private var isPageEnabled
+    @Environment(\.librarySearchFocus) private var searchFocus
     private var motionPreferences = InspectorMotionPreferences()
     private var reduceMotion: Bool { motionPreferences.reduceMotion }
     @StateObject private var inspector: InspectorPresentation
@@ -45,6 +46,7 @@ struct ContentView: View {
                     FolioHeaderBar(
                         store: store,
                         palette: palette,
+                        searchFocus: searchFocus,
                         reservesTrafficLights: reservesTrafficLights,
                         showsInlineCategoryStrip: !reservesTrafficLights,
                         onToggleEdgeDock: onToggleEdgeDock
@@ -105,6 +107,12 @@ struct ContentView: View {
                                 ClipFlowRuntime.shared.paste(current)
                             }
                         },
+                        onPastePlainAction: {
+                            inspector.dismiss(reduceMotion: reduceMotion) {
+                                guard let current = store.item(withID: inspectingItem.id) else { return }
+                                ClipFlowRuntime.shared.pastePlainText(current)
+                            }
+                        },
                         sourceRectInWindow: inspector.snapshot.sourceRectInWindow,
                         motion: inspector.motion
                     ) {
@@ -150,6 +158,19 @@ struct ContentView: View {
         .background(
             InspectorEscapeHandler(onEscape: {
                 guard isPageEnabled, store.startupPermissionReport == nil else { return false }
+                let window = LibrarySearchFocus.eventWindow
+                if LibrarySearchFocus.isComposing(in: window) {
+                    return false
+                }
+                // A committed query leaves on the first Escape. The next one reaches the deck extraction or inspector.
+                if LibrarySearchFocus.escapeClearsQuery(
+                    query: store.searchText,
+                    fieldFocused: LibrarySearchFocus.searchFieldIsFirstResponder(in: window),
+                    isComposing: LibrarySearchFocus.isComposing(in: window)
+                ) {
+                    store.searchText = ""
+                    return true
+                }
                 if store.libraryViewMode == .deck && deckExtraction.isActive {
                     deckExtraction.collapse(reduceMotion: reduceMotion)
                     return true
@@ -211,7 +232,7 @@ struct ContentView: View {
             return store.historySelection.move(by: command == .moveUp ? -1 : 1, in: items.map(\.id)) != nil
         case .activate:
             guard let item = items.first(where: { $0.id == store.selectedItemID }) ?? items.first else { return false }
-            if store.libraryViewMode == .deck {
+            if store.libraryViewMode == .deck && !LibrarySearchFocus.searchFieldIsFirstResponder(in: LibrarySearchFocus.eventWindow) {
                 ClipFlowRuntime.shared.paste(item)
             } else {
                 toggleLibraryInspector(for: item)
@@ -225,11 +246,15 @@ struct ContentView: View {
                 toggleLibraryInspector(for: item)
             }
             return true
+        case .pastePlain:
+            return false
         case .pasteIndex(let index):
             guard let item = HistoryPasteRouting.item(at: index, in: items) else { return false }
             store.select(item)
             ClipFlowRuntime.shared.paste(item)
             return true
+        case .showHistory, .showSnippets, .reorder:
+            return false
         }
     }
 

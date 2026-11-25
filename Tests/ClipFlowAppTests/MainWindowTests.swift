@@ -156,14 +156,14 @@ final class MainWindowTests: XCTestCase {
             preferredTargetName: nil, onPaste: { _ in }, onOpenLibrary: {}, onClose: {}))
         let panel = NSWindow(contentViewController: host)
         panel.isReleasedWhenClosed = false
-        panel.setContentSize(NSSize(width: 360, height: 588))
+        panel.setContentSize(NSSize(width: QuickPastePanelLayout.panelWidth, height: QuickPastePanelLayout.panelHeight))
         panel.orderFront(nil)
         defer { panel.close() }
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         let quickScroll = try XCTUnwrap(scrolls(host.view).first)
         XCTAssertEqual(quickScroll.contentView.bounds.height, 424, accuracy: 0.5)
         XCTAssertTrue(host.view.bounds.contains(quickScroll.convert(quickScroll.bounds, to: host.view)))
-        XCTAssertLessThanOrEqual(host.view.fittingSize.height, 588)
+        XCTAssertLessThanOrEqual(host.view.fittingSize.height, QuickPastePanelLayout.panelHeight)
     }
 
     func testHistorySelectionDoesNotInvalidateWholeStore() throws {
@@ -261,14 +261,16 @@ final class MainWindowTests: XCTestCase {
     func testSidebarOrderAndMotionFollowHistoryThenSettings() throws {
         let navigation = MainWindowNavigation(store: try makeStore())
         XCTAssertEqual(navigation.selectedIndex, 0)
-        navigation.selectSettings(.general)
+        navigation.select(.snippets)
         XCTAssertEqual(navigation.selectedIndex, 1)
+        navigation.selectSettings(.general)
+        XCTAssertEqual(navigation.selectedIndex, 2)
         XCTAssertTrue(navigation.settingsDraft.movesForward)
         navigation.selectSettings(.sync)
-        XCTAssertEqual(navigation.selectedIndex, 3)
+        XCTAssertEqual(navigation.selectedIndex, 4)
         XCTAssertTrue(navigation.settingsDraft.movesForward)
         navigation.selectSettings(.privacy)
-        XCTAssertEqual(navigation.selectedIndex, 2)
+        XCTAssertEqual(navigation.selectedIndex, 3)
         XCTAssertFalse(navigation.settingsDraft.movesForward)
         navigation.select(.history)
         XCTAssertEqual(navigation.selectedIndex, 0)

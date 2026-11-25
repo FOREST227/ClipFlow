@@ -85,14 +85,11 @@ struct ClipThumbnailView: View {
 }
 
 /// A separate hosting surface keeps highlight animation out of image/text layout.
-struct LibrarySelectionChrome: View {
-    let itemID: ClipboardItem.ID
-    let selection: HistorySelection
+struct CardSelectionChrome: View {
+    let isSelected: Bool
     let tint: Color
     let palette: ClipFlowPalette
-    @ViewState private var isSelected = false
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let accent = FolioTheme.primaryAccent(for: colorScheme)
@@ -106,6 +103,21 @@ struct LibrarySelectionChrome: View {
                     .opacity(isSelected ? 1 : 0)
                     .padding(.vertical, 12).padding(.leading, 9)
             }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+struct LibrarySelectionChrome: View {
+    let itemID: ClipboardItem.ID
+    let selection: HistorySelection
+    let tint: Color
+    let palette: ClipFlowPalette
+    @ViewState private var isSelected = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        CardSelectionChrome(isSelected: isSelected, tint: tint, palette: palette)
             .animation(reduceMotion ? nil : ClipFlowMotion.rowSelection, value: isSelected)
             .onReceive(selection.$itemID.map { $0 == itemID }.removeDuplicates()) {
                 if isSelected != $0 { isSelected = $0 }
@@ -140,10 +152,17 @@ struct ClipboardCard: View {
     @ViewState private var isSelected = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: item.kind == .image || item.kind == .code ? 8 : 6) {
+        VStack(alignment: .leading, spacing: item.kind == .image || item.kind == .code || showsTableGrid
+            ? LibraryCardLayout.blockSpacing : 6) {
             metadata
             if item.isImage {
                 imageContent
+            } else if let grid = tableGrid, showsTableGrid {
+                SpreadsheetGridView(grid: grid, style: .inline)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(6)
+                    .background(item.kind.tint.opacity(0.045), in: RoundedRectangle(cornerRadius: ClipFlowLayout.controlRadius, style: .continuous))
+                tags
             } else if item.kind == .code {
                 Text(String(store.displayFullText(for: item).prefix(1200)))
                     .font(.system(size: ClipFlowType.meta, weight: .medium, design: .monospaced))
@@ -162,9 +181,9 @@ struct ClipboardCard: View {
         // Symmetric breathing room: 9pt from left edge | 3pt bar | 10pt to content.
         .padding(.leading, 22)
         .padding(.trailing, ClipFlowLayout.space12)
-        .padding(.vertical, ClipFlowLayout.space8)
+        .padding(.vertical, LibraryCardLayout.contentPadding)
         .frame(maxWidth: .infinity)
-        .frame(height: LibraryCardLayout.height(for: item.kind), alignment: .top)
+        .frame(height: LibraryCardLayout.height(for: item), alignment: .top)
         .onReceive(store.historySelection.$itemID.map { $0 == item.id }.removeDuplicates()) {
             if isSelected != $0 { isSelected = $0 }
         }
@@ -179,7 +198,7 @@ struct ClipboardCard: View {
         HStack(spacing: 6) {
             AppIconBadgeView(item: item, size: 15)
             Text(item.sourceApp).lineLimit(1)
-            Text(item.kind.label)
+            Text(SpreadsheetPreview.typeLabel(for: item))
                 .font(.system(size: ClipFlowType.mono, weight: .semibold))
                 .foregroundStyle(item.kind.labelColor(for: colorScheme))
                 .padding(.horizontal, 6).padding(.vertical, 2)
@@ -194,7 +213,7 @@ struct ClipboardCard: View {
         }
         .font(.system(size: ClipFlowType.mono, weight: .medium))
         .foregroundStyle(ClipFlowPalette.secondaryText(for: colorScheme))
-        .frame(height: 16)
+        .frame(height: LibraryCardLayout.metadataHeight)
     }
 
     @ViewBuilder private var imageContent: some View {
@@ -238,6 +257,16 @@ struct ClipboardCard: View {
     private var summaryLine: String {
         let line = ClipboardCardSummary.plainFirstLine(of: store.displayFullText(for: item))
         return line.isEmpty ? displayedSnippet : line
+    }
+
+    private var tableGrid: SpreadsheetPreviewGrid? {
+        guard store.isRevealed(item) else { return nil }
+        return SpreadsheetPreview.grid(for: item)
+    }
+
+    private var showsTableGrid: Bool {
+        guard let tableGrid else { return false }
+        return tableGrid.rows.count > 1 || tableGrid.columnCount > 1
     }
 }
 

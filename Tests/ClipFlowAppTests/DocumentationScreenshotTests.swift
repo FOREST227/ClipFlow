@@ -79,6 +79,20 @@ final class DocumentationScreenshotTests: XCTestCase {
         if let swift = store.items.first(where: { $0.sourceApp == "Xcode" }) {
             store.select(swift)
         }
+        // Last created sorts first. These stay out of history and use demo text only.
+        store.createSnippet(
+            title: "Swift 模板",
+            body: "func greeting(_ name: String) -> String {\n    return \"你好，\\(name)！\"\n}",
+            category: "代码")
+        store.createSnippet(title: "常用回复", body: "收到，我看完后回复你。", category: "回复")
+        store.createSnippet(
+            title: "邮件签名",
+            body: "ClipFlow 剪流\n复制过的内容，随时找回。",
+            category: "签名")
+        store.createSnippet(
+            title: "公司地址",
+            body: "上海市徐汇区漕溪北路 18 号\n3 楼前台",
+            category: "地址")
         store.lastCaptureStatus = "正在监听系统剪贴板"
         // Rows render their relative time once; items under a second old read "0秒后".
         RunLoop.main.run(until: Date().addingTimeInterval(1.1))
@@ -113,7 +127,6 @@ final class DocumentationScreenshotTests: XCTestCase {
         defer { window.close() }
         RunLoop.main.run(until: Date().addingTimeInterval(1.5))
         try save(try XCTUnwrap(window.contentView?.superview), name: "history")
-
         NSApp.appearance = NSAppearance(named: .darkAqua)
         window.appearance = NSAppearance(named: .darkAqua)
         RunLoop.main.run(until: Date().addingTimeInterval(1.2))
@@ -126,6 +139,9 @@ final class DocumentationScreenshotTests: XCTestCase {
         try save(try XCTUnwrap(window.contentView?.superview), name: "folio-list")
         store.libraryViewMode = .deck
 
+        controller.navigation.select(.snippets)
+        RunLoop.main.run(until: Date().addingTimeInterval(1.5))
+        try save(try XCTUnwrap(window.contentView?.superview), name: "snippets")
         controller.navigation.selectSettings(.general)
         RunLoop.main.run(until: Date().addingTimeInterval(1.2))
         try save(try XCTUnwrap(window.contentView?.superview), name: "settings")
@@ -138,10 +154,14 @@ final class DocumentationScreenshotTests: XCTestCase {
             size: NSSize(width: QuickPastePanelLayout.floatingCarouselWidth + 24,
                          height: QuickPastePanelLayout.floatingCarouselHeight + 24),
             name: "quick-paste-fan")
+        let quickPasteChrome: CGFloat = 12
+        let quickPasteSize = NSSize(
+            width: QuickPastePanelLayout.panelWidth + quickPasteChrome * 2,
+            height: QuickPastePanelLayout.panelHeight + quickPasteChrome * 2)
         try export(QuickPastePanelView(store: store, preferredTargetName: "Xcode",
             onPaste: { _ in }, onOpenLibrary: {}, onClose: {})
-                .padding(12).background(backdrop),
-            size: NSSize(width: 384, height: 612), name: "quick-paste")
+                .padding(quickPasteChrome).background(backdrop),
+            size: quickPasteSize, name: "quick-paste")
         // NSPopover's compositor-owned edge is not included by cacheDisplay.
         // Supply its rounded presentation frame around the unmodified app content.
         let menuHeight = ceil(NSHostingController(rootView: MenuBarView(store: store)
@@ -208,26 +228,20 @@ final class DocumentationScreenshotTests: XCTestCase {
         let markdown = ClipboardClassifier.makeItem(text: markdownText, sourceApp: "文本编辑",
             sourceBundleID: nil, autoProtectSecrets: false, existingItem: nil)
         RunLoop.main.run(until: Date().addingTimeInterval(1.1))
-        func detail(_ item: ClipboardItem) -> some View {
+        func detail(_ item: ClipboardItem, preferMarkdownPreview: Bool = false) -> some View {
             ZStack(alignment: .top) {
                 Color.white
                 LibraryInspectorOverlay(item: item, store: store, palette: .resolve(for: .light),
-                    maxHeight: 576, contentWidth: 340, compactShadow: true, onClose: {}).frame(width: 340)
+                    maxHeight: 576, contentWidth: 340, compactShadow: true,
+                    preferMarkdownPreview: preferMarkdownPreview, onClose: {}).frame(width: 340)
                     .overlay(RoundedRectangle(cornerRadius: 22)
                         .strokeBorder(Color.black.opacity(0.16), lineWidth: 1))
                     .padding(24)
             }.frame(width: 388, height: 624)
         }
         try export(detail(code), size: NSSize(width: 388, height: 624), name: "code-detail")
-        try export(detail(markdown), size: NSSize(width: 388, height: 624), name: "markdown-preview") { root in
-            @MainActor func controls(_ view: NSView) -> [NSSegmentedControl] {
-                if let seg = view as? NSSegmentedControl { return [seg] }
-                return view.subviews.flatMap(controls)
-            }
-            let picker = try XCTUnwrap(controls(root).first { $0.segmentCount == 2 })
-            picker.selectedSegment = 1
-            XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(picker.action), to: picker.target, from: picker))
-        }
+        // The 源码/预览 control is a SwiftUI pill, so the preview is selected up front.
+        try export(detail(markdown, preferMarkdownPreview: true), size: NSSize(width: 388, height: 624), name: "markdown-preview")
         try export(detail(imageItem), size: NSSize(width: 388, height: 624), name: "image-detail")
     }
 }

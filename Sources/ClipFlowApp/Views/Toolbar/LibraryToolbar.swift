@@ -3,6 +3,7 @@ import SwiftUI
 
 struct FolioHeaderBar: View {
     @ObservedObject var store: ClipFlowStore
+    @ObservedObject var searchFocus: LibrarySearchFocusModel
     let palette: ClipFlowPalette
     var reservesTrafficLights = false
     var showsInlineCategoryStrip = false
@@ -10,7 +11,30 @@ struct FolioHeaderBar: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+    @FocusState private var searchFieldFocused: Bool
+    @State private var appliedFocusRequest = 0
     @Namespace private var modeNamespace
+
+    init(
+        store: ClipFlowStore,
+        palette: ClipFlowPalette,
+        searchFocus: LibrarySearchFocusModel? = nil,
+        reservesTrafficLights: Bool = false,
+        showsInlineCategoryStrip: Bool = false,
+        onToggleEdgeDock: (() -> Void)? = nil
+    ) {
+        self.store = store
+        self.palette = palette
+        self.searchFocus = searchFocus ?? .inactive
+        self.reservesTrafficLights = reservesTrafficLights
+        self.showsInlineCategoryStrip = showsInlineCategoryStrip
+        self.onToggleEdgeDock = onToggleEdgeDock
+    }
+
+    private var canClaimSearchFocus: Bool {
+        isEnabled && store.startupPermissionReport == nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -29,6 +53,9 @@ struct FolioHeaderBar: View {
                     TextField("搜索叠卡、来源或标签…", text: $store.searchText)
                         .textFieldStyle(.plain)
                         .font(.system(size: ClipFlowType.body))
+                        .focused($searchFieldFocused)
+                        .accessibilityIdentifier(LibrarySearchFocus.fieldIdentifier)
+                        .background(LibrarySearchFieldAnchor(requestID: searchFocus.requestID, canClaim: canClaimSearchFocus))
 
                     if !store.searchText.isEmpty {
                         Button { store.searchText = "" } label: {
@@ -111,15 +138,45 @@ struct FolioHeaderBar: View {
                 CategoryFilterBar(store: store)
             }
         }
+        .onAppear(perform: claimRequestedFocus)
+        .onChangeBackward(of: searchFocus.requestID) { claimRequestedFocus() }
+        .onChangeBackward(of: canClaimSearchFocus) {
+            if canClaimSearchFocus {
+                claimRequestedFocus()
+            } else if searchFieldFocused {
+                searchFieldFocused = false
+            }
+        }
+    }
+
+    private func claimRequestedFocus() {
+        let request = searchFocus.requestID
+        guard request != 0, request != appliedFocusRequest, canClaimSearchFocus else { return }
+        appliedFocusRequest = request
+        searchFieldFocused = true
     }
 }
 
 struct HeaderView: View {
     @ObservedObject var store: ClipFlowStore
+    @ObservedObject var searchFocus: LibrarySearchFocusModel
     let palette: ClipFlowPalette
 
+    init(store: ClipFlowStore, palette: ClipFlowPalette, searchFocus: LibrarySearchFocusModel? = nil) {
+        self.store = store
+        self.palette = palette
+        self.searchFocus = searchFocus ?? .inactive
+    }
+
     var body: some View {
-        FolioHeaderBar(store: store, palette: palette)
+        FolioHeaderBar(store: store, palette: palette, searchFocus: searchFocus)
+    }
+}
+
+/// Zero-count chips stay off the bar. The selected chip stays so an empty filter is still visible.
+enum CategoryFilterChips {
+    static func isVisible(category: ClipCategory, count: Int, selected: ClipCategory) -> Bool {
+        category == .all || count > 0 || category == selected
     }
 }
 
@@ -131,7 +188,12 @@ struct CategoryFilterBar: View {
     var body: some View {
         CategoryFilterScroll {
             HStack(spacing: ClipFlowLayout.space8) {
-                ForEach(ClipCategory.allCases) { category in
+                ForEach(ClipCategory.allCases.filter { category in
+                    CategoryFilterChips.isVisible(
+                        category: category,
+                        count: store.count(for: category),
+                        selected: store.selectedCategory)
+                }) { category in
                     Button {
                         withAnimation(reduceMotion ? nil : ClipFlowMotion.selection) {
                             store.selectedCategory = category

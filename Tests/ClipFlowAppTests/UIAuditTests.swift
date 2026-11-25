@@ -22,6 +22,26 @@ final class UIAuditTests: XCTestCase {
         XCTAssertNil(HistoryPasteRouting.item(at: -1, in: items))
     }
 
+    func testSharedSwitchTitlesAndRecordingPolarity() {
+        XCTAssertEqual(SharedSettingsCopy.recordClipboard, "记录剪贴板")
+        XCTAssertEqual(SharedSettingsCopy.protectSecrets, "自动保护疑似敏感内容")
+        XCTAssertEqual(SharedSettingsCopy.expireSecrets, "5 分钟后删除敏感内容")
+        XCTAssertEqual(SharedSettingsCopy.syncPlainHistory, "同步普通历史")
+        var paused = false
+        let pausedBinding = Binding(get: { paused }, set: { paused = $0 })
+        let recording = SharedSettingsCopy.recording(isPaused: pausedBinding)
+        XCTAssertTrue(recording.wrappedValue)
+        recording.wrappedValue = false
+        XCTAssertTrue(paused)
+    }
+
+    func testZeroCountFilterChipsStayHiddenUnlessSelected() {
+        XCTAssertTrue(CategoryFilterChips.isVisible(category: .all, count: 0, selected: .all))
+        XCTAssertFalse(CategoryFilterChips.isVisible(category: .protected, count: 0, selected: .all))
+        XCTAssertTrue(CategoryFilterChips.isVisible(category: .protected, count: 0, selected: .protected))
+        XCTAssertTrue(CategoryFilterChips.isVisible(category: .images, count: 2, selected: .all))
+    }
+
     func testCardSummaryUsesThePlainFirstLine() {
         let markdown = "# 项目笔记\n\n## 本周安排\n- 完成界面调整\n**所有记录，随时找回。**"
         XCTAssertEqual(ClipboardCardSummary.plainFirstLine(of: markdown), "项目笔记")

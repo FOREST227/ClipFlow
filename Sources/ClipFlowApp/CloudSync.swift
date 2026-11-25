@@ -80,7 +80,7 @@ struct ClipFlowCloudSyncCoordinator: Sendable {
         let locations = try resolveLocations()
         try prepareUbiquitousItem(at: locations.historyURL)
 
-        let merged = try ClipFlowCloudSyncFile.coordinate(historyAt: locations.historyURL) { readURL, writeURL in
+        let merged = try ClipFlowCloudSyncFile.coordinate(fileAt: locations.historyURL) { readURL, writeURL in
             let remoteState = try ClipFlowCloudSyncFile.readState(at: readURL)
             let merged = ClipFlowHistoryMerge.merge(
                 localItems: localItems,
@@ -127,6 +127,7 @@ struct ClipFlowCloudSyncCoordinator: Sendable {
         let rootURL = documentsURL.appendingPathComponent(documentsFolderName, isDirectory: true)
         let imagesURL = rootURL.appendingPathComponent("images", isDirectory: true)
         let historyURL = rootURL.appendingPathComponent("history.json")
+        let snippetsURL = rootURL.appendingPathComponent("snippets.json")
 
         do {
             try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
@@ -134,7 +135,30 @@ struct ClipFlowCloudSyncCoordinator: Sendable {
         } catch {
             throw ClipFlowCloudSyncError.unavailable
         }
-        return ClipFlowCloudSyncLocations(historyURL: historyURL, imagesURL: imagesURL)
+        return ClipFlowCloudSyncLocations(historyURL: historyURL, imagesURL: imagesURL, snippetsURL: snippetsURL)
+    }
+
+    /// Snippets use their own file so history's item cap cannot evict them.
+    func synchronizeSnippets(
+        localSnippets: [SavedSnippet],
+        tombstones: [UUID: Date]
+    ) throws -> ClipFlowSnippetSyncResult {
+        let locations = try resolveLocations()
+        try prepareUbiquitousItem(at: locations.snippetsURL)
+
+        let merged = try ClipFlowCloudSyncFile.coordinate(fileAt: locations.snippetsURL) { readURL, writeURL in
+            let remoteState = try ClipFlowCloudSyncFile.readSnippetState(at: readURL)
+            let merged = ClipFlowSnippetMerge.merge(
+                localSnippets: localSnippets,
+                remoteSnippets: remoteState.snippets,
+                localTombstones: tombstones,
+                remoteTombstones: remoteState.tombstones
+            )
+            try ClipFlowCloudSyncFile.writeSnippetsIfChanged(merged, replacing: remoteState, at: writeURL)
+            return merged
+        }
+
+        return ClipFlowSnippetSyncResult(snippets: merged.snippets, tombstones: merged.tombstones)
     }
 
     private func prepareCloudAssetIfNeeded(for item: ClipboardItem, cloudImagesDirectoryURL: URL) throws {
@@ -203,11 +227,112 @@ actor ClipFlowCloudSyncWorker {
     ) throws -> ClipFlowCloudSyncResult {
         try coordinator.synchronize(localItems: localItems, tombstones: tombstones, maxItems: maxItems)
     }
+
+    func synchronizeSnippets(
+        using coordinator: ClipFlowCloudSyncCoordinator,
+        localSnippets: [SavedSnippet],
+        tombstones: [UUID: Date]
+    ) throws -> ClipFlowSnippetSyncResult {
+        try coordinator.synchronizeSnippets(localSnippets: localSnippets, tombstones: tombstones)
+    }
 }
 
 private struct ClipFlowCloudSyncLocations {
     let historyURL: URL
     let imagesURL: URL
+    let snippetsURL: URL
+}
+
+struct ClipFlowSnippetSyncState: Codable, Equatable, Sendable {
+    var schemaVersion: Int
+    var updatedAt: Date
+    var snippets: [SavedSnippet]
+    var tombstones: [UUID: Date]
+
+    init(
+        schemaVersion: Int = 1,
+        updatedAt: Date = Date(),
+        snippets: [SavedSnippet] = [],
+        tombstones: [UUID: Date] = [:]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.updatedAt = updatedAt
+        self.snippets = snippets
+        self.tombstones = tombstones
+    }
+}
+
+struct ClipFlowSnippetSyncResult: Sendable {
+    let snippets: [SavedSnippet]
+    let tombstones: [UUID: Date]
+}
+
+struct ClipFlowMergedSnippets: Equatable, Sendable {
+    var snippets: [SavedSnippet]
+    var tombstones: [UUID: Date]
+}
+
+/// Snippet identity wins over whole-file replacement. A newer edit beats a tombstone.
+/// Nothing here applies the history item cap.
+final class ClipFlowSnippetMerge {
+    private init() {}
+
+    static func merge(
+        localSnippets: [SavedSnippet],
+        remoteSnippets: [SavedSnippet],
+        localTombstones: [UUID: Date],
+        remoteTombstones: [UUID: Date],
+        now: Date = Date()
+    ) -> ClipFlowMergedSnippets {
+        let tombstones = prune(mergeTombstones(localTombstones, remoteTombstones), now: now)
+        var byID: [UUID: SavedSnippet] = [:]
+        for snippet in remoteSnippets + localSnippets {
+            guard !snippet.localOnly, shouldKeep(snippet, tombstones: tombstones) else { continue }
+            if let existing = byID[snippet.id] {
+                byID[snippet.id] = preferred(existing, snippet)
+            } else {
+                byID[snippet.id] = snippet
+            }
+        }
+        return ClipFlowMergedSnippets(snippets: SnippetLibrary.sorted(Array(byID.values)), tombstones: tombstones)
+    }
+
+    private static func shouldKeep(_ snippet: SavedSnippet, tombstones: [UUID: Date]) -> Bool {
+        guard let tombstone = tombstones[snippet.id] else { return true }
+        return snippet.updatedAt > tombstone
+    }
+
+    private static func mergeTombstones(_ lhs: [UUID: Date], _ rhs: [UUID: Date]) -> [UUID: Date] {
+        var merged = lhs
+        for (id, date) in rhs {
+            if let existing = merged[id] {
+                if date > existing { merged[id] = date }
+            } else {
+                merged[id] = date
+            }
+        }
+        return merged
+    }
+
+    private static func prune(_ tombstones: [UUID: Date], now: Date) -> [UUID: Date] {
+        let cutoff = now.addingTimeInterval(-30 * 24 * 60 * 60)
+        return tombstones.filter { $0.value >= cutoff }
+    }
+
+    private static func preferred(_ lhs: SavedSnippet, _ rhs: SavedSnippet) -> SavedSnippet {
+        if lhs.updatedAt != rhs.updatedAt {
+            return lhs.updatedAt > rhs.updatedAt ? lhs : rhs
+        }
+        return canonical(lhs, rhs)
+    }
+
+    private static func canonical(_ lhs: SavedSnippet, _ rhs: SavedSnippet) -> SavedSnippet {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let left = [UInt8]((try? encoder.encode(lhs)) ?? Data())
+        let right = [UInt8]((try? encoder.encode(rhs)) ?? Data())
+        return left.lexicographicallyPrecedes(right) ? rhs : lhs
+    }
 }
 
 struct ClipFlowMergedHistory: Equatable, Sendable {
@@ -239,12 +364,10 @@ final class ClipFlowHistoryMerge {
             }
         }
 
-        var items = byID.values.sorted(by: ClipboardItemOrder.isBefore)
-        if items.count > maxItems {
-            let pinned = items.filter(\.pinned)
-            let rest = items.filter { !$0.pinned }
-            items = pinned + rest.prefix(max(0, maxItems - pinned.count))
-        }
+        let items = HistoryRetention.partition(
+            byID.values.sorted(by: ClipboardItemOrder.isBefore),
+            limit: maxItems
+        ).kept
         return ClipFlowMergedHistory(items: items, tombstones: tombstones)
     }
 
@@ -303,7 +426,7 @@ final class ClipFlowCloudSyncFile {
     private init() {}
 
     static func coordinate<T: Sendable>(
-        historyAt url: URL,
+        fileAt url: URL,
         _ body: (URL, URL) throws -> T
     ) throws -> T {
         let coordinator = NSFileCoordinator(filePresenter: nil)
@@ -356,6 +479,52 @@ final class ClipFlowCloudSyncFile {
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
+        let data: Data
+        do {
+            data = try encoder.encode(state)
+        } catch {
+            throw ClipFlowCloudSyncError.writeFailed
+        }
+        if let existing = try? Data(contentsOf: url), existing == data {
+            return
+        }
+        do {
+            try data.write(to: url, options: [.atomic])
+        } catch {
+            throw ClipFlowCloudSyncError.writeFailed
+        }
+    }
+
+    static func readSnippetState(at url: URL) throws -> ClipFlowSnippetSyncState {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return ClipFlowSnippetSyncState()
+        }
+        do {
+            let data = try Data(contentsOf: url)
+            return try JSONDecoder().decode(ClipFlowSnippetSyncState.self, from: data)
+        } catch {
+            throw ClipFlowCloudSyncError.invalidState
+        }
+    }
+
+    static func writeSnippetsIfChanged(
+        _ merged: ClipFlowMergedSnippets,
+        replacing remote: ClipFlowSnippetSyncState,
+        at url: URL
+    ) throws {
+        let snippets = merged.snippets.filter { !$0.localOnly }
+        guard remote.snippets != snippets || remote.tombstones != merged.tombstones else {
+            return
+        }
+        let state = ClipFlowSnippetSyncState(
+            schemaVersion: remote.schemaVersion,
+            updatedAt: Date(),
+            snippets: snippets,
+            tombstones: merged.tombstones
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .deferredToDate
         let data: Data
         do {
             data = try encoder.encode(state)

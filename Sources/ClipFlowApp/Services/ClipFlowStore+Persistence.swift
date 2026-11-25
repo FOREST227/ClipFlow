@@ -183,36 +183,59 @@ extension ClipFlowStore {
     func schedulePersistItems() {
         guard historyLoadError == nil else { return }
 
-        let data: Data
+        // Keychain redaction stays on the main actor. JSON encoding of a full
+        // history is the slow part, so it runs on the persistence queue.
+        let redacted: [ClipboardItem]
         do {
-            data = try persistedHistoryData(for: items)
+            redacted = try redactedItems(items)
         } catch {
             report(error)
             return
         }
 
         pendingPersistWorkItem?.cancel()
-        let generation = historyWriter.stage(data)
         let writer = historyWriter
         let writerBlock: @Sendable () -> Void = {
+            let data: Data
+            do {
+                data = try JSONEncoder().encode(redacted)
+            } catch {
+                Task { @MainActor in
+                    ClipFlowStore.shared.lastCaptureStatus = SensitivePayloadStore.encodingFailure
+                }
+                return
+            }
+            let generation = writer.stage(data)
             if writer.writeIfCurrent(generation) == .failed {
                 Task { @MainActor in
                     ClipFlowStore.shared.lastCaptureStatus = "保存历史记录失败"
                 }
             }
         }
-        let workItem = DispatchWorkItem(qos: .utility, flags: .assignCurrentContext, block: writerBlock)
+        let workItem = DispatchWorkItem(qos: .userInitiated, flags: .assignCurrentContext, block: writerBlock)
         pendingPersistWorkItem = workItem
-        persistenceQueue.asyncAfter(deadline: .now() + 0.12, execute: workItem)
+        persistenceQueue.asyncAfter(deadline: .now() + 0.08, execute: workItem)
     }
 
     /// Writes any debounced history snapshot immediately. Safe when nothing is waiting.
     func flushPendingPersistence() {
         pendingPersistWorkItem?.cancel()
         pendingPersistWorkItem = nil
-        if historyWriter.flush() == .failed {
-            lastCaptureStatus = "保存历史记录失败"
+        // Let a cancelled encode finish before the latest snapshot replaces it.
+        persistenceQueue.sync {}
+        // A failed load must keep the original history file. There is nothing safe to write.
+        guard historyLoadError == nil else {
+            if historyWriter.flush() == .failed {
+                lastCaptureStatus = "保存历史记录失败"
+            }
+            return
         }
+        do {
+            try historyWriter.writeNow(try persistedHistoryData(for: items))
+        } catch {
+            report(error)
+        }
+        flushPendingSnippets()
     }
 
     /// Writes the latest history snapshot now and drops the delayed copy.
@@ -221,15 +244,18 @@ extension ClipFlowStore {
         flushPendingPersistence()
     }
 
-    private func persistedHistoryData(for items: [ClipboardItem]) throws -> Data {
-        let redacted: [ClipboardItem]
+    private func redactedItems(_ items: [ClipboardItem]) throws -> [ClipboardItem] {
         do {
-            redacted = try items.map {
+            return try items.map {
                 try SensitivePayloadStore.redactedForDisk($0, repository: payloadRepository, digests: payloadDigests)
             }
         } catch {
             throw HistoryPersistError.keychain(error)
         }
+    }
+
+    private func persistedHistoryData(for items: [ClipboardItem]) throws -> Data {
+        let redacted = try redactedItems(items)
         do {
             return try JSONEncoder().encode(redacted)
         } catch {

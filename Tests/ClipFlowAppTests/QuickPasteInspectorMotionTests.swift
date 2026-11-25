@@ -7,6 +7,7 @@ import XCTest
 @MainActor
 final class InspectorHUDProbe {
     var pasted: [UUID] = []
+    var plainPastes: [UUID] = []
     var closes = 0
 }
 
@@ -24,10 +25,11 @@ final class InspectorHUDHarness {
         inspector = InspectorPresentation(driver: driver)
         let probe = self.probe
         host = NSHostingController(rootView: AnyView(QuickPastePanelView(store: context.store,
-            preferredTargetName: nil, onPaste: { probe.pasted.append($0.id) }, onOpenLibrary: {},
+            preferredTargetName: nil, onPaste: { probe.pasted.append($0.id) },
+            onPastePlain: { probe.plainPastes.append($0.id) }, onOpenLibrary: {},
             onClose: { probe.closes += 1 }, inspector: inspector)
             .environment(\.inspectorMotionPolicy, InspectorMotionPolicy(reduceMotion: reduceMotion, reduceTransparency: reduceTransparency))))
-        window = QuickPastePanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 588),
+        window = QuickPastePanel(contentRect: NSRect(x: 0, y: 0, width: QuickPastePanelLayout.panelWidth, height: QuickPastePanelLayout.panelHeight),
             styleMask: .borderless, backing: .buffered, defer: false)
         window.contentViewController = host
         window.isReleasedWhenClosed = false

@@ -1,6 +1,25 @@
 import AppKit
 import SwiftUI
 
+private enum MarkdownDisplay: String, CaseIterable, Hashable {
+    case source
+    case preview
+
+    var title: String {
+        switch self {
+        case .source: "源码"
+        case .preview: "预览"
+        }
+    }
+
+    var accessibilityIdentifier: String {
+        switch self {
+        case .source: "markdown-source"
+        case .preview: "markdown-preview"
+        }
+    }
+}
+
 struct LibraryInspectorOverlay: View {
     let item: ClipboardItem
     @ObservedObject var store: ClipFlowStore
@@ -10,6 +29,7 @@ struct LibraryInspectorOverlay: View {
     var compactShadow = false
     var useBinderExtractMotion = false
     var onPasteAction: (() -> Void)? = nil
+    var onPastePlainAction: (() -> Void)? = nil
     var sourceRectInWindow: CGRect? = nil
     var motion: InspectorMotionProgress? = nil
     @ViewState private var destinationRectInWindow: CGRect = .zero
@@ -20,6 +40,21 @@ struct LibraryInspectorOverlay: View {
     @Environment(\.colorScheme) private var textColorScheme
     @ViewState private var showsMarkdownPreview = false
     @ViewState private var codeLanguage = "自动识别"
+    private var showsSpreadsheetText: Bool {
+        SpreadsheetClipboard.hasTabularData(item) || item.labels.contains("表格")
+    }
+    private var tableGrid: SpreadsheetPreviewGrid? {
+        guard !item.isSensitive || store.isRevealed(item) else { return nil }
+        return SpreadsheetPreview.grid(for: item)
+    }
+    private var showsTableGrid: Bool {
+        guard let tableGrid else { return false }
+        return tableGrid.rows.count > 1 || tableGrid.columnCount > 1
+    }
+    private var heading: String {
+        if item.isSensitive && !store.isRevealed(item) { return "受保护的敏感内容" }
+        return SpreadsheetPreview.title(for: item)
+    }
     private var markdownAvailable: Bool {
         (!item.isSensitive || store.isRevealed(item)) && DetailTextFormat.isMarkdown(store.displayFullText(for: item))
     }
@@ -45,8 +80,10 @@ struct LibraryInspectorOverlay: View {
     init(item: ClipboardItem, store: ClipFlowStore, palette: ClipFlowPalette,
          maxHeight: CGFloat, contentWidth: CGFloat = 438, compactShadow: Bool = false,
          useBinderExtractMotion: Bool = false,
-         onPasteAction: (() -> Void)? = nil, sourceRectInWindow: CGRect? = nil,
-         motion: InspectorMotionProgress? = nil, onClose: @escaping () -> Void) {
+         onPasteAction: (() -> Void)? = nil, onPastePlainAction: (() -> Void)? = nil,
+         sourceRectInWindow: CGRect? = nil,
+         motion: InspectorMotionProgress? = nil,
+         preferMarkdownPreview: Bool = false, onClose: @escaping () -> Void) {
         self.item = item
         _store = ObservedObject(wrappedValue: store)
         self.palette = palette
@@ -55,17 +92,21 @@ struct LibraryInspectorOverlay: View {
         self.compactShadow = compactShadow
         self.useBinderExtractMotion = useBinderExtractMotion
         self.onPasteAction = onPasteAction
+        self.onPastePlainAction = onPastePlainAction
         self.sourceRectInWindow = sourceRectInWindow
         self.motion = motion
+        _showsMarkdownPreview = State(initialValue: preferMarkdownPreview)
         self.onClose = onClose
     }
 
     private let drawerHeaderHeight: CGFloat = 84
     private var drawerFooterHeight: CGFloat {
-        measuredFooterHeight > 1 ? measuredFooterHeight : 96
+        if measuredFooterHeight > 1 { return measuredFooterHeight }
+        return PlainTextPaste.hasRichText(item) ? 136 : 96
     }
     private var drawerHeight: CGFloat {
         if item.isImage || item.kind == .code || markdownAvailable { return maxHeight }
+        if showsTableGrid, let tableGrid { return tableDrawerHeight(for: tableGrid) }
         let font = NSFont.systemFont(ofSize: 13)
         let bounds = (store.displayFullText(for: item) as NSString).boundingRect(
             with: CGSize(width: max(160, contentWidth - 64), height: .greatestFiniteMagnitude),
@@ -73,7 +114,15 @@ struct LibraryInspectorOverlay: View {
         return min(maxHeight, drawerHeaderHeight + max(64, ceil(bounds.height) + 24) + drawerFooterHeight + 24)
     }
     private var drawerBodyHeight: CGFloat { max(64, drawerHeight - drawerHeaderHeight - drawerFooterHeight - 24) }
-    private var previewHeight: CGFloat { item.isImage ? max(64, drawerBodyHeight - 24) : drawerBodyHeight }
+    private var previewHeight: CGFloat { drawerBodyHeight }
+
+    /// A short sheet stays about as tall as its rows. A long sheet stops at the pane and scrolls.
+    private func tableDrawerHeight(for grid: SpreadsheetPreviewGrid) -> CGFloat {
+        let caption: CGFloat = grid.overflowCaption == nil ? 0 : 26
+        let gridBlock = CGFloat(grid.rows.count) * 34 + 20 + caption
+        let natural = drawerHeaderHeight + gridBlock + drawerFooterHeight + 24
+        return min(maxHeight, max(240, natural))
+    }
 
     var body: some View {
         // Build rich content and measure text once per content/state change, not per animation tick.
@@ -157,12 +206,15 @@ struct LibraryInspectorOverlay: View {
                         Color.clear.preference(key: InspectorFooterHeightKey.self, value: proxy.size.height + ClipFlowLayout.space16)
                     })
                     .opacity(bodyOpacity)
-                    .allowsHitTesting(frame.contentOpacity >= 0.99)
-                    .accessibilityHidden(frame.contentOpacity < 0.99)
+                    .allowsHitTesting(frame.contentOpacity > 0.8)
+                    .accessibilityHidden(frame.contentOpacity <= 0.8)
                     .frame(width: max(1, contentWidth - 24), alignment: .topLeading)
                     .offset(x: drawer.shellRect.minX + 12, y: drawer.coverTop + 16)
                 }
                 .frame(width: contentWidth, height: height, alignment: .topLeading)
+                // Flatten text into the cover before masking. Without this, button titles
+                // stay in a second layer and the live window shows empty pills.
+                .compositingGroup()
                 .mask(InspectorDrawerCoverShape(lipDepth: drawer.lipDepth).path(in: coverRect))
                 .opacity(coverOpacity)
             }
@@ -201,10 +253,10 @@ struct LibraryInspectorOverlay: View {
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: ClipFlowLayout.space4) {
                     HStack(spacing: ClipFlowLayout.space8) {
-                        Text(item.isSensitive && !store.isRevealed(item) ? "受保护的敏感内容" : item.title)
+                        Text(heading)
                             .font(.system(size: 16, weight: .semibold))
                             .lineLimit(1)
-                        Text(item.kind.label)
+                        Text(SpreadsheetPreview.typeLabel(for: item))
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(item.kind.labelColor(for: textColorScheme))
                             .padding(.horizontal, ClipFlowLayout.space8)
@@ -238,6 +290,7 @@ struct LibraryInspectorOverlay: View {
                     if (!item.isSensitive || store.isRevealed(item)), let url = store.imageURL(for: item) {
                         ZoomableDetailImage(
                             url: url,
+                            fillsHeight: false,
                             placeholder: store.cachedImagePreview(for: item),
                             canvasBackground: unifiedWellNSColor
                         )
@@ -255,15 +308,35 @@ struct LibraryInspectorOverlay: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else if let grid = tableGrid, showsTableGrid {
+                SpreadsheetGridView(grid: grid, style: .detail)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(height: previewHeight)
+                    .padding(.bottom, ClipFlowLayout.space8)
+                    .background(unifiedWellColor,
+                        in: RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ClipFlowLayout.rowRadius, style: .continuous)
+                            .strokeBorder(FolioTheme.hairline(for: textColorScheme), lineWidth: 1)
+                    )
             } else if item.kind == .code || markdownAvailable {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         if markdownAvailable {
-                            Picker("显示方式", selection: $showsMarkdownPreview) {
-                                Text("源码").tag(false)
-                                Text("预览").tag(true)
-                            }
-                            .pickerStyle(.segmented).labelsHidden().frame(width: 110)
+                            ClipFlowPillPicker(
+                                options: MarkdownDisplay.allCases,
+                                selection: Binding(
+                                    get: { showsMarkdownPreview ? MarkdownDisplay.preview : .source },
+                                    set: { showsMarkdownPreview = $0 == .preview }
+                                ),
+                                accessibilityTitle: "显示方式",
+                                width: 148,
+                                height: 28,
+                                title: \.title,
+                                optionAccessibilityLabel: \.title,
+                                accessibilityIdentifier: \.accessibilityIdentifier
+                            )
                         }
                         Spacer(minLength: 4)
                         if !showsMarkdownPreview {
@@ -304,7 +377,8 @@ struct LibraryInspectorOverlay: View {
             } else {
                 SoftEdgeScrollView(showsEdgeEffects: false) {
                     Text(displayText)
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.system(size: item.kind == .code ? 12 : 13, weight: .regular,
+                            design: item.kind == .code || showsSpreadsheetText ? .monospaced : .default))
                         .lineSpacing(4)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -319,59 +393,118 @@ struct LibraryInspectorOverlay: View {
             }
     }
 
+    private var offersExcelInsert: Bool {
+        ExcelInsertOffer.shouldOffer(item: item, bundleIDs: ExcelInsertContext.currentBundleIDs())
+    }
+
+    private var actionSet: InspectorActionSet {
+        InspectorCommands.actions(
+            pinned: item.pinned,
+            canSaveSnippet: SnippetLibrary.canSave(item),
+            showsReveal: item.privacy != .standard,
+            revealed: store.isRevealed(item),
+            hasRichText: PlainTextPaste.hasRichText(item),
+            hasOriginalTypes: SpreadsheetClipboard.hasOriginalTypes(item),
+            offersExcelInsert: offersExcelInsert
+        )
+    }
+
     private var drawerActions: some View {
-            let isQueued = store.pasteStack.contains(item.id)
-            return HStack(spacing: 8) {
-                Button("复制") {
-                    let copied = ClipFlowRuntime.shared.copyToClipboard(item)
-                    copyFeedback = copied ? "已复制到剪贴板" : store.lastCaptureStatus
-                }
-                .buttonStyle(FolioButtonStyle(prominence: .secondary, height: 28, horizontalPadding: 12))
-                Button("粘贴") {
-                    if let onPasteAction { onPasteAction() }
-                    else { ClipFlowRuntime.shared.paste(item); onClose() }
-                }
-                .buttonStyle(FolioButtonStyle(prominence: .primary, height: 28, horizontalPadding: 14))
-                .background(InspectorFrameReader(name: "ClipFlowInspector.paste"))
-                Button { store.togglePin(item.id) } label: {
-                    Image(systemName: item.pinned ? "pin.fill" : "pin")
-                        .foregroundStyle(item.pinned ? ClipCategory.pinned.labelColor(for: textColorScheme) : Color.primary.opacity(0.82))
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(FolioButtonStyle(prominence: .secondary, height: 28, horizontalPadding: 0))
-                .help(item.pinned ? "取消置顶" : "置顶条目")
-                .accessibilityLabel(item.pinned ? "取消置顶" : "置顶条目")
-                Button { store.pasteStack.toggle(item.id) } label: {
-                    Image(systemName: isQueued ? "checkmark" : "plus")
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(FolioButtonStyle(prominence: isQueued ? .tonalAccent : .secondary, height: 28, horizontalPadding: 0))
-                .help(isQueued ? "移出顺序粘贴" : "加入顺序粘贴")
-                if item.privacy != .standard {
-                    Button(store.isRevealed(item) ? "隐藏" : "显示") { store.toggleReveal(item.id) }
-                        .buttonStyle(FolioButtonStyle(prominence: .secondary, height: 28, horizontalPadding: 10))
-                }
-                if let url = item.primaryURL {
-                    Button {
-                        NSWorkspace.shared.open(url)
-                    } label: {
-                        Image(systemName: "safari").frame(width: 28, height: 28)
-                    }
-                    .buttonStyle(FolioButtonStyle(prominence: .secondary, height: 28, horizontalPadding: 0))
-                    .help("访问链接")
-                }
-                Spacer(minLength: 0)
-                Button {
-                    confirmsDelete = true
-                } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(ClipFlowPalette.secondaryText(for: textColorScheme))
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(FolioButtonStyle(prominence: .secondary, height: 28, horizontalPadding: 0))
-                .help("删除条目")
-                .accessibilityLabel("删除条目")
+        let set = actionSet
+        return InspectorActionFlow(commands: set.commands, iconClusterCount: set.iconClusterCount) { command in
+            commandButton(command, action: command.id == .more ? { showOverflowMenu() } : nil)
+                .background(InspectorFrameReader(name: InspectorAnchor.action(command.id)))
+        }
+        .background(InspectorFrameReader(name: InspectorAnchor.actions))
+    }
+
+    private func commandButton(_ command: InspectorCommand, action: (() -> Void)? = nil) -> some View {
+        InspectorCommandButton(
+            command: command,
+            fill: command.isPrimary ? FolioTheme.primaryAccent(for: textColorScheme) : palette.rowFill,
+            foreground: command.isPrimary ? .white : Color.primary,
+            border: command.isPrimary ? .clear : FolioTheme.hairline(for: textColorScheme),
+            action: {
+                if let action { action() } else { perform(command) }
             }
+        )
+    }
+
+    private func showOverflowMenu() {
+        let entries = InspectorCommands.overflowMenu(
+            pinned: item.pinned,
+            canSaveSnippet: SnippetLibrary.canSave(item),
+            hasRichText: PlainTextPaste.hasRichText(item),
+            canOpenURL: item.primaryURL != nil,
+            canRevealInFinder: InspectorCommands.canRevealInFinder(item),
+            hasOriginalTypes: SpreadsheetClipboard.hasOriginalTypes(item),
+            offersExcelInsert: offersExcelInsert
+        )
+        InspectorOverflowMenu.present(entries: entries) { action in
+            performOverflow(action)
+        }
+    }
+
+    private func performOverflow(_ action: InspectorOverflowAction) {
+        switch action.id {
+        case .copyPlain:
+            perform(.init(id: .copyPlain, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
+        case .pastePlain:
+            perform(.init(id: .pastePlain, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
+        case .pin:
+            store.togglePin(item.id)
+        case .saveSnippet:
+            store.requestSaveSnippet(fromItemID: item.id)
+        case .openURL:
+            if let url = item.primaryURL { NSWorkspace.shared.open(url) }
+        case .revealInFinder:
+            if let url = InspectorCommands.finderURL(for: item) {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        case .copyOriginal:
+            perform(.init(id: .copyOriginal, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
+        case .insertDown:
+            perform(.init(id: .insertDown, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
+        case .insertRight:
+            perform(.init(id: .insertRight, title: action.title, symbol: action.symbol, accessibilityLabel: action.title))
+        case .delete:
+            store.delete(item.id)
+            onClose()
+        }
+    }
+
+    private func perform(_ command: InspectorCommand) {
+        switch command.id {
+        case .copy:
+            let copied = ClipFlowRuntime.shared.copyToClipboard(item)
+            copyFeedback = copied ? "已复制到剪贴板" : store.lastCaptureStatus
+        case .paste:
+            if let onPasteAction { onPasteAction() }
+            else { ClipFlowRuntime.shared.paste(item); onClose() }
+        case .pin:
+            store.togglePin(item.id)
+        case .saveSnippet:
+            store.requestSaveSnippet(fromItemID: item.id)
+        case .reveal:
+            store.toggleReveal(item.id)
+        case .copyOriginal:
+            let copied = ClipFlowRuntime.shared.copyOriginalToClipboard(item)
+            copyFeedback = copied ? "已放回剪贴板，未粘贴" : store.lastCaptureStatus
+        case .insertDown:
+            ClipFlowRuntime.shared.insertIntoExcel(item, shift: .down)
+            onClose()
+        case .insertRight:
+            ClipFlowRuntime.shared.insertIntoExcel(item, shift: .right)
+            onClose()
+        case .copyPlain:
+            let copied = ClipFlowRuntime.shared.copyPlainText(item)
+            copyFeedback = copied ? "已复制纯文本到剪贴板" : store.lastCaptureStatus
+        case .pastePlain:
+            if let onPastePlainAction { onPastePlainAction() }
+            else { ClipFlowRuntime.shared.pastePlainText(item); onClose() }
+        case .more:
+            break
+        }
     }
 
     private var drawerInfo: some View {

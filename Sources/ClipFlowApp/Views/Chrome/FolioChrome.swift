@@ -466,6 +466,23 @@ struct FolioSpineTabsView: View {
 
             Spacer(minLength: 6)
 
+            let snippetsSelected = navigation.page == .snippets
+            spineButton(
+                title: "片段",
+                count: store.snippets.count,
+                fill: snippetsSelected
+                    ? FolioTheme.folioPage(for: colorScheme)
+                    : FolioTheme.spineTabFill(for: .pinned, scheme: colorScheme),
+                accent: FolioTheme.spineTabAccent(for: .pinned, scheme: colorScheme),
+                isSelected: snippetsSelected,
+                accessibilityTitle: "常用片段，\(store.snippets.count) 个"
+            ) {
+                NSApp.keyWindow?.makeFirstResponder(nil)
+                withAnimation(reduceMotion ? nil : ClipFlowMotion.selection) {
+                    navigation.select(.snippets)
+                }
+            }
+
             let settingsSelected = navigation.page == .settings
             spineButton(
                 title: "设置",

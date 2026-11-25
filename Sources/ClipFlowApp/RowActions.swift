@@ -26,13 +26,41 @@ enum ClipboardRowMenu {
     /// Shared by the history list and the quick-paste panel. `leading` carries
     /// the surface-specific primary entries (details, paste).
     static func entries(for item: ClipboardItem, store: ClipFlowStore,
-                        leading: [ClipboardRowMenuEntry]) -> [ClipboardRowMenuEntry] {
+                        leading: [ClipboardRowMenuEntry],
+                        excelBundleIDs: [String?]? = nil) -> [ClipboardRowMenuEntry] {
         let id = item.id
         var entries = leading
         entries.append(.action(title: "复制", symbol: "doc.on.doc") { [weak store] in
             guard let current = store?.item(withID: id) else { return }
             ClipFlowRuntime.shared.copyToClipboard(current)
         })
+        if SpreadsheetClipboard.hasOriginalTypes(item) {
+            entries.append(.action(title: SpreadsheetClipboard.copyOnlyTitle, symbol: "clipboard") { [weak store] in
+                guard let current = store?.item(withID: id) else { return }
+                ClipFlowRuntime.shared.copyOriginalToClipboard(current)
+            })
+        }
+        let excelBundles = excelBundleIDs ?? ExcelInsertContext.currentBundleIDs()
+        if ExcelInsertOffer.shouldOffer(item: item, bundleIDs: excelBundles) {
+            entries.append(.action(title: SpreadsheetShift.down.menuTitle, symbol: "arrow.down.to.line") { [weak store] in
+                guard let current = store?.item(withID: id) else { return }
+                ClipFlowRuntime.shared.insertIntoExcel(current, shift: .down)
+            })
+            entries.append(.action(title: SpreadsheetShift.right.menuTitle, symbol: "arrow.right.to.line") { [weak store] in
+                guard let current = store?.item(withID: id) else { return }
+                ClipFlowRuntime.shared.insertIntoExcel(current, shift: .right)
+            })
+        }
+        if PlainTextPaste.hasRichText(item) {
+            entries.append(.action(title: PlainTextPaste.pasteTitle, symbol: "text.alignleft") { [weak store] in
+                guard let current = store?.item(withID: id) else { return }
+                ClipFlowRuntime.shared.pastePlainText(current)
+            })
+            entries.append(.action(title: PlainTextPaste.copyTitle, symbol: "doc.plaintext") { [weak store] in
+                guard let current = store?.item(withID: id) else { return }
+                ClipFlowRuntime.shared.copyPlainText(current)
+            })
+        }
         entries.append(.action(title: item.pinned ? "取消置顶" : "置顶",
             symbol: item.pinned ? "pin.slash" : "pin") { [weak store] in store?.togglePin(id) })
         if item.privacy != .standard {
@@ -41,6 +69,11 @@ enum ClipboardRowMenu {
         }
         if let url = item.primaryURL {
             entries.append(.action(title: "访问链接", symbol: "safari") { NSWorkspace.shared.open(url) })
+        }
+        if SnippetLibrary.canSave(item) {
+            entries.append(.action(title: "存为片段", symbol: "text.badge.plus") { [weak store] in
+                store?.requestSaveSnippet(fromItemID: id)
+            })
         }
         entries.append(.separator)
         entries.append(.action(title: "删除条目", symbol: "trash") { [weak store] in store?.delete(id) })
@@ -194,8 +227,11 @@ struct LibraryCardActionBar: View {
 }
 
 enum ListKeyCommand: Equatable {
-    case moveUp, moveDown, activate, toggleDetails
+    case moveUp, moveDown, activate, pastePlain, toggleDetails
     case pasteIndex(Int)
+    case showHistory
+    case showSnippets
+    case reorder(Int)
 
     /// - Parameters:
     ///   - isEditingText: a text field owns keyboard focus.
@@ -208,6 +244,24 @@ enum ListKeyCommand: Equatable {
         let active = modifiers.intersection([.command, .option, .control, .shift])
         if active == .command, let index = digitKeyCodes.firstIndex(of: keyCode) {
             return .pasteIndex(index)
+        }
+        // ⇧↩ pastes the quick-paste selection as plain text. Keypad Return counts too.
+        if active == .shift, keyCode == 36 || keyCode == 76 {
+            return .pastePlain
+        }
+        if active == .control {
+            switch keyCode {
+            case 123: return .showHistory
+            case 124: return .showSnippets
+            default: break
+            }
+        }
+        if active == .option, !isEditingText {
+            switch keyCode {
+            case 126: return .reorder(-1)
+            case 125: return .reorder(1)
+            default: break
+            }
         }
         guard active.isEmpty else { return nil }
         switch keyCode {

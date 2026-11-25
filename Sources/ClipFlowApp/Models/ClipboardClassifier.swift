@@ -160,7 +160,10 @@ enum ClipboardClassifier {
         let capturedAt = Date()
         let title = kind.label
         let snippet = makeSnippet(for: normalized)
-        let labels = labels(for: normalized, kind: kind, sourceApp: sourceApp, privacy: privacy)
+        var labels = labels(for: normalized, kind: kind, sourceApp: sourceApp, privacy: privacy)
+        if ClipboardPasteboardKinds.representsTable(richContent), !labels.contains("表格") {
+            labels.append("表格")
+        }
         let pasteTargets = pasteTargets(for: kind)
 
         return ClipboardItem(
@@ -188,7 +191,8 @@ enum ClipboardClassifier {
             secretPayloadRef: nil,
             rtfData: richContent.rtfData.flatMap { $0.isEmpty ? nil : $0 },
             htmlData: richContent.htmlData.flatMap { $0.isEmpty ? nil : $0 },
-            fileURLs: richContent.fileURLs.isEmpty ? nil : richContent.fileURLs
+            fileURLs: richContent.fileURLs.isEmpty ? nil : richContent.fileURLs,
+            extraTypes: richContent.extraTypes.isEmpty ? nil : richContent.extraTypes
         )
     }
 

@@ -4,9 +4,16 @@ import SwiftUI
 enum MainWindowPage: String, CaseIterable, Identifiable, ClipFlowTab {
     case settings = "设置"
     case history = "剪贴历史"
+    case snippets = "片段"
     var id: Self { self }
     var title: String { rawValue }
-    var icon: String { self == .history ? "rectangle.stack" : "gearshape" }
+    var icon: String {
+        switch self {
+        case .history: "rectangle.stack"
+        case .snippets: "text.quote"
+        case .settings: "gearshape"
+        }
+    }
 }
 
 @MainActor
@@ -15,9 +22,55 @@ final class SettingsDraft: ObservableObject {
     var movesForward = true
     @Published var excludedAppsText: String
     @Published var exclusionError: String?
+    /// A lower history limit that is waiting for the inline confirmation.
+    @Published var pendingHistoryLimit: Int?
 
     init(store: ClipFlowStore) {
         excludedAppsText = ExcludedAppRules.normalizedText(store.excludedBundleIDs)
+    }
+
+    func requestHistoryLimit(_ limit: Int, in store: ClipFlowStore) {
+        let resolved = HistoryRetention.normalized(limit)
+        if resolved == store.historyItemLimit {
+            pendingHistoryLimit = nil
+            return
+        }
+        let removal = HistoryRetention.removalCount(in: store.items, limit: resolved)
+        if HistoryRetention.needsConfirmation(
+            currentLimit: store.historyItemLimit,
+            proposedLimit: resolved,
+            removalCount: removal
+        ) {
+            pendingHistoryLimit = resolved
+            return
+        }
+        pendingHistoryLimit = nil
+        store.applyHistoryItemLimit(resolved)
+    }
+
+    func confirmHistoryLimitChange(in store: ClipFlowStore) {
+        guard let pendingHistoryLimit else { return }
+        self.pendingHistoryLimit = nil
+        store.applyHistoryItemLimit(pendingHistoryLimit)
+    }
+
+    func cancelHistoryLimitChange() {
+        pendingHistoryLimit = nil
+    }
+
+    /// Drops a confirmation that would no longer delete anything, and applies that choice.
+    func refreshHistoryLimitPrompt(in store: ClipFlowStore) {
+        guard let pending = pendingHistoryLimit else { return }
+        let removal = HistoryRetention.removalCount(in: store.items, limit: pending)
+        guard !HistoryRetention.needsConfirmation(
+            currentLimit: store.historyItemLimit,
+            proposedLimit: pending,
+            removalCount: removal
+        ) else { return }
+        pendingHistoryLimit = nil
+        if pending != store.historyItemLimit {
+            store.applyHistoryItemLimit(pending)
+        }
     }
 
     func saveExcludedApps(into store: ClipFlowStore) {
@@ -51,6 +104,9 @@ final class MainWindowNavigation: ObservableObject {
     @Published var isEdgeDocked = false
     @Published var onToggleEdgeDock: (() -> Void)?
     let settingsDraft: SettingsDraft
+    let searchFocus = LibrarySearchFocusModel()
+    /// Used to present the editor on first appearance. Nil in normal use.
+    var initialSnippetEditor: SnippetEditorDraft?
     private let store: ClipFlowStore
 
     init(store: ClipFlowStore, initialPage: MainWindowPage = .history) {
@@ -68,15 +124,17 @@ final class MainWindowNavigation: ObservableObject {
         if !loadedPages.contains(page) { loadedPages.insert(page) }
         self.page = page
     }
-
-    /// Order: history first, then the settings sections.
+    /// Sidebar order: history, snippets, then the settings sections.
     var selectedIndex: Int {
-        page == .history ? 0
-            : 1 + (SettingsCategory.allCases.firstIndex(of: settingsDraft.section) ?? 0)
+        switch page {
+        case .history: 0
+        case .snippets: 1
+        case .settings: 2 + (SettingsCategory.allCases.firstIndex(of: settingsDraft.section) ?? 0)
+        }
     }
 
     func selectSettings(_ category: SettingsCategory) {
-        let target = 1 + (SettingsCategory.allCases.firstIndex(of: category) ?? 0)
+        let target = 2 + (SettingsCategory.allCases.firstIndex(of: category) ?? 0)
         guard page != .settings || settingsDraft.section != category else { return }
         settingsDraft.movesForward = target > selectedIndex
         store.endShortcutRecording()
@@ -142,6 +200,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         scheduleWindowControlLayout()
+        guard page == .history else { return }
+        // Claim focus after AppKit finishes making the window key.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.navigation.page == .history else { return }
+            self.navigation.searchFocus.request()
+        }
     }
 
     func toggleEdgeDock() {
@@ -279,8 +343,19 @@ private struct MainWindowView: View {
                             store: store,
                             onToggleEdgeDock: navigation.onToggleEdgeDock
                         )
+                        .environment(\.librarySearchFocus, navigation.searchFocus)
                         .modifier(PageMotion(isSelected: navigation.page == .history,
                             hiddenOffset: -10, reduceMotion: reduceMotion))
+                    }
+                    if navigation.loadedPages.contains(.snippets) {
+                        SnippetsView(
+                            reservesTrafficLights: true,
+                            store: store,
+                            initialEditor: navigation.initialSnippetEditor,
+                            onToggleEdgeDock: navigation.onToggleEdgeDock
+                        )
+                        .modifier(PageMotion(isSelected: navigation.page == .snippets,
+                            hiddenOffset: 10, reduceMotion: reduceMotion))
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -330,6 +405,7 @@ private struct MainWindowView: View {
             }
         }
         .animation(reduceMotion ? nil : ClipFlowMotion.fade, value: store.startupPermissionReport != nil)
+        .modifier(SensitiveSnippetConfirmation(store: store))
         .environment(\.locale, locale)
     }
 }

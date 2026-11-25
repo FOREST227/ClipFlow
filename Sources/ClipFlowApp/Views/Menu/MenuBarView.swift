@@ -108,17 +108,17 @@ struct MenuBarView: View {
             .background(CleanGlassBackground(cornerRadius: ClipFlowLayout.rowRadius, elevated: true))
 
             VStack(spacing: 0) {
-                statusToggle("剪贴板监听", icon: "waveform", tint: ClipCategory.all.tint,
-                    isOn: Binding(get: { !store.capturePaused }, set: { store.capturePaused = !$0 }))
-                    .help("关闭后暂停记录新内容，已有历史仍可使用")
+                statusToggle(SharedSettingsCopy.recordClipboard, icon: "waveform", tint: ClipCategory.all.tint,
+                    isOn: SharedSettingsCopy.recording(isPaused: $store.capturePaused))
+                    .help(SharedSettingsCopy.recordClipboardDetail)
                 Divider()
-                statusToggle("敏感内容保护", icon: "lock.shield", tint: ClipCategory.protected.tint,
+                statusToggle(SharedSettingsCopy.protectSecrets, icon: "lock.shield", tint: ClipCategory.protected.tint,
                     isOn: $store.autoProtectSecrets)
-                    .help("自动识别验证码、令牌等疑似敏感内容")
+                    .help(SharedSettingsCopy.protectSecretsDetail)
                 Divider()
-                statusToggle("敏感内容 5 分钟过期", icon: "clock", tint: ClipCategory.protected.tint,
+                statusToggle(SharedSettingsCopy.expireSecrets, icon: "clock", tint: ClipCategory.protected.tint,
                     isOn: $store.sensitiveAutoExpireEnabled)
-                    .help("按复制时间计算，置顶也会过期；重新开启将清理已超时的敏感记录")
+                    .help(SharedSettingsCopy.expireSecretsHelp)
                 Divider()
                 statusToggle("开机自动启动", icon: "power", tint: ClipCategory.all.tint,
                     isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
@@ -126,13 +126,13 @@ struct MenuBarView: View {
                 Divider()
                 HStack(spacing: 8) {
                     Image(systemName: "folder").foregroundStyle(ClipCategory.images.tint).frame(width: 16)
-                    Text("文稿同步")
+                    Text(SharedSettingsCopy.syncPlainHistory)
                     Spacer()
                     Text(store.iCloudSyncStatusValue).foregroundStyle(store.iCloudSyncTint(for: colorScheme))
-                    Toggle("文稿同步", isOn: Binding(get: { store.iCloudSyncEnabled },
+                    Toggle(SharedSettingsCopy.syncPlainHistory, isOn: Binding(get: { store.iCloudSyncEnabled },
                         set: { store.setICloudSyncEnabled($0) }))
                         .labelsHidden().toggleStyle(.switch).controlSize(.small)
-                        .accessibilityLabel("启用文稿同步")
+                        .accessibilityLabel(SharedSettingsCopy.syncPlainHistory)
                 }
                 .font(.system(size: 11)).frame(height: 34)
                 .help(QuotedCopy.keepingQuotesIntact(store.iCloudSyncDetail))

@@ -10,6 +10,8 @@ struct SensitivePayload: Codable, Equatable, Sendable {
     var rtfData: Data? = nil
     var htmlData: Data? = nil
     var fileURLs: [String]? = nil
+    /// Spreadsheet pasteboard types. Absent from older Keychain items.
+    var extraTypes: [ClipboardPasteboardType]? = nil
 }
 
 protocol SensitivePayloadRepository: AnyObject {
@@ -45,6 +47,12 @@ final class SensitivePayloadDigest {
         data.append(0x1e)
         for url in payload.fileURLs ?? [] {
             data.append(contentsOf: url.utf8)
+            data.append(0x1d)
+        }
+        for record in payload.extraTypes ?? [] {
+            data.append(contentsOf: record.type.utf8)
+            data.append(0x1d)
+            data.append(record.data)
             data.append(0x1d)
         }
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -168,7 +176,8 @@ final class SensitivePayloadStore {
             snippet: item.snippet,
             rtfData: nonempty(item.rtfData),
             htmlData: nonempty(item.htmlData),
-            fileURLs: item.fileURLs.flatMap { $0.isEmpty ? nil : $0 }
+            fileURLs: item.fileURLs.flatMap { $0.isEmpty ? nil : $0 },
+            extraTypes: item.extraTypes.flatMap { $0.isEmpty ? nil : $0 }
         )
     }
 
@@ -178,12 +187,14 @@ final class SensitivePayloadStore {
         item.rtfData = payload.rtfData
         item.htmlData = payload.htmlData
         item.fileURLs = payload.fileURLs
+        item.extraTypes = payload.extraTypes
     }
 
     private static func clearRepresentations(_ item: inout ClipboardItem) {
         item.rtfData = nil
         item.htmlData = nil
         item.fileURLs = nil
+        item.extraTypes = nil
     }
 
     private static func nonempty(_ data: Data?) -> Data? {

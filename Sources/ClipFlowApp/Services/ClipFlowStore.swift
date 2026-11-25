@@ -63,6 +63,9 @@ final class ClipFlowStore: ObservableObject {
     var registerShortcut: ((ClipFlowShortcut) -> String?)?
     var suspendShortcut: (() -> Void)?
     @Published var historyLoadError: String?
+    @Published var snippetSearch = ""
+    @Published var sensitiveSnippetPrompt: SensitiveSnippetPrompt?
+    @Published var snippetLoadError: String?
 
     @Published private(set) var items: [ClipboardItem] = [] {
         didSet {
@@ -76,21 +79,43 @@ final class ClipFlowStore: ObservableObject {
         }
     }
 
+    @Published var snippets: [SavedSnippet] = [] {
+        didSet {
+            snippetsRevision += 1
+            schedulePersistSnippets()
+            if iCloudSyncEnabled && !isApplyingCloudSnapshot {
+                scheduleICloudSync()
+            }
+        }
+    }
+
+    @Published private(set) var historyItemLimit = HistoryRetention.defaultLimit {
+        didSet {
+            defaults.set(historyItemLimit, forKey: Keys.historyItemLimit)
+            imagePreviewCache.countLimit = historyItemLimit + 20
+        }
+    }
+
+    /// Unpinned rows kept. Pinned rows are extra and are not evicted to meet this.
+    var maxItems: Int { historyItemLimit }
+
     let integrations = ClipFlowCatalog.integrations
-    let maxItems = 80
 
     let defaults: UserDefaults
     let fileManager = FileManager.default
-    let persistenceQueue = DispatchQueue(label: "ClipFlow.persistence", qos: .utility)
+    let persistenceQueue = DispatchQueue(label: "ClipFlow.persistence", qos: .userInitiated)
     let imagePreviewCache = NSCache<NSString, NSImage>()
     var inFlightPrewarmFilenames: Set<String> = []
     let historyURL: URL
     let historyWriter: HistoryFileWriter
+    let snippetsURL: URL
+    let snippetWriter: HistoryFileWriter
     let payloadRepository: SensitivePayloadRepository
     let payloadDigests = SensitivePayloadDigest()
     let imagesDirectoryURL: URL
     let cloudSyncCoordinator: ClipFlowCloudSyncCoordinator
     var pendingPersistWorkItem: DispatchWorkItem?
+    var pendingSnippetPersist: DispatchWorkItem?
     var localSyncTombstones: [UUID: Date] = [:] {
         didSet { persistLocalSyncTombstones() }
     }
@@ -100,8 +125,12 @@ final class ClipFlowStore: ObservableObject {
     var activeCloudSyncTask: Task<Void, Never>?
     var cloudSyncGeneration = 0
     var syncRequestedWhileRunning = false
-    private var isApplyingCloudSnapshot = false
+    var isApplyingCloudSnapshot = false
     var itemsRevision = 0
+    var snippetsRevision = 0
+    var snippetTombstones: [UUID: Date] = [:] {
+        didSet { persistSnippetTombstones() }
+    }
     private let accessibility: any AccessibilityTrustChecking
 
     init(
@@ -123,9 +152,12 @@ final class ClipFlowStore: ObservableObject {
         try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
         historyURL = appSupport.appendingPathComponent("history.json")
         historyWriter = HistoryFileWriter(url: historyURL)
+        snippetsURL = appSupport.appendingPathComponent("snippets.json")
+        snippetWriter = HistoryFileWriter(url: snippetsURL)
         imagesDirectoryURL = appSupport.appendingPathComponent("images", isDirectory: true)
         try? FileManager.default.createDirectory(at: imagesDirectoryURL, withIntermediateDirectories: true)
-        imagePreviewCache.countLimit = maxItems + 20
+        let loadedHistoryLimit = HistoryRetention.normalized(defaults.object(forKey: Keys.historyItemLimit) as? Int)
+        imagePreviewCache.countLimit = loadedHistoryLimit + 20
         imagePreviewCache.totalCostLimit = 64 * 1024 * 1024
         cloudSyncCoordinator = ClipFlowCloudSyncCoordinator(localImagesDirectoryURL: imagesDirectoryURL, documentsDirectoryURL: syncDirectory)
 
@@ -139,8 +171,13 @@ final class ClipFlowStore: ObservableObject {
         excludedBundleIDs = defaults.stringArray(forKey: Keys.excludedBundleIDs) ?? PasswordManagerApps.bundleIDs
         iCloudLastSyncedAt = defaults.object(forKey: Keys.iCloudLastSyncedAt) as? Date
         localSyncTombstones = Self.decodeTombstones(from: defaults.data(forKey: Keys.iCloudSyncTombstones))
+        snippetTombstones = Self.decodeTombstones(from: defaults.data(forKey: Keys.snippetSyncTombstones))
         items = loadItems()
+        snippets = loadSnippets()
+        // Property observers do not run while initializing, so publish the loaded limit explicitly.
+        historyItemLimit = loadedHistoryLimit
         cleanupOrphanedImageFiles()
+        trimItemsToLimit()
         selectedItemID = items.first?.id
     }
 
@@ -220,6 +257,20 @@ final class ClipFlowStore: ObservableObject {
         items = pinned
         revealedItemIDs.removeAll()
         lastCaptureStatus = pinned.isEmpty ? "历史记录已清空" : "历史记录已清空，已保留置顶内容"
+    }
+
+    /// Persists a supported history limit. A lower limit trims immediately;
+    /// the settings page confirms that deletion before calling this.
+    func applyHistoryItemLimit(_ limit: Int) {
+        let resolved = HistoryRetention.normalized(limit)
+        guard resolved != historyItemLimit else { return }
+        let removedCount = HistoryRetention.removalCount(in: items, limit: resolved)
+        historyItemLimit = resolved
+        trimItemsToLimit()
+        if removedCount > 0 {
+            flushPendingPersistence()
+        }
+        lastCaptureStatus = HistoryRetention.appliedStatus(limit: resolved, removedCount: removedCount)
     }
 
     func ingestCopiedText(
@@ -428,16 +479,13 @@ final class ClipFlowStore: ObservableObject {
         lastCaptureStatus = "已清理过期的敏感内容"
     }
 
-    private func trimItemsToLimit() {
-        guard items.count > maxItems else { return }
-        let ordered = sortItems(items)
-        let retained = ordered.filter(\.pinned) + ordered.filter { !$0.pinned }
-            .prefix(max(0, maxItems - ordered.filter(\.pinned).count))
-        let retainedIDs = Set(retained.map(\.id))
-        let overflow = items.filter { !retainedIDs.contains($0.id) }
-        rememberCloudDeletion(for: overflow)
-        overflow.forEach(removeStoredAssetIfNeeded)
-        items = retained
+    func trimItemsToLimit() {
+        let split = HistoryRetention.partition(items, limit: maxItems)
+        guard !split.removed.isEmpty else { return }
+        rememberCloudDeletion(for: split.removed)
+        split.removed.forEach(removeStoredAssetIfNeeded)
+        revealedItemIDs.subtract(split.removed.map(\.id))
+        items = split.kept
     }
 
     func applyCloudItems(_ cloudItems: [ClipboardItem]) {
@@ -471,7 +519,9 @@ final class ClipFlowStore: ObservableObject {
         static let iCloudSyncEnabled = "iCloudSyncEnabled"
         static let iCloudLastSyncedAt = "iCloudLastSyncedAt"
         static let iCloudSyncTombstones = "iCloudSyncTombstones"
+        static let snippetSyncTombstones = "snippetSyncTombstones"
         static let excludedBundleIDs = "excludedBundleIDs"
+        static let historyItemLimit = "historyItemLimit"
     }
 
     private static func currentLaunchAtLoginStatus() -> LaunchAtLoginStatus {
@@ -479,7 +529,7 @@ final class ClipFlowStore: ObservableObject {
         return LaunchAtLoginStatus.resolve(SMAppService.mainApp.status)
     }
 
-    private static func decodeTombstones(from data: Data?) -> [UUID: Date] {
+    static func decodeTombstones(from data: Data?) -> [UUID: Date] {
         guard let data else { return [:] }
         return (try? JSONDecoder().decode([UUID: Date].self, from: data)) ?? [:]
     }

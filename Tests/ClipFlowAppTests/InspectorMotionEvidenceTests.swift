@@ -89,7 +89,7 @@ final class InspectorMotionEvidenceTests: XCTestCase {
         let state = InspectorPresentation(driver: AppKitInspectorAnimationDriver())
         let host = NSHostingController(rootView: QuickPastePanelView(store: context.store,
             preferredTargetName: nil, onPaste: { _ in }, onOpenLibrary: {}, onClose: {}, inspector: state))
-        let window = QuickPastePanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 588),
+        let window = QuickPastePanel(contentRect: NSRect(x: 0, y: 0, width: QuickPastePanelLayout.panelWidth, height: QuickPastePanelLayout.panelHeight),
             styleMask: .borderless, backing: .buffered, defer: false)
         window.title = "ClipFlow 动效验收"
         window.isReleasedWhenClosed = false

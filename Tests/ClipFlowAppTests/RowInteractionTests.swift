@@ -5,9 +5,9 @@ import XCTest
 
 @MainActor
 final class RowInteractionTests: XCTestCase {
-    private func click(_ count: Int, at time: TimeInterval) throws -> NSEvent {
+    private func click(_ count: Int, at time: TimeInterval, modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
         try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero,
-            modifierFlags: [], timestamp: time, windowNumber: 0, context: nil,
+            modifierFlags: modifiers, timestamp: time, windowNumber: 0, context: nil,
             eventNumber: 1, clickCount: count, pressure: 1))
     }
 
@@ -54,6 +54,26 @@ final class RowInteractionTests: XCTestCase {
         configure(UUID()) // Recycled view now represents a different item.
         row.mouseDown(with: try click(2, at: 40.05))
         XCTAssertEqual(pastes, 1)
+    }
+
+    func testShiftDoubleClickPastesAsPlainText() throws {
+        let row = HUDInteractiveHostingView()
+        var pastes = 0
+        var plain = 0
+        row.update(itemID: UUID(), rootView: AnyView(Text("row")),
+            onSelect: {}, onPaste: { pastes += 1 }, onPastePlain: { plain += 1 }, onInspect: {})
+        row.mouseDown(with: try click(1, at: 10, modifiers: .shift))
+        row.mouseDown(with: try click(2, at: 10.05))
+        XCTAssertEqual(plain, 0, "Shift on the first click alone does not change the second click")
+        XCTAssertEqual(pastes, 1)
+        row.mouseDown(with: try click(1, at: 20))
+        row.mouseDown(with: try click(2, at: 20.05, modifiers: .shift))
+        XCTAssertEqual(plain, 1)
+        XCTAssertEqual(pastes, 1)
+        row.mouseDown(with: try click(1, at: 30))
+        row.mouseDown(with: try click(2, at: 30.05, modifiers: [.shift, .command]))
+        XCTAssertEqual(plain, 1)
+        XCTAssertEqual(pastes, 2, "⌘⇧ stays on the normal paste path")
     }
 
     func testClickDeliveredToPreviousRowUsesActualPointerTarget() throws {

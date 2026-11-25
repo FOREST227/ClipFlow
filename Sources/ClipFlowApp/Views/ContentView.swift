@@ -49,7 +49,13 @@ struct ContentView: View {
                         searchFocus: searchFocus,
                         reservesTrafficLights: reservesTrafficLights,
                         showsInlineCategoryStrip: !reservesTrafficLights,
-                        onToggleEdgeDock: onToggleEdgeDock
+                        isBlocked: overlayActive,
+                        onToggleEdgeDock: onToggleEdgeDock,
+                        onSearchFocusRequested: {
+                            if inspector.blocksBackground {
+                                inspector.reset()
+                            }
+                        }
                     )
 
                     PasteStackTrayView(
@@ -66,6 +72,8 @@ struct ContentView: View {
                         onInspectItem: { item in toggleLibraryInspector(for: item) }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .scaleEffect(!reduceMotion && store.libraryViewMode == .deck && inspector.blocksBackground ? 0.975 : 1.0)
+                    .animation(reduceMotion ? nil : ClipFlowMotion.selection, value: inspector.blocksBackground)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, reservesTrafficLights ? 8 : 14)
@@ -73,8 +81,6 @@ struct ContentView: View {
                 .frame(width: min(1100, proxy.size.width), height: proxy.size.height)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
-                .scaleEffect(!reduceMotion && store.libraryViewMode == .deck && inspector.blocksBackground ? 0.975 : 1.0)
-                .animation(reduceMotion ? nil : ClipFlowMotion.selection, value: inspector.blocksBackground)
                 .blur(radius: permissionOverlayActive ? ClipFlowMotion.backgroundDefocusRadius : 0)
                 .disabled(overlayActive)
                 .allowsHitTesting(!overlayActive)
@@ -171,13 +177,15 @@ struct ContentView: View {
                     store.searchText = ""
                     return true
                 }
-                if store.libraryViewMode == .deck && deckExtraction.isActive {
+                if inspector.blocksBackground {
+                    inspector.dismiss(reduceMotion: reduceMotion)
+                    return true
+                }
+                if store.libraryViewMode == .deck && deckExtraction.isExpanded {
                     deckExtraction.collapse(reduceMotion: reduceMotion)
                     return true
                 }
-                guard inspector.blocksBackground else { return false }
-                inspector.dismiss(reduceMotion: reduceMotion)
-                return true
+                return false
             }, onWindowInactive: {
                 inspector.reset()
                 deckExtraction.reset()

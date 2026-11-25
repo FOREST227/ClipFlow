@@ -200,7 +200,10 @@ final class LibrarySearchFieldAnchorView: NSView {
             coordinator.didMarkField = true
         }
         guard coordinator.requestID != 0, coordinator.appliedID != coordinator.requestID else { return }
-        guard coordinator.canClaim else { return }
+        guard coordinator.canClaim else {
+            retry(coordinator)
+            return
+        }
         guard let window, window.isVisible else {
             retry(coordinator)
             return

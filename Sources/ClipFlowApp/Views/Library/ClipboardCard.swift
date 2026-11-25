@@ -217,26 +217,21 @@ struct ClipboardCard: View {
     }
 
     @ViewBuilder private var imageContent: some View {
-        let thumbHeight: CGFloat = 104
-        let thumbWidth: CGFloat = {
-            guard let w = item.imageWidth, let h = item.imageHeight, w.isFinite, h.isFinite, w > 0, h > 0 else {
-                return thumbHeight
-            }
-            return min(184, max(68, thumbHeight * w / h))
-        }()
+        let thumbHeight = LibraryImageThumbnail.height
+        let thumbWidth = LibraryImageThumbnail.width(imageWidth: item.imageWidth, imageHeight: item.imageHeight)
         HStack(alignment: .center, spacing: ClipFlowLayout.space12) {
             ClipThumbnailView(store: store, item: item, height: thumbHeight,
                 cornerRadius: ClipFlowLayout.controlRadius, expandsToContainer: false,
-                showsDimensionLabel: false, contentMode: .fit, insetPreview: true)
+                showsDimensionLabel: false, contentMode: .fit, insetPreview: false)
                 .frame(width: thumbWidth, height: thumbHeight)
-            VStack(alignment: .leading, spacing: ClipFlowLayout.space8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(item.title).font(.system(size: ClipFlowType.cardTitle, weight: isSelected ? .semibold : .medium))
                     .lineLimit(2)
                 tags
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxHeight: .infinity, alignment: .center)
+        .frame(height: thumbHeight, alignment: .center)
     }
 
     private var tags: some View {

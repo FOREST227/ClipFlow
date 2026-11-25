@@ -39,6 +39,15 @@ final class DocumentationScreenshotTests: XCTestCase {
             ("# 项目笔记\n\n## 本周安排\n- 完成界面调整\n- 整理使用说明\n\n**所有记录，随时找回。**", "文本编辑")
         ]
         for (text, app) in texts { store.ingestCopiedText(text, sourceApp: app, sourceBundleID: nil) }
+        store.ingestCopiedText(
+            "模块\t耗时\t状态\n索引检索\t7.1 ms\t通过\n叠卡渲染\t120 Hz\t通过\n离线预热\t0 ms\t就绪",
+            sourceApp: "Microsoft Excel",
+            sourceBundleID: "com.microsoft.Excel",
+            richContent: ClipboardRepresentations.Snapshot(
+                rtfData: nil, htmlData: nil, fileURLs: [],
+                extraTypes: [ClipboardPasteboardType(type: "com.microsoft.Excel.xml", data: Data([1]))]
+            )
+        )
         store.ingestCopiedText("您的登录验证码是 482910，5 分钟内有效", sourceApp: "信息", sourceBundleID: "com.apple.MobileSMS")
         let swiftText = """
         import AppKit
@@ -63,14 +72,23 @@ final class DocumentationScreenshotTests: XCTestCase {
         }
         let sample = NSImage(size: NSSize(width: 720, height: 400))
         sample.lockFocus()
-        NSColor(calibratedRed: 0.91, green: 0.95, blue: 1, alpha: 1).setFill()
+        NSColor(srgbRed: 0.961, green: 0.945, blue: 0.910, alpha: 1).setFill()
         NSRect(x: 0, y: 0, width: 720, height: 400).fill()
-        ("ClipFlow 剪流" as NSString).draw(at: NSPoint(x: 58, y: 230), withAttributes: [
-            .font: NSFont.systemFont(ofSize: 48, weight: .semibold),
-            .foregroundColor: NSColor(calibratedRed: 0.23, green: 0.40, blue: 0.69, alpha: 1)])
-        ("复制过的内容，随时找回。" as NSString).draw(at: NSPoint(x: 60, y: 166), withAttributes: [
-            .font: NSFont.systemFont(ofSize: 26),
-            .foregroundColor: NSColor.darkGray])
+        let cardPath = NSBezierPath(roundedRect: NSRect(x: 36, y: 36, width: 648, height: 328), xRadius: 24, yRadius: 24)
+        NSColor(srgbRed: 0.996, green: 0.992, blue: 0.980, alpha: 1).setFill()
+        cardPath.fill()
+        NSColor(srgbRed: 0.855, green: 0.835, blue: 0.792, alpha: 1).setStroke()
+        cardPath.lineWidth = 2
+        cardPath.stroke()
+        let accentBar = NSBezierPath(roundedRect: NSRect(x: 68, y: 278, width: 56, height: 8), xRadius: 4, yRadius: 4)
+        NSColor(srgbRed: 0.220, green: 0.420, blue: 0.340, alpha: 1).setFill()
+        accentBar.fill()
+        ("ClipFlow 剪流" as NSString).draw(at: NSPoint(x: 68, y: 204), withAttributes: [
+            .font: NSFont.systemFont(ofSize: 46, weight: .semibold),
+            .foregroundColor: NSColor(srgbRed: 0.165, green: 0.161, blue: 0.153, alpha: 1)])
+        ("温润陶纸叠卡匣 · 复制过的内容，随时找回。" as NSString).draw(at: NSPoint(x: 70, y: 146), withAttributes: [
+            .font: NSFont.systemFont(ofSize: 24, weight: .medium),
+            .foregroundColor: NSColor(srgbRed: 0.220, green: 0.420, blue: 0.340, alpha: 1)])
         sample.unlockFocus()
         let image = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(sample.tiffRepresentation)))
         store.ingestCopiedImage(try XCTUnwrap(image.representation(using: .png, properties: [:])),

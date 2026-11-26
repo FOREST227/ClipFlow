@@ -467,7 +467,6 @@ private struct LibraryViewModeControl: View {
 private func settingsToggle(_ title: String, isOn: Binding<Bool>) -> some View {
     Toggle(title, isOn: isOn)
         .labelsHidden()
-        .toggleStyle(.switch)
-        .controlSize(.small)
+        .toggleStyle(FolioSwitchToggleStyle())
         .accessibilityLabel(title)
 }

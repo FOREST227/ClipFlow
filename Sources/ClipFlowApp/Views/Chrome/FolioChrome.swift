@@ -108,6 +108,116 @@ private struct FolioButtonBody: View {
     }
 }
 
+// MARK: - Folio Celadon Switch Toggle Style
+
+struct FolioSwitchToggleStyle: ToggleStyle {
+    var showsLabel: Bool = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        let control = Button {
+            configuration.isOn.toggle()
+        } label: {
+            EmptyView()
+        }
+        .buttonStyle(FolioSwitchTrackButtonStyle(isOn: configuration.isOn))
+        .accessibilityValue(configuration.isOn ? "开启" : "关闭")
+
+        if showsLabel {
+            HStack(spacing: 8) {
+                configuration.label
+                control
+            }
+        } else {
+            control
+        }
+    }
+}
+
+private struct FolioSwitchTrackButtonStyle: ButtonStyle {
+    let isOn: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        FolioSwitchTrackView(isOn: isOn, isPressed: configuration.isPressed)
+    }
+}
+
+private struct FolioSwitchTrackView: View {
+    let isOn: Bool
+    let isPressed: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovered = false
+
+    private let trackWidth: CGFloat = 34
+    private let trackHeight: CGFloat = 18
+    private let thumbInset: CGFloat = 2
+    private var thumbDiameter: CGFloat { trackHeight - thumbInset * 2 }
+
+    private var trackFill: Color {
+        isOn
+            ? FolioTheme.switchTrackOn(for: colorScheme)
+            : FolioTheme.switchTrackOff(for: colorScheme)
+    }
+
+    private var trackBorder: Color {
+        if isOn {
+            return colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.08)
+        }
+        if isHovered {
+            return FolioTheme.strongHairline(for: colorScheme)
+        }
+        return colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
+    }
+
+    var body: some View {
+        let trackShape = Capsule(style: .circular)
+        let thumbShape = Capsule(style: .circular)
+        let thumbWidth: CGFloat = isPressed && isEnabled ? thumbDiameter + 2.5 : thumbDiameter
+
+        ZStack(alignment: isOn ? .trailing : .leading) {
+            trackShape
+                .fill(trackFill)
+                .overlay {
+                    if isHovered && isEnabled && !isPressed {
+                        trackShape.fill(
+                            isOn
+                                ? Color.white.opacity(colorScheme == .dark ? 0.08 : 0.07)
+                                : Color.primary.opacity(colorScheme == .dark ? 0.06 : 0.04)
+                        )
+                    }
+                }
+                .overlay(trackShape.strokeBorder(trackBorder, lineWidth: 1))
+
+            thumbShape
+                .fill(Color.white.opacity(isEnabled ? 1 : 0.72))
+                .overlay(
+                    thumbShape
+                        .strokeBorder(
+                            Color.black.opacity(colorScheme == .dark ? 0.22 : 0.08),
+                            lineWidth: 0.5
+                        )
+                )
+                .shadow(
+                    color: Color.black.opacity(colorScheme == .dark ? 0.36 : 0.16),
+                    radius: 1.5,
+                    x: 0,
+                    y: 0.75
+                )
+                .frame(width: thumbWidth, height: thumbDiameter)
+                .padding(thumbInset)
+        }
+        .frame(width: trackWidth, height: trackHeight)
+        .opacity(isEnabled ? 1 : 0.48)
+        .contentShape(trackShape)
+        .animation(reduceMotion ? nil : ClipFlowMotion.selection, value: isOn)
+        .animation(reduceMotion ? nil : ClipFlowMotion.press, value: isPressed)
+        .animation(reduceMotion ? nil : .easeOut(duration: isHovered ? 0.15 : 0.12), value: isHovered)
+        .onHover { isHovered = $0 }
+    }
+}
+
 // MARK: - Calm Folio Color Tokens (Warm Rice-Paper Linen & Quiet Graphite)
 
 enum FolioTheme {
@@ -192,6 +302,21 @@ enum FolioTheme {
         scheme == .dark
             ? Color(red: 0.467, green: 0.725, blue: 0.624) // #77B99F
             : Color(red: 0.200, green: 0.400, blue: 0.318) // #336651
+    }
+
+    /// Switch track fill when enabled: exact Celadon Sage in Light Mode (matching primary buttons),
+    /// lifted Celadon Sage in Dark Mode for >= 3:1 contrast against dark card surfaces and white knob.
+    static func switchTrackOn(for scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 0.278, green: 0.514, blue: 0.427) // #47836D
+            : primaryAccent(for: .light)                 // #386B56
+    }
+
+    /// Switch track fill when off: warm ceramic stone in Light Mode, translucent graphite in Dark Mode.
+    static func switchTrackOff(for scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color.white.opacity(0.16)
+            : Color(red: 0.855, green: 0.839, blue: 0.808) // #DAD6CE
     }
 
     /// Distinct Morandi mineral tints for inactive protruding spine tabs (high legibility in Dark Mode, zero violet).

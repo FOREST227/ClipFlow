@@ -313,6 +313,57 @@ final class FolioTimeDeckTests: XCTestCase {
         XCTAssertEqual(model.progress, 10, accuracy: 0.0001)
         XCTAssertFalse(model.isInteracting)
     }
+
+    func testStatusBarIconRendersArchivalCardBoxTemplate() throws {
+        let active = ClipFlowStatusBarIcon.make(paused: false)
+        let paused = ClipFlowStatusBarIcon.make(paused: true)
+        XCTAssertEqual(active.size, NSSize(width: 18, height: 18))
+        XCTAssertEqual(paused.size, NSSize(width: 18, height: 18))
+        XCTAssertTrue(active.isTemplate)
+        XCTAssertTrue(paused.isTemplate)
+        XCTAssertNotNil(active.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        XCTAssertNotNil(paused.cgImage(forProposedRect: nil, context: nil, hints: nil))
+
+        if let previewPath = ProcessInfo.processInfo.environment["CLIPFLOW_STATUS_ICON_PREVIEW"] {
+            let canvasSize = NSSize(width: 480, height: 180)
+            let canvas = NSImage(size: canvasSize, flipped: false) { _ in
+                // Left half: Light Menu Bar (#F3EFE8); Right half: Dark Menu Bar (#1E2026)
+                NSColor(srgbRed: 0.953, green: 0.937, blue: 0.910, alpha: 1).setFill()
+                NSRect(x: 0, y: 0, width: 240, height: 180).fill()
+                NSColor(srgbRed: 0.118, green: 0.125, blue: 0.149, alpha: 1).setFill()
+                NSRect(x: 240, y: 0, width: 240, height: 180).fill()
+
+                func drawTinted(_ img: NSImage, in rect: NSRect, color: NSColor) {
+                    let copy = img.copy() as! NSImage
+                    copy.isTemplate = false
+                    let tinted = NSImage(size: rect.size, flipped: false) { r in
+                        copy.draw(in: r)
+                        color.setFill()
+                        r.fill(using: .sourceAtop)
+                        return true
+                    }
+                    tinted.draw(in: rect)
+                }
+
+                // Draw at 3x (54pt) and real 2x (36pt) for both active & paused on Light & Dark
+                drawTinted(active, in: NSRect(x: 34, y: 66, width: 72, height: 72), color: NSColor(white: 0.10, alpha: 0.92))
+                drawTinted(paused, in: NSRect(x: 134, y: 66, width: 72, height: 72), color: NSColor(white: 0.10, alpha: 0.92))
+                drawTinted(active, in: NSRect(x: 58, y: 20, width: 24, height: 24), color: NSColor(white: 0.10, alpha: 0.92))
+                drawTinted(paused, in: NSRect(x: 158, y: 20, width: 24, height: 24), color: NSColor(white: 0.10, alpha: 0.92))
+
+                drawTinted(active, in: NSRect(x: 274, y: 66, width: 72, height: 72), color: NSColor(white: 0.98, alpha: 0.95))
+                drawTinted(paused, in: NSRect(x: 374, y: 66, width: 72, height: 72), color: NSColor(white: 0.98, alpha: 0.95))
+                drawTinted(active, in: NSRect(x: 298, y: 20, width: 24, height: 24), color: NSColor(white: 0.98, alpha: 0.95))
+                drawTinted(paused, in: NSRect(x: 398, y: 20, width: 24, height: 24), color: NSColor(white: 0.98, alpha: 0.95))
+                return true
+            }
+            if let tiff = canvas.tiffRepresentation,
+               let rep = NSBitmapImageRep(data: tiff),
+               let png = rep.representation(using: .png, properties: [:]) {
+                try png.write(to: URL(fileURLWithPath: previewPath))
+            }
+        }
+    }
 }
 
 private final class TestScrollWheelEvent: NSEvent {

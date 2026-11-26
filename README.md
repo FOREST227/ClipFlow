@@ -5,7 +5,7 @@
   <p>原生 macOS 剪贴板与灵感归档工具，融合陶纸活页叠卡盒、120Hz 物理动效、扇形快捷粘贴、表格网格与常用片段。</p>
   <p>
     <a href="https://github.com/FOREST227/ClipFlow/releases/latest">下载最新版</a>
-    · <a href="docs/releases/v0.3.1.md">v0.3.1 更新说明</a>
+    · <a href="docs/releases/v0.3.2.md">v0.3.2 更新说明</a>
     · <a href="https://github.com/FOREST227/ClipFlow/issues">反馈问题</a>
   </p>
   <p>macOS 12+ · Apple 芯片 / Intel / 通用版本 · 中文界面 · 本地优先存储</p>
@@ -82,9 +82,9 @@
 
 | 你的 Mac | 安装包 |
 | --- | --- |
-| Apple 芯片 | [ClipFlow-v0.3.1-arm64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.3.1/ClipFlow-v0.3.1-arm64.dmg) |
-| Intel 处理器 | [ClipFlow-v0.3.1-x86_64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.3.1/ClipFlow-v0.3.1-x86_64.dmg) |
-| 两种架构通用，或不确定芯片类型 | [ClipFlow-v0.3.1-universal.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.3.1/ClipFlow-v0.3.1-universal.dmg) |
+| Apple 芯片 | [ClipFlow-v0.3.2-arm64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.3.2/ClipFlow-v0.3.2-arm64.dmg) |
+| Intel 处理器 | [ClipFlow-v0.3.2-x86_64.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.3.2/ClipFlow-v0.3.2-x86_64.dmg) |
+| 两种架构通用，或不确定芯片类型 | [ClipFlow-v0.3.2-universal.dmg](https://github.com/FOREST227/ClipFlow/releases/download/v0.3.2/ClipFlow-v0.3.2-universal.dmg) |
 
 1. 打开 `.dmg`，将 **ClipFlow** 拖入“应用程序”。
 2. 从“应用程序”启动，点击菜单栏中的 ClipFlow 图标。
@@ -140,7 +140,7 @@
 
 遇到问题欢迎 [提交 Issue](https://github.com/FOREST227/ClipFlow/issues)，附上 macOS 版本、芯片型号、应用版本及复现步骤。分享截图前请遮住私人剪贴内容。
 
-- [v0.3.1 更新说明](docs/releases/v0.3.1.md)
+- [v0.3.2 更新说明](docs/releases/v0.3.2.md)
 - [开发、测试与打包](docs/development.md)
 - [离线渲染组件与许可证](Sources/ClipFlowApp/Renderer/NOTICE.txt)
 

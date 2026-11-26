@@ -236,63 +236,111 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     }
 }
 
-private enum ClipFlowStatusBarIcon {
+enum ClipFlowStatusBarIcon {
+    /// Renders the 18×18pt monochrome macOS template icon matching the Ceramic Archival Card Box:
+    /// two stepped archival cards rising from a rounded card-box pocket with a concave center thumb notch.
     static func make(paused: Bool) -> NSImage {
         let size = NSSize(width: 18, height: 18)
-        let image = NSImage(size: size, flipped: false) { _ in
-            guard let context = NSGraphicsContext.current?.cgContext else { return false }
-            context.setAllowsAntialiasing(true)
-            context.setFillColor(NSColor.black.cgColor)
-            context.saveGState()
-            // SVG coordinates are top-down; AppKit drawing coordinates are bottom-up.
-            context.translateBy(x: -2.4, y: 21.16)
-            context.scaleBy(x: 0.095, y: -0.095)
-            context.addPath(flowPath())
-            context.fillPath()
-            context.restoreGState()
+        let image = NSImage(size: size, flipped: true) { _ in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            ctx.setAllowsAntialiasing(true)
+            ctx.setShouldAntialias(true)
+
+            let strokeWidth: CGFloat = 1.45
+            ctx.setStrokeColor(NSColor.black.cgColor)
+            ctx.setFillColor(NSColor.black.cgColor)
+            ctx.setLineWidth(strokeWidth)
+            ctx.setLineCap(.round)
+            ctx.setLineJoin(.round)
+
             if paused {
-                for x: CGFloat in [13.3, 15.7] {
-                    context.addPath(CGPath(roundedRect: CGRect(x: x, y: 2, width: 1.4, height: 4.5),
-                        cornerWidth: 0.7, cornerHeight: 0.7, transform: nil))
+                // Clip out the bottom-right corner badge zone so the pause bars read with crisp separation.
+                ctx.saveGState()
+                let clipPath = CGMutablePath()
+                clipPath.addRect(CGRect(x: 0, y: 0, width: 18, height: 18))
+                clipPath.addRoundedRect(in: CGRect(x: 11.4, y: 10.0, width: 6.6, height: 8.0), cornerWidth: 1.8, cornerHeight: 1.8)
+                ctx.addPath(clipPath)
+                ctx.clip(using: .evenOdd)
+            }
+
+            // 1. Rear peeking card top arch (y: 2.1 -> 4.6, x: 5.0 ... 13.0)
+            let rearCard = CGMutablePath()
+            rearCard.move(to: CGPoint(x: 5.0, y: 4.5))
+            rearCard.addLine(to: CGPoint(x: 5.0, y: 3.5))
+            rearCard.addArc(tangent1End: CGPoint(x: 5.0, y: 2.1), tangent2End: CGPoint(x: 6.4, y: 2.1), radius: 1.4)
+            rearCard.addLine(to: CGPoint(x: 11.6, y: 2.1))
+            rearCard.addArc(tangent1End: CGPoint(x: 13.0, y: 2.1), tangent2End: CGPoint(x: 13.0, y: 3.5), radius: 1.4)
+            rearCard.addLine(to: CGPoint(x: 13.0, y: 4.5))
+            ctx.addPath(rearCard)
+            ctx.strokePath()
+
+            // 2. Front hero card rising from pocket (y: 4.6 -> 9.8, x: 3.3 ... 14.7)
+            let frontCard = CGMutablePath()
+            frontCard.move(to: CGPoint(x: 3.3, y: 9.8))
+            frontCard.addLine(to: CGPoint(x: 3.3, y: 6.2))
+            frontCard.addArc(tangent1End: CGPoint(x: 3.3, y: 4.6), tangent2End: CGPoint(x: 4.9, y: 4.6), radius: 1.6)
+            frontCard.addLine(to: CGPoint(x: 13.1, y: 4.6))
+            frontCard.addArc(tangent1End: CGPoint(x: 14.7, y: 4.6), tangent2End: CGPoint(x: 14.7, y: 6.2), radius: 1.6)
+            frontCard.addLine(to: CGPoint(x: 14.7, y: 9.8))
+            ctx.addPath(frontCard)
+            ctx.strokePath()
+
+            // Subtle header pill accent inside the front card
+            let headerLine = CGMutablePath()
+            headerLine.move(to: CGPoint(x: 5.6, y: 7.1))
+            headerLine.addLine(to: CGPoint(x: 9.6, y: 7.1))
+            ctx.addPath(headerLine)
+            ctx.strokePath()
+
+            // 3. Archival box front pocket with concave center thumb notch (y: 9.8 ... 15.8, x: 1.9 ... 16.1)
+            let pocket = CGMutablePath()
+            pocket.move(to: CGPoint(x: 1.9, y: 10.6))
+            pocket.addArc(tangent1End: CGPoint(x: 1.9, y: 9.8), tangent2End: CGPoint(x: 2.7, y: 9.8), radius: 0.8)
+            pocket.addLine(to: CGPoint(x: 6.4, y: 9.8))
+            pocket.addCurve(
+                to: CGPoint(x: 9.0, y: 11.35),
+                control1: CGPoint(x: 7.25, y: 9.8),
+                control2: CGPoint(x: 7.85, y: 11.35)
+            )
+            pocket.addCurve(
+                to: CGPoint(x: 11.6, y: 9.8),
+                control1: CGPoint(x: 10.15, y: 11.35),
+                control2: CGPoint(x: 10.75, y: 9.8)
+            )
+            pocket.addLine(to: CGPoint(x: 15.3, y: 9.8))
+            pocket.addArc(tangent1End: CGPoint(x: 16.1, y: 9.8), tangent2End: CGPoint(x: 16.1, y: 10.6), radius: 0.8)
+            pocket.addLine(to: CGPoint(x: 16.1, y: 13.0))
+            pocket.addArc(tangent1End: CGPoint(x: 16.1, y: 15.8), tangent2End: CGPoint(x: 13.3, y: 15.8), radius: 2.8)
+            pocket.addLine(to: CGPoint(x: 4.7, y: 15.8))
+            pocket.addArc(tangent1End: CGPoint(x: 1.9, y: 15.8), tangent2End: CGPoint(x: 1.9, y: 13.0), radius: 2.8)
+            pocket.closeSubpath()
+
+            // Soft translucent glaze inside the pocket + crisp SF-Symbol-weight outline
+            ctx.saveGState()
+            ctx.setFillColor(NSColor.black.withAlphaComponent(0.18).cgColor)
+            ctx.addPath(pocket)
+            ctx.fillPath()
+            ctx.restoreGState()
+
+            ctx.addPath(pocket)
+            ctx.strokePath()
+
+            if paused {
+                ctx.restoreGState()
+                for x: CGFloat in [12.9, 15.3] {
+                    ctx.addPath(CGPath(
+                        roundedRect: CGRect(x: x, y: 11.3, width: 1.45, height: 4.8),
+                        cornerWidth: 0.72,
+                        cornerHeight: 0.72,
+                        transform: nil
+                    ))
                 }
-                context.fillPath()
+                ctx.fillPath()
             }
             return true
         }
         image.isTemplate = true
         image.accessibilityDescription = paused ? "剪流：监听已暂停" : "剪流：正在监听"
         return image
-    }
-
-    /// Same filled outlines as assets/icon/ClipFlow-icon.svg, scaled for the menu bar.
-    private static func flowPath() -> CGPath {
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: 64, y: 176))
-        path.addCurve(to: CGPoint(x: 56, y: 168), control1: CGPoint(x: 59.5817, y: 176.0000), control2: CGPoint(x: 56.0000, y: 172.4183))
-        path.addLine(to: CGPoint(x: 56, y: 104))
-        path.addCurve(to: CGPoint(x: 104, y: 56), control1: CGPoint(x: 56.0000, y: 77.4903), control2: CGPoint(x: 77.4903, y: 56.0000))
-        path.addLine(to: CGPoint(x: 176, y: 56))
-        path.addCurve(to: CGPoint(x: 184, y: 64), control1: CGPoint(x: 180.4183, y: 56.0000), control2: CGPoint(x: 184.0000, y: 59.5817))
-        path.addLine(to: CGPoint(x: 184, y: 72))
-        path.addCurve(to: CGPoint(x: 176, y: 80), control1: CGPoint(x: 184.0000, y: 76.4183), control2: CGPoint(x: 180.4183, y: 80.0000))
-        path.addLine(to: CGPoint(x: 104, y: 80))
-        path.addCurve(to: CGPoint(x: 80, y: 104), control1: CGPoint(x: 90.7452, y: 80.0000), control2: CGPoint(x: 80.0000, y: 90.7452))
-        path.addLine(to: CGPoint(x: 80, y: 168))
-        path.addCurve(to: CGPoint(x: 72, y: 176), control1: CGPoint(x: 80.0000, y: 172.4183), control2: CGPoint(x: 76.4183, y: 176.0000))
-        path.closeSubpath()
-        path.move(to: CGPoint(x: 112, y: 200))
-        path.addCurve(to: CGPoint(x: 104, y: 192), control1: CGPoint(x: 107.5817, y: 200.0000), control2: CGPoint(x: 104.0000, y: 196.4183))
-        path.addLine(to: CGPoint(x: 104, y: 144))
-        path.addCurve(to: CGPoint(x: 144, y: 104), control1: CGPoint(x: 104.0000, y: 121.9086), control2: CGPoint(x: 121.9086, y: 104.0000))
-        path.addLine(to: CGPoint(x: 176, y: 104))
-        path.addCurve(to: CGPoint(x: 184, y: 112), control1: CGPoint(x: 180.4183, y: 104.0000), control2: CGPoint(x: 184.0000, y: 107.5817))
-        path.addLine(to: CGPoint(x: 184, y: 120))
-        path.addCurve(to: CGPoint(x: 176, y: 128), control1: CGPoint(x: 184.0000, y: 124.4183), control2: CGPoint(x: 180.4183, y: 128.0000))
-        path.addLine(to: CGPoint(x: 144, y: 128))
-        path.addCurve(to: CGPoint(x: 128, y: 144), control1: CGPoint(x: 135.1634, y: 128.0000), control2: CGPoint(x: 128.0000, y: 135.1634))
-        path.addLine(to: CGPoint(x: 128, y: 192))
-        path.addCurve(to: CGPoint(x: 120, y: 200), control1: CGPoint(x: 128.0000, y: 196.4183), control2: CGPoint(x: 124.4183, y: 200.0000))
-        path.closeSubpath()
-        return path
     }
 }

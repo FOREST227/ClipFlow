@@ -385,4 +385,23 @@ final class MainWindowTests: XCTestCase {
         XCTAssertNotNil(window.standardWindowButton(.closeButton))
         window.close()
     }
+
+    func testFolioSwitchUsesThemeCeladonGreenAndCompactTrackSize() throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let color = try XCTUnwrap(NSColor(FolioTheme.switchTrackOn(for: scheme)).usingColorSpace(.sRGB))
+            XCTAssertGreaterThan(color.greenComponent, color.blueComponent,
+                "Switch ON track should use theme Celadon Sage green, not system blue (\(scheme))")
+            XCTAssertGreaterThan(color.greenComponent, color.redComponent,
+                "Switch ON track should be green-dominant (\(scheme))")
+        }
+
+        let host = NSHostingView(
+            rootView: Toggle("记录剪贴板", isOn: .constant(true))
+                .labelsHidden()
+                .toggleStyle(FolioSwitchToggleStyle())
+        )
+        let size = host.fittingSize
+        XCTAssertEqual(size.width, 34, accuracy: 0.5)
+        XCTAssertEqual(size.height, 18, accuracy: 0.5)
+    }
 }

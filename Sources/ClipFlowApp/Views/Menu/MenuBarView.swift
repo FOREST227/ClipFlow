@@ -42,8 +42,8 @@ struct MenuBarView: View {
                     Spacer(minLength: 6)
                     Toggle("顺序粘贴", isOn: $pasteStack.autoCollectEnabled)
                         .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
+                        .toggleStyle(FolioSwitchToggleStyle())
+                        .accessibilityLabel("顺序粘贴")
                 }
                 .frame(height: 34)
 
@@ -131,7 +131,8 @@ struct MenuBarView: View {
                     Text(store.iCloudSyncStatusValue).foregroundStyle(store.iCloudSyncTint(for: colorScheme))
                     Toggle(SharedSettingsCopy.syncPlainHistory, isOn: Binding(get: { store.iCloudSyncEnabled },
                         set: { store.setICloudSyncEnabled($0) }))
-                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                        .labelsHidden()
+                        .toggleStyle(FolioSwitchToggleStyle())
                         .accessibilityLabel(SharedSettingsCopy.syncPlainHistory)
                 }
                 .font(.system(size: 11)).frame(height: 34)
@@ -194,7 +195,10 @@ struct MenuBarView: View {
             Image(systemName: icon).foregroundStyle(tint).frame(width: 16)
             Text(title).font(.system(size: 11, weight: .medium))
             Spacer(minLength: 8)
-            Toggle(title, isOn: isOn).labelsHidden().toggleStyle(.switch).controlSize(.small)
+            Toggle(title, isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(FolioSwitchToggleStyle())
+                .accessibilityLabel(title)
         }
         .frame(height: 34)
     }

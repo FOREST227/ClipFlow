@@ -122,8 +122,7 @@ struct SettingsToggleCard: View {
                 Toggle("", isOn: $isOn)
                     .labelsHidden()
                     .accessibilityLabel(title)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
+                    .toggleStyle(FolioSwitchToggleStyle())
             }
             .padding(.horizontal, 0)
             .padding(.vertical, 10)
